@@ -24,15 +24,45 @@ mobile/
   hooks/
   utils/
   tests/
-backend/
+front-service/   # Nginx: proxy inverso, sin lógica de negocio ni acceso a MongoDB
+  nginx.conf
+  conf.d/        # proxy REST/WebSocket, rate limiting, límites de tamaño, requestId, /health
+  admin/         # estáticos del panel /admin
+  tests/
+back-service/    # Node.js/Express + Socket.io, API interna /internal/...
   routes/        # método + URL
-  middlewares/   # auth JWT, rate limit, requestId, errores
+  middlewares/   # auth JWT, errores y controles transversales
   controllers/   # adapta req/res, sin lógica de negocio
   services/      # reglas de negocio
+  sockets/       # Socket.io
+  adapters/      # adaptador Redis para Socket.io
   models/        # esquemas y acceso a MongoDB
   validators/    # esquemas Zod
   config/        # carga de configuración (sin secretos)
   tests/
+infra/           # CloudFormation para todo lo de AWS
+  templates/
+  parameters/    # parámetros por entorno
+prompts/         # registro de prompts (ver abajo)
+```
+
+## Registro de prompts
+
+**Cada prompt que se le haga a Claude en este repo se registra en `prompts/`**, antes de empezar a trabajar en él. Un archivo por prompt:
+
+- Nombre: `prompts/YYYY-MM-DD-HHMM-<slug>.md` (hora local, slug corto en kebab-case).
+- Contenido: título, autor y fecha, y el prompt **textual** (sin resumir ni corregir).
+- Autor: el usuario de GitHub de quien hace el prompt, obtenido con `gh api user --jq .login`. Si `gh` no está disponible, preguntar en lugar de adivinarlo.
+
+```markdown
+# <Título corto>
+
+- **Autor:** @<usuario-github>
+- **Fecha:** <ISO 8601 con zona horaria>
+
+## Prompt
+
+<prompt textual>
 ```
 
 Flujo de una request: `ruta → middleware → controlador → servicio → modelo → MongoDB`. La lógica de negocio vive en `services/`, no en controladores ni rutas.
