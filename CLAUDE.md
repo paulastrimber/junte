@@ -1,49 +1,41 @@
 # CLAUDE.md
 
-Guía para trabajar en **junte**, una app móvil de planes universitarios: crear planes, consultar actividades cercanas, inscribirse, registrar asistencia (QR + ubicación), chatear por plan y reportar contenido.
+Guía para trabajar en **junte**: app móvil de planes universitarios (crear planes, feed cercano recomendado, inscripción, asistencia por QR + ubicación, chat por plan, push, reportes, panel `/admin`).
 
-La fuente de verdad del diseño es el *Informe de arquitectura técnica* (entrega prevista: 23/09/2026). Los contratos y reglas son una propuesta preliminar: si algo no está definido acá o en el informe, preguntar antes de inventarlo.
+La fuente de verdad del diseño es el *Informe de arquitectura técnico* (entrega prevista: 23/09/2026); el detalle vive en [`docs/`](docs/README.md). Este archivo resume **lo que no se puede romper** y dónde buscar lo demás. Los contratos y reglas son una propuesta preliminar: si algo no está definido acá, en `docs/` o en el informe, **preguntar antes de inventarlo** y anotarlo en [`docs/pendientes.md`](docs/pendientes.md).
 
 ## Stack
 
-- **Móvil:** React Native (Expo + EAS Build). No accede nunca a MongoDB, solo a la API.
-- **Backend:** Node.js + Express + Socket.io, validación con Zod, JWT propio (bcrypt o Argon2 para contraseñas).
-- **Base de datos:** MongoDB en EC2 privada, configurada como **replica set** (requisito para transacciones).
-- **AWS:** VPC, ALB público (TLS termina acá), EC2 privadas, S3 privado, Secrets Manager, CloudWatch, Session Manager.
-- **Push:** Firebase Cloud Messaging.
+- **Cliente:** React Native (Expo + EAS Build). Solo habla con `/api/v1`; nunca con MongoDB ni AWS directo (salvo S3 con URL firmada).
+- **Borde:** Nginx (front service). Proxy, IP real, rate limit, `requestId`, `/admin` estático. Sin lógica de negocio.
+- **Aplicación:** Node.js + Express 5 + Socket.io (adaptador Redis), JavaScript ESM, Mongoose, Zod, JWT propio (bcrypt o Argon2 para contraseñas).
+- **Datos:** MongoDB replica set (3 nodos / 1 en local; requisito para transacciones). Migraciones con migrate-mongo.
+- **AWS:** ALB público → Nginx → ALB interno → Express; S3 privado, Secrets Manager, CloudWatch, Session Manager, NAT por AZ. **FCM** para push.
 - **Fuera de alcance:** Lambda, API Gateway, DynamoDB, Kubernetes, Cognito.
 
-## Estructura del repositorio
+## Dónde está cada cosa
+
+| Necesito… | Leer |
+|-----------|------|
+| Capas y nombres | [docs/arquitectura/01-vista-general.md](docs/arquitectura/01-vista-general.md) |
+| Estructura del back, MVC, DI | [03-back-service.md](docs/arquitectura/03-back-service.md) |
+| Estructura de la app | [05-mobile.md](docs/arquitectura/05-mobile.md) |
+| Endpoints y errores | [06-api.md](docs/arquitectura/06-api.md), [errores-y-logs.md](docs/practicas/errores-y-logs.md) |
+| Colecciones e índices | [07-modelo-de-datos.md](docs/arquitectura/07-modelo-de-datos.md) |
+| Qué tarea toca | [docs/tareas/](docs/tareas/README.md) |
+| Cómo testear | [testing.md](docs/practicas/testing.md) |
+
+## Estructura
 
 ```
-mobile/
-  screens/       # LoginScreen, HomeScreen, PlanScreen, CreatePlanScreen...
-  components/    # UI reutilizable
-  services/      # HTTP, Socket.io, auth, FCM, persistencia offline
-  navigation/
-  hooks/
-  utils/
-  tests/
-front-service/   # Nginx: proxy inverso, sin lógica de negocio ni acceso a MongoDB
-  nginx.conf
-  conf.d/        # proxy REST/WebSocket, rate limiting, límites de tamaño, requestId, /health
-  admin/         # estáticos del panel /admin
-  tests/
-back-service/    # Node.js/Express + Socket.io, API interna /internal/...
-  routes/        # método + URL
-  middlewares/   # auth JWT, errores y controles transversales
-  controllers/   # adapta req/res, sin lógica de negocio
-  services/      # reglas de negocio
-  sockets/       # Socket.io
-  adapters/      # adaptador Redis para Socket.io
-  models/        # esquemas y acceso a MongoDB
-  validators/    # esquemas Zod
-  config/        # carga de configuración (sin secretos)
-  tests/
-infra/           # CloudFormation para todo lo de AWS
-  templates/
-  parameters/    # parámetros por entorno
-prompts/         # registro de prompts (ver abajo)
+mobile/          screens → hooks → services   (una screen nunca llama a la API directo)
+front-service/   nginx.conf, conf.d/, admin/, tests/
+back-service/
+  src/modules/<modulo>/   *.routes · *.controller · *.service · *.repository · *.model · *.validators · *.serializer · index.js
+  src/{middlewares,sockets,adapters,config,shared}/
+  migrations/  seeds/  tests/
+infra/           CloudFormation de todo lo de AWS: templates/, parameters/ (por entorno)
+prompts/         registro de prompts (ver abajo)
 ```
 
 ## Registro de prompts
@@ -65,22 +57,42 @@ prompts/         # registro de prompts (ver abajo)
 <prompt textual>
 ```
 
-Flujo de una request: `ruta → middleware → controlador → servicio → modelo → MongoDB`. La lógica de negocio vive en `services/`, no en controladores ni rutas.
+Flujo: `ruta → middlewares → controlador → servicio → repositorio/modelo → MongoDB`.
+- Controlador: adapta HTTP, sin negocio, no importa modelos.
+- Servicio: todo el negocio; factory con dependencias inyectadas; **no importa `express` ni `mongoose`**.
+- Serializer: la "vista"; nunca expone hashes.
+- Entre módulos solo se importa desde `index.js`.
+
+## Reglas que no se rompen
+
+1. **Identidad desde el token, nunca desde el body** (`creatorId`, `senderId`, `userId`, `reporterId`).
+2. **Campos solo-backend** (`reputation`, `role`, `status` de usuario, `noShow`, `noShowAt`, `participantCount`, `university` del plan, `qrNonceHash`): Zod `.strict()` los rechaza.
+3. **Cupos:** `participantCount` y `planParticipants` se modifican **en la misma transacción**, con actualización condicional. Nunca "consultar y después insertar".
+   - Crear un plan no consume cupo; el creador debe inscribirse si quiere participar.
+   - `PATCH /plans/:id` con `capacity` menor a los inscriptos → 409.
+4. **Check-in:** inscripción activa + ventana (`checkInOpensAt`/`checkInClosesAt`) + QR + distancia ≤ `checkInRadiusMeters`. El QR es un desafío aleatorio con vencimiento (se guarda `qrNonceHash`), no el ID del plan. **No persistir la ubicación** del participante: solo `distanceMeters` y `accuracyMeters`. Check-in y `reputation +1` en una transacción.
+5. **Reputación:** +1 por check-in válido. Al cerrar/completar un plan, `noShow=true` en inscripciones activas sin check-in.
+6. **Chat:** solo participante activo o creador. Socket.io autentica la conexión y verifica pertenencia al plan; REST de mensajes para historial y fallback por polling. Texto de 1 a 2000 caracteres.
+7. **Permisos en el servicio:** perfil e inscripciones propias; solo el creador edita el plan y genera QR; reportes nunca visibles a otros; `/admin/*` requiere `role: 'admin'`.
+8. **Nunca** pasar filtros u operadores del cliente a MongoDB; las queries se construyen en el backend.
+9. **Índices y cambios de datos solo por migración** (`up` + `down`; una migración mergeada no se edita). Mongoose con `autoIndex: false`.
+10. **Efectos secundarios (push, avisos) después del commit**, nunca dentro de la transacción.
+11. **Back sin estado local**: hay 2+ instancias. Jobs con lock en Redis.
+12. **Secretos** solo en Secrets Manager / `.env` local (mantener `.env.example` con nombres, sin valores). Nada en Git, logs, binario móvil ni `EXPO_PUBLIC_*`.
+13. **Logs** con `requestId`, estado y duración; sin contraseñas, tokens, coordenadas exactas ni bodies completos.
+14. Errores siempre `{ code, message, requestId }` con `code` del catálogo.
 
 ## Convenciones de la API
 
-- Prefijo `/api/v1`. JSON en request y response.
-- Todas las rutas de negocio requieren `Authorization: Bearer <access_token>`. Públicas: `/auth/register`, `/auth/login`, `/auth/refresh` y `GET /health` (sin prefijo, para el ALB, devuelve 200/503).
-- Fechas en ISO 8601 con zona horaria; IDs como strings; **nombres de campos en inglés**.
-- Paginación: `limit` (default 20, máx 100) y `cursor`; respuesta `{ items, nextCursor }` (`nextCursor: null` al final).
-- Errores: `{ code, message, requestId }`. 400 validación, 401 token ausente/inválido/vencido, 403 sin permiso, 404 inexistente, 409 conflicto (cupo, duplicado, estado), 429 rate limit, 500 sin detalles sensibles.
-- Coordenadas GeoJSON: `[longitud, latitud]`, en ese orden.
+- Prefijo `/api/v1` (Nginx → `/internal` en Express). JSON, ISO 8601 con zona, IDs string, **campos en inglés**, GeoJSON `[lng, lat]`.
+- Paginación: `limit` (20, máx 100) + `cursor` opaco → `{ items, nextCursor }` (`null` al final).
+- Todas las rutas de negocio requieren `Authorization: Bearer <access_token>`. Públicas: `/auth/register`, `/auth/login`, `/auth/refresh` y `GET /health` (sin prefijo, 200/503).
+- Códigos: 400 validación, 401 token ausente/inválido/vencido, 403 sin permiso, 404 inexistente, 409 conflicto (cupo, duplicado, estado), 429 rate limit, 500 sin detalles sensibles.
+- Endpoints: `auth/*`, `users/me` (+ `/photo`), `plans` (GET/POST), `plans/:id` (GET/PATCH), `plans/:id/join` (POST/DELETE), `plans/:id/qr`, `plans/:id/check-in`, `plans/:id/messages` (GET/POST), `plans/:id/photo`, `reports`, `uploads/presign`. Parámetros y permisos en [06-api.md](docs/arquitectura/06-api.md).
 
-Endpoints: `auth/*`, `users/me` (+ `/photo`), `plans` (GET/POST), `plans/:id` (GET/PATCH), `plans/:id/join` (POST/DELETE), `plans/:id/qr`, `plans/:id/check-in`, `plans/:id/messages` (GET/POST), `plans/:id/photo`, `reports`, `uploads/presign`. Ver sección 3.2 del informe para parámetros, permisos y códigos de error de cada uno.
+## Modelo de datos
 
-## Modelo de datos (MongoDB)
-
-Colecciones: `users`, `plans`, `planParticipants`, `checkIns`, `messages`, `reports`, `deviceTokens`. Todas con `createdAt`/`updatedAt`, referencias por `ObjectId`.
+Colecciones: `users`, `plans`, `planParticipants`, `checkIns`, `messages`, `reports`, `deviceTokens`. Todas con `createdAt`/`updatedAt`, referencias por `ObjectId`. Detalle en [07-modelo-de-datos.md](docs/arquitectura/07-modelo-de-datos.md).
 
 Índices obligatorios:
 - `users.email` único
@@ -90,18 +102,6 @@ Colecciones: `users`, `plans`, `planParticipants`, `checkIns`, `messages`, `repo
 - `messages`: `{ planId, createdAt, _id }`
 - `reports`: `{ status, createdAt }`
 - `deviceTokens.token` único
-
-## Reglas de negocio que no se pueden romper
-
-- **Identidad desde el token, nunca desde el body.** `creatorId`, `senderId`, `userId`, `reporterId` los setea el backend.
-- **Campos solo-backend:** `reputation`, `noShow`, `noShowAt`, `participantCount`, `university` del plan. Rechazarlos o ignorarlos si vienen del cliente.
-- **Cupos:** inscripción y baja actualizan `participantCount` condicionalmente **y** el registro en `planParticipants` dentro de la **misma transacción**. Nunca "consultar y después insertar".
-- Crear un plan no consume cupo; el creador debe inscribirse si quiere participar.
-- `PATCH /plans/:id` con `capacity` menor a los inscriptos → 409.
-- **Check-in:** requiere inscripción activa, ventana horaria (`checkInOpensAt`/`checkInClosesAt`), QR válido y no vencido, y distancia ≤ `checkInRadiusMeters`. El QR es un desafío aleatorio con vencimiento (se guarda `qrNonceHash`), no el ID del plan. No persistir la ubicación exacta del participante: solo `distanceMeters` y `accuracyMeters`.
-- **Reputación:** +1 por check-in válido. Al cerrar/completar un plan, marcar `noShow=true` en inscripciones activas sin check-in.
-- **Chat:** solo participantes activos o el creador. Socket.io autentica la conexión y verifica pertenencia al plan; REST de mensajes sirve para historial y fallback por polling. Texto de 1 a 2000 caracteres.
-- **Permisos:** un usuario solo edita su perfil y sus inscripciones; solo el creador edita el plan y genera el QR; los reportes no se exponen a otros usuarios; `/admin` requiere permisos específicos.
 
 ## Feed de recomendación
 
@@ -117,24 +117,32 @@ Los pesos deben ser configurables sin cambiar el contrato de la API.
 
 ## Seguridad
 
-- Validar con Zod todo input: enteros positivos, fechas coherentes, IDs válidos, longitudes máximas, coordenadas en rango. Construir las queries en el backend; **nunca** pasar filtros u operadores del cliente directo a MongoDB.
+- Zod en todo input: enteros positivos, fechas coherentes, IDs válidos, longitudes máximas, coordenadas en rango.
 - JWT: verificar firma, algoritmo esperado, vencimiento, tipo de token y usuario activo. Access token de vida corta; refresh token rotado y revocable (se guarda `refreshTokenHash`).
-- Secretos (Mongo, firma JWT, FCM) en Secrets Manager, leídos con el rol de la instancia. Nada de secretos en el código, Git ni el binario móvil. Mantener un `.env.example` con nombres de variables sin valores.
-- Fotos: bucket S3 privado, URLs firmadas de corta duración; verificar tipo, tamaño, contenido y dueño antes de vincular `photoKey`. MongoDB guarda la clave del objeto, no la imagen.
-- Logs: incluir `requestId`, estado y duración. **No** loguear contraseñas, tokens, coordenadas exactas ni bodies completos.
-- Móvil: tokens en almacenamiento seguro del SO (p. ej. `expo-secure-store`), nunca en logs.
-- El backend no guarda estado de sesión local (para poder escalar horizontalmente más adelante).
+- Fotos: bucket S3 privado, URLs firmadas de corta duración; verificar tipo, tamaño, contenido y dueño antes de vincular `photoKey`. MongoDB guarda la clave, no la imagen.
+- Móvil: tokens en almacenamiento seguro del SO (`expo-secure-store`), nunca en logs.
 
 ## Red y despliegue
 
-- App → ALB: HTTPS/WSS 443. ALB → backend: HTTP 3000. Backend → MongoDB: TCP 27017.
-- Security Groups: `sg-alb` (443 desde Internet), `sg-backend` (3000 solo desde `sg-alb`), `sg-db` (27017 solo desde `sg-backend`). Sin IP pública en las EC2, sin puerto 22 abierto: administración por Session Manager.
+- App → ALB: HTTPS/WSS 443 (TLS termina en el ALB). Backend → MongoDB: TCP 27017.
+- Security Groups mínimos por capa (cada uno acepta solo desde la capa anterior). Sin IP pública en las EC2, sin puerto 22: administración por Session Manager.
 - Salida del backend vía NAT (dependencias, FCM) y/o VPC endpoints.
-- Móvil: perfiles EAS separados (development, preview, production); URLs de API/Socket.io por entorno. Probar push con un development build (Expo Go no las soporta). Entrega académica: APK de Android.
+- Móvil: perfiles EAS separados (development, preview, production); URLs de API/Socket.io por entorno. Push se prueba con development build (Expo Go no las soporta). Entrega académica: APK de Android.
+
+## Comandos
+
+```
+task setup        # dependencias + .env
+task up           # entorno local (Nginx, back, Mongo RS, Redis)
+task db:migrate   # migraciones
+task db:seed      # datos de desarrollo
+task ci           # lint + tests + migraciones + nginx -t (antes de cada PR)
+task --list       # todo lo demás
+```
 
 ## Tests
 
-Priorizar: validaciones, propiedad del plan (403 sobre plan ajeno), token vencido (401), inscripciones concurrentes que no superen el cupo ni dupliquen, QR vencido / inscripción inactiva / fuera de radio que impidan el check-in, y contratos HTTP.
+Tests primero para reglas de negocio. Prioridad: validaciones, propiedad del plan (403 sobre plan ajeno), token vencido (401), inscripciones concurrentes que no superen el cupo ni dupliquen, QR vencido / inscripción inactiva / fuera de radio que impidan el check-in, y contratos HTTP. Casos obligatorios en [testing.md](docs/practicas/testing.md#qué-se-testea-sí-o-sí).
 
 ## Plan de sprints (1 semana c/u)
 
@@ -145,3 +153,9 @@ Priorizar: validaciones, propiedad del plan (403 sobre plan ajeno), token vencid
 5. Chat y notificaciones: Socket.io, fallback REST, notas de voz, FCM y `deviceTokens`.
 6. Admin y comportamiento móvil: `/admin`, offline + sincronización, CloudWatch, backups.
 7. Validación y entrega: e2e, seguridad, concurrencia, restauración, APK.
+
+## Al escribir código
+
+- Leer la tarea en `docs/tareas/` y sus criterios de aceptación.
+- Cambio de contrato o modelo → actualizar `docs/` en el mismo PR.
+- Commits Conventional Commits en inglés; docs y mensajes al usuario en español.

@@ -1,0 +1,158 @@
+# Taskfile de junte — https://taskfile.dev
+# Uso: `task --list` muestra todos los comandos.
+# Los archivos referenciados (docker-compose, scripts) se crean en el sprint 1 (S1-INF-02/03).
+version: '3'
+
+vars:
+  COMPOSE: docker compose -f infra/docker-compose.dev.yml
+  BACK: back-service
+  MOBILE: mobile
+  FRONT: front-service
+
+tasks:
+  default:
+    cmds: [task --list]
+    silent: true
+
+  # ── Entorno local ────────────────────────────────────────────────
+  setup:
+    desc: Instala dependencias de back y app y crea .env desde .env.example
+    cmds:
+      - test -f {{.BACK}}/.env || cp {{.BACK}}/.env.example {{.BACK}}/.env
+      - npm ci --prefix {{.BACK}}
+      - npm ci --prefix {{.MOBILE}}
+
+  up:
+    desc: Levanta Nginx, back, MongoDB (replica set 1 nodo) y Redis
+    cmds: ['{{.COMPOSE}} up -d --build']
+
+  down:
+    desc: Detiene el entorno local
+    cmds: ['{{.COMPOSE}} down']
+
+  reset:
+    desc: Detiene y BORRA los datos locales, luego levanta, migra y siembra
+    prompt: Esto borra la base local. ¿Continuar?
+    cmds:
+      - '{{.COMPOSE}} down -v'
+      - task: up
+      - task: db:migrate
+      - task: db:seed
+
+  logs:
+    desc: 'Logs del entorno (ej: task logs -- back)'
+    cmds: ['{{.COMPOSE}} logs -f {{.CLI_ARGS}}']
+
+  # ── Back service ─────────────────────────────────────────────────
+  back:dev:
+    desc: Back en modo desarrollo fuera de docker
+    dir: '{{.BACK}}'
+    cmds: [npm run dev]
+
+  back:test:
+    desc: Tests del back (unitarios, integración, contrato)
+    dir: '{{.BACK}}'
+    cmds: [npm test]
+
+  back:test:watch:
+    desc: Tests del back en modo watch
+    dir: '{{.BACK}}'
+    cmds: [npm run test:watch]
+
+  back:lint:
+    desc: Lint del back
+    dir: '{{.BACK}}'
+    cmds: [npm run lint]
+
+  # ── Base de datos (migrate-mongo) ────────────────────────────────
+  db:migrate:
+    desc: Aplica las migraciones pendientes
+    dir: '{{.BACK}}'
+    cmds: [npx migrate-mongo up]
+
+  db:migrate:down:
+    desc: Revierte la ÚLTIMA migración aplicada
+    dir: '{{.BACK}}'
+    prompt: Se va a revertir la última migración. ¿Continuar?
+    cmds: [npx migrate-mongo down]
+
+  db:migrate:status:
+    desc: Muestra migraciones aplicadas y pendientes
+    dir: '{{.BACK}}'
+    cmds: [npx migrate-mongo status]
+
+  db:migrate:create:
+    desc: 'Crea una migración (ej: task db:migrate:create -- add-plan-interests)'
+    dir: '{{.BACK}}'
+    requires:
+      vars: [CLI_ARGS]
+    cmds: ['npx migrate-mongo create {{.CLI_ARGS}}']
+
+  db:migrate:check:
+    desc: up → down → up (lo mismo que corre CI)
+    dir: '{{.BACK}}'
+    cmds: [npm run migrate:check]
+
+  db:seed:
+    desc: Carga datos de desarrollo (solo local)
+    dir: '{{.BACK}}'
+    preconditions:
+      - sh: '[ "$NODE_ENV" != "production" ]'
+        msg: Los seeds no se corren en producción
+    cmds: [npm run seed]
+
+  # ── Front service (Nginx) ────────────────────────────────────────
+  front:check:
+    desc: Valida la configuración de Nginx
+    cmds: ['{{.COMPOSE}} run --rm --no-deps nginx nginx -t']
+
+  front:smoke:
+    desc: Smoke test del front contra el entorno local
+    cmds: ['bash {{.FRONT}}/tests/smoke.sh http://localhost:8080']
+
+  # ── App móvil ────────────────────────────────────────────────────
+  mobile:start:
+    desc: Inicia Expo (development build)
+    dir: '{{.MOBILE}}'
+    cmds: [npx expo start --dev-client]
+
+  mobile:test:
+    desc: Tests de la app
+    dir: '{{.MOBILE}}'
+    cmds: [npm test]
+
+  mobile:lint:
+    desc: Lint de la app
+    dir: '{{.MOBILE}}'
+    cmds: [npm run lint]
+
+  mobile:build:dev:
+    desc: Development build Android (EAS)
+    dir: '{{.MOBILE}}'
+    cmds: [npx eas build --profile development --platform android]
+
+  mobile:build:apk:
+    desc: APK de entrega (EAS, perfil production con buildType apk)
+    dir: '{{.MOBILE}}'
+    cmds: [npx eas build --profile production --platform android]
+
+  # ── Calidad ──────────────────────────────────────────────────────
+  lint:
+    desc: Lint de todo
+    cmds:
+      - task: back:lint
+      - task: mobile:lint
+
+  test:
+    desc: Tests de todo
+    cmds:
+      - task: back:test
+      - task: mobile:test
+
+  ci:
+    desc: Lo mismo que CI — correr antes de abrir un PR
+    cmds:
+      - task: lint
+      - task: test
+      - task: db:migrate:check
+      - task: front:check
