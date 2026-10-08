@@ -97,3 +97,25 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 **Problema:** tramos internos en HTTP. El informe lo reconoce.
 **Propuesta:** límite documentado para la entrega; TLS en MongoDB primero si hay tiempo.
 **Bloquea:** nada (deuda aceptada).
+
+### Pesos del feed
+**Problema:** los pesos del score (0.5 / 0.3 / 0.2) tienen que ser configurables, pero no está definido cómo.
+**Propuesta:** variable opcional `FEED_WEIGHTS` en JSON (`{"interests":0.5,"distance":0.3,"schedule":0.2}`), validada con Zod (suma 1); si falta, se usan los valores del informe.
+**Bloquea:** S3 (feed). En S1 la variable existe en `.env.example` pero es opcional.
+
+## C. Notas del sprint 1
+
+Lo que apareció al implementar el sprint 1 y queda para revisar con el equipo.
+
+### Base (líder)
+- **ESLint 9, no 10:** `neostandard@0.13` declara `peerDependencies: eslint ^9` y `eslint-plugin-import@2.32` no soporta ESLint 10. Se fija `eslint@^9.39`.
+- **Node ≥ 22.12:** lo exige `vitest@5`. Se fija en `engines` y en `.nvmrc`.
+- **`migrate:check` usa siempre un `MongoMemoryReplSet` efímero:** `down` borra colecciones, así que nunca se corre contra la base de desarrollo.
+
+### back-core (Agente A)
+
+### back-data (Agente B)
+
+### infra local + Nginx (Agente C)
+
+### mobile (Agente D)
