@@ -1,0 +1,14 @@
+# Destino del back y resolver DNS.
+# proxy_pass usa una variable ($backend) para que Nginx re-resuelva el nombre cada `valid`
+# segundos: el DNS de un ALB cambia de IPs y un nombre fijo se resolvería una sola vez al
+# arrancar. Además, así `nginx -t` pasa aunque el back no esté levantado.
+#   - AWS:   NGINX_RESOLVER=169.254.169.253  (DNS de la VPC, Amazon Route 53 Resolver)
+#            NGINX_BACKEND=<DNS del ALB interno>:3000
+#   - Local: NGINX_RESOLVER=127.0.0.11       (DNS embebido de docker)
+#            NGINX_BACKEND=back:3000
+resolver ${NGINX_RESOLVER} valid=30s ipv6=off;
+resolver_timeout 5s;
+
+map $host $backend {
+  default "http://${NGINX_BACKEND}";
+}
