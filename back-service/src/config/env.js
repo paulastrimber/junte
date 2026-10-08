@@ -1,11 +1,22 @@
 // Esquema y validación de las variables de entorno (S1-BE-02).
 // Función pura: no lee process.env ni termina el proceso, para poder testearla.
 // Los mensajes de error nombran la variable pero NUNCA incluyen su valor (puede ser un secreto).
+import { createHash } from 'node:crypto'
 import { z } from 'zod'
 
 const JWT_SECRET_MIN_LENGTH = 32
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']
 const NODE_ENVS = ['development', 'test', 'production']
+
+// SHA-256 de los valores de JWT_SECRET que aparecen (o aparecieron) en el repo: el viejo valor fijo
+// del entrypoint de desarrollo y el de los tests. Se guarda el hash para no volver a escribir el valor.
+// Producción los rechaza. Si un test o script agrega otro valor fijo, sumar su hash acá.
+const SECRETS_KNOWN_FROM_REPO = new Set([
+  '0aa0b382413dd769d65f621ad30d63029202190501d57c36f6495a6095aa1692', // infra/back/dev-entrypoint.sh (historial)
+  'c62e4615bd39e222572f3a1bf7c2132ea1e65b17ec805047bd6b2842c593493f' // src/config/env.test.js
+])
+
+const sha256 = (value) => createHash('sha256').update(value).digest('hex')
 
 const required = (hint) => ({
   error: (issue) => (issue.input === undefined ? 'es obligatoria' : hint)
@@ -24,12 +35,24 @@ const envSchema = z.object({
     .regex(/^[A-Za-z0-9_-]{1,64}$/, { error: 'solo letras, números, "_" y "-" (máx. 64)' }),
   REDIS_URL: z.string(required('debe ser texto'))
     .regex(/^rediss?:\/\//, { error: 'debe empezar con redis:// o rediss://' }),
-  JWT_SECRET: z.string(required('debe ser texto'))
+  JWT_SECRET: z.string({
+    error: (issue) => (issue.input === undefined
+      ? 'es obligatoria; en desarrollo corré `task setup` para generarla en back-service/.env'
+      : 'debe ser texto')
+  })
     .min(JWT_SECRET_MIN_LENGTH, { error: `debe tener al menos ${JWT_SECRET_MIN_LENGTH} caracteres` }),
   LOG_LEVEL: z.enum(LOG_LEVELS, { error: `debe ser uno de: ${LOG_LEVELS.join(', ')}` }).default('info'),
   // TODO(S3-BE): formato pendiente (docs/pendientes.md#pesos-del-feed). Por ahora solo se acepta
   // y se pasa tal cual; el módulo de feed lo validará cuando se defina el formato.
   FEED_WEIGHTS: z.string().optional()
+}).superRefine((vars, ctx) => {
+  if (vars.NODE_ENV === 'production' && SECRETS_KNOWN_FROM_REPO.has(sha256(vars.JWT_SECRET))) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['JWT_SECRET'],
+      message: 'usa un valor que está en el repositorio; en producción tiene que venir de Secrets Manager'
+    })
+  }
 })
 
 /** Error de configuración: el proceso no debe arrancar. `variables` lista solo nombres. */

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { ConfigError, loadConfig } from './env.js'
 
@@ -66,6 +67,31 @@ describe('loadConfig', () => {
     expect(err.variables).toEqual(['JWT_SECRET'])
     expect(err.message).toMatch(/al menos 32 caracteres/)
     expect(err.message).not.toMatch(/corto-y-secreto/)
+  })
+
+  it('JWT_SECRET ausente pide correr task setup', () => {
+    const err = errorOf({ ...validEnv, JWT_SECRET: '' })
+
+    expect(err.variables).toEqual(['JWT_SECRET'])
+    expect(err.message).toMatch(/task setup/)
+  })
+
+  it('en producción rechaza un JWT_SECRET que está en el repo, sin mostrarlo', () => {
+    const err = errorOf({ ...validEnv, NODE_ENV: 'production' })
+
+    expect(err.variables).toEqual(['JWT_SECRET'])
+    expect(err.message).toMatch(/repositorio/)
+    expect(err.message).not.toContain(SECRET)
+  })
+
+  it('en producción acepta un JWT_SECRET que no está en el repo', () => {
+    const config = loadConfig({ ...validEnv, NODE_ENV: 'production', JWT_SECRET: randomBytes(32).toString('hex') })
+
+    expect(config.isProduction).toBe(true)
+  })
+
+  it('fuera de producción acepta el JWT_SECRET de los tests', () => {
+    expect(loadConfig(validEnv).jwt.secret).toBe(SECRET)
   })
 
   it('no muestra el valor de una URI inválida', () => {

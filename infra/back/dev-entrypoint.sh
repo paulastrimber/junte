@@ -13,11 +13,7 @@ if ! sha256sum -c "$stamp" >/dev/null 2>&1; then
   sha256sum package-lock.json > "$stamp"
 fi
 
-# 2. JWT_SECRET de desarrollo, NO secreto, solo si no vino de back-service/.env
-#    (permite `docker compose up` sin haber corrido `task setup`). Nunca usar fuera de local.
-if [ -z "${JWT_SECRET:-}" ]; then
-  echo "[dev-entrypoint] AVISO: JWT_SECRET vacío; se usa uno de desarrollo inseguro. Corré 'task setup'."
-  export JWT_SECRET="dev-only-insecure-jwt-secret-do-not-use-anywhere-else"
-fi
+# JWT_SECRET y el resto de las variables llegan de back-service/.env (env_file del compose),
+# que genera `task setup`. Si falta, la validación de config del back no arranca y lo explica.
 
 exec "$@"
