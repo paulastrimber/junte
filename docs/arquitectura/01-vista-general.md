@@ -64,8 +64,10 @@ junte/
   mobile/           # Capa 1 — ver 05-mobile.md
   front-service/    # Capa 3 — ver 04-front-service.md
   back-service/     # Capa 5 — ver 03-back-service.md
-  infra/            # docker-compose de desarrollo, scripts de AWS
+  infra/            # docker-compose de desarrollo, CloudFormation de AWS
   docs/
+  prompts/          # registro de prompts a Claude
+  .github/          # CI y plantilla de PR
   Taskfile.yml
   CLAUDE.md
   README.md

@@ -49,7 +49,11 @@ back-service/
     integration/           # repos + Mongo en memoria (replica set)
     contract/              # HTTP con Supertest
     helpers/
+  scripts/migrate-check.js # up → down → up sobre un MongoMemoryReplSet efímero (lo corre CI)
   migrate-mongo-config.js
+  vitest.config.js
+  eslint.config.js         # neostandard + fronteras de capas (import/no-restricted-paths)
+  Dockerfile
   .env.example
 ```
 
@@ -142,8 +146,8 @@ Express 5 propaga los errores de funciones `async` al `errorHandler`: **no hace 
 ## Middlewares (orden en `app.js`)
 
 1. `requestId` — toma `X-Request-Id` de Nginx (o genera uno en desarrollo) y lo pone en `req.id`, en el logger y en la respuesta.
-2. `express.json({ limit: '100kb' })` — Nginx ya limita, esto es defensa en profundidad.
-3. `httpLogger` — una línea por request: `requestId`, método, ruta, status, duración. **Sin bodies, tokens ni coordenadas.**
+2. `httpLogger` — una línea por request: `requestId`, método, patrón de ruta (sin query string), status, duración. **Sin bodies, tokens ni coordenadas.** Va antes de `express.json` para que también quede logueada una request con JSON malformado.
+3. `express.json({ limit: '100kb' })` — Nginx ya limita, esto es defensa en profundidad.
 4. Rutas montadas bajo `/internal/...` (cada una con `authenticate`, `requireRole`, `validate` según corresponda).
 5. `notFound` → 404 `NOT_FOUND`.
 6. `errorHandler` → normaliza todo error.

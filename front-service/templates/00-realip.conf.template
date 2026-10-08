@@ -1,0 +1,10 @@
+# IP real del cliente (ver docs/arquitectura/02-comunicacion-y-red.md#ip-real-del-cliente-x-forwarded-for).
+# Solo se confía en X-Forwarded-For cuando la conexión viene de NGINX_TRUSTED_CIDR:
+#   - AWS: CIDR de la VPC (el ALB público), p. ej. 10.0.0.0/16.
+#   - Local: el rango de IPs de los contenedores de la red de compose. El tráfico que entra
+#     desde el host llega desde fuera de ese rango: el host se trata como un cliente externo.
+# real_ip_recursive descarta desde la derecha las direcciones de confianza: un cliente que
+# manda su propio X-Forwarded-For no puede falsear su IP.
+set_real_ip_from  ${NGINX_TRUSTED_CIDR};
+real_ip_header    X-Forwarded-For;
+real_ip_recursive on;

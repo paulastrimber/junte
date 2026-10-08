@@ -1,0 +1,28 @@
+# Complementa el .gitignore de la raíz del repo.
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Carpetas nativas generadas (prebuild / expo run)
+/ios
+/android
+.kotlin/
+
+# Credenciales de firma: nunca en Git
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+
+# Metro
+.metro-health-check*
+*.orig.*
+
+# Variables locales
+.env
+.env*.local

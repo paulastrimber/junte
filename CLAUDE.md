@@ -28,13 +28,15 @@ La fuente de verdad del diseño es el *Informe de arquitectura técnico* (entreg
 ## Estructura
 
 ```
-mobile/          screens → hooks → services   (una screen nunca llama a la API directo)
-front-service/   nginx.conf, conf.d/, admin/, tests/
+mobile/          app.config.js, eas.json, src/{screens,components,hooks,services,contexts,navigation,config,utils}/
+                 screens → hooks → services   (una screen nunca llama a la API directo)
+front-service/   nginx.conf, conf.d/, templates/ (valores por entorno vía NGINX_*), snippets/, admin/, tests/smoke.sh
 back-service/
+  src/{app,server,container}.js           app sin listen · arranque · composition root (DI)
   src/modules/<modulo>/   *.routes · *.controller · *.service · *.repository · *.model · *.validators · *.serializer · index.js
-  src/{middlewares,sockets,adapters,config,shared}/
-  migrations/  seeds/  tests/
-infra/           CloudFormation de todo lo de AWS: templates/, parameters/ (por entorno)
+  src/{middlewares,sockets,adapters,config,shared}/   adapters/db = connectDb, pingDb, withTransaction
+  migrations/  seeds/  scripts/  tests/{integration,contract,helpers}/
+infra/           docker-compose.dev.yml (+ back/, mongo/) y CloudFormation de AWS: templates/, parameters/ (por entorno)
 prompts/         registro de prompts (ver abajo)
 ```
 
@@ -137,8 +139,11 @@ task up           # entorno local (Nginx, back, Mongo RS, Redis)
 task db:migrate   # migraciones
 task db:seed      # datos de desarrollo
 task ci           # lint + tests + migraciones + nginx -t (antes de cada PR)
+task front:smoke  # smoke test de Nginx contra el entorno local
 task --list       # todo lo demás
 ```
+
+Requisitos: Node 22 (`.nvmrc`, ≥ 22.12), Docker con Compose v2, [Task](https://taskfile.dev). Los tests del back usan `mongodb-memory-server` con MongoDB 9.0.2 (la misma versión que el compose).
 
 ## Tests
 
