@@ -3,11 +3,12 @@ import { randomUUID } from 'node:crypto'
 
 export const REQUEST_ID_HEADER = 'X-Request-Id'
 
-// Solo se acepta un id "seguro" de Nginx/cliente: evita inyectar saltos de línea o basura en los logs.
+// Detrás de Nginx el header siempre viene (Nginx lo genera y pisa el del cliente). Sin Nginx
+// (`task back:dev`) no viene y se genera uno acá. Igual se valida: evita inyectar basura en los logs.
 const VALID_REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/
 
 /**
- * Toma `X-Request-Id` (lo pone Nginx) o genera uno, lo deja en `req.id` y lo devuelve en la respuesta.
+ * Toma `X-Request-Id` (lo pone Nginx) o, si no viene, genera uno; lo deja en `req.id` y lo devuelve en la respuesta.
  * @param {{ generateId?: () => string }} [options]
  */
 export function createRequestId ({ generateId = randomUUID } = {}) {

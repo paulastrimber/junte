@@ -3,7 +3,7 @@
 #
 #   bash front-service/tests/smoke.sh [base_url]        (por defecto http://localhost:8080)
 #
-# Verifica: /health, X-Request-Id (generado y respetado), proxy /api/v1/* → /internal/*,
+# Verifica: /health, X-Request-Id (siempre generado por Nginx; el del cliente no llega al back), proxy /api/v1/* → /internal/*,
 # /internal no publicado, límite de body, 429 JSON tras una ráfaga en /api/v1/auth/login,
 # que un X-Forwarded-For de un cliente externo no evade el límite y que el límite es por IP real.
 #
@@ -94,17 +94,15 @@ section 'X-Request-Id'
 generated="$(header health X-Request-Id)"
 [ -n "$generated" ] && ok "Nginx genera uno si no viene ($generated)" || fail "la respuesta de /health no trae X-Request-Id"
 
+is_nginx_id() { [[ "$1" =~ ^[0-9a-f]{32}$ ]]; }
+
 sent="smoke-$(rand)"
 request rid_health -H "X-Request-Id: $sent" "$BASE_URL/health"
-[ "$(header rid_health X-Request-Id)" = "$sent" ] && ok "respeta el enviado por el cliente (/health)" \
-  || fail "no respeta el X-Request-Id enviado en /health" "enviado=$sent recibido=$(header rid_health X-Request-Id)"
-
-request rid_bad -H 'X-Request-Id: no válido <script>' "$BASE_URL/health"
-got="$(header rid_bad X-Request-Id)"
-if [ -n "$got" ] && [ "$got" != 'no válido <script>' ]; then
-  ok "reemplaza uno con formato inválido ($got)"
+got="$(header rid_health X-Request-Id)"
+if [ "$got" != "$sent" ] && is_nginx_id "$got"; then
+  ok "pisa el enviado por el cliente con uno propio ($got)"
 else
-  fail "aceptó un X-Request-Id con formato inválido" "recibido=$got"
+  fail "no pisa el X-Request-Id del cliente en /health" "enviado=$sent recibido=$got"
 fi
 
 # ── Proxy /api/v1 → /internal ────────────────────────────────────────
@@ -116,8 +114,9 @@ if [ "$(status api_health)" = 200 ] && grep -qi 'application/json' <<<"$(header 
 else
   fail "GET /api/v1/health → $(status api_health) ($(header api_health Content-Type)), se esperaba 200 JSON del back" "$(body api_health | head -c 200)"
 fi
-[ "$(header api_health X-Request-Id)" = "$sent" ] && ok "propaga el X-Request-Id al back y lo devuelve una sola vez" \
-  || fail "X-Request-Id inesperado en una respuesta del back" "enviado=$sent recibido=$(header api_health X-Request-Id)"
+got="$(header api_health X-Request-Id)"
+[ "$got" != "$sent" ] && is_nginx_id "$got" && ok "respuesta del back con el X-Request-Id de Nginx, no el del cliente" \
+  || fail "X-Request-Id inesperado en una respuesta del back" "enviado=$sent recibido=$got"
 [ "$(grep -ci '^X-Request-Id:' "$TMP/api_health.headers")" = 1 ] || fail "la respuesta trae X-Request-Id duplicado"
 
 missing="__smoke_$(rand)"
@@ -128,8 +127,16 @@ if [ "$(status api_404)" = 404 ] && { grep -q "/internal/$missing" "$TMP/api_404
 else
   fail "ruta inexistente → $(status api_404), se esperaba el 404 del back" "$(body api_404 | head -c 200)"
 fi
+# El requestId del body lo pone Express con el header que recibió: muestra qué llegó al back.
+edge_id="$(header api_404 X-Request-Id)"
+back_id="$(json_field api_404 requestId)"
+if [ -n "$back_id" ] && [ "$back_id" != "$sent" ] && [ "$back_id" = "$edge_id" ] && is_nginx_id "$back_id"; then
+  ok "el X-Request-Id del cliente no llega al back (el back recibió el de Nginx: $back_id)"
+else
+  fail "el back no recibió el X-Request-Id generado por Nginx" "enviado=$sent back=$back_id header=$edge_id"
+fi
 if $local_checks; then
-  line="$(nginx_log_line "$sent")"
+  line="$(nginx_log_line "$edge_id")"
   if grep -q "\"upstreamPath\":\"/internal/$missing\"" <<<"$line" && grep -q '"upstreamStatus":"404"' <<<"$line"; then
     ok "[local] el access log muestra que llegó al back como /internal/$missing"
   else
@@ -193,15 +200,15 @@ section 'Rate limit por IP real (X-Forwarded-For desde la red de confianza)'
 if $local_checks; then
   ip_a="203.0.113.$((RANDOM % 120 + 1))"
   ip_b="203.0.113.$((RANDOM % 120 + 130))"
-  rid_b="smoke-$(rand)"
   # Contenedor efímero en la red de compose (misma imagen de Nginx, que trae curl).
   out="$(compose run --rm --no-deps -T --entrypoint sh nginx -c "
     url=http://nginx:8080/api/v1/auth/login
     post() { curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST -H 'Content-Type: application/json' --data '{}' \"\$@\" \$url; }
     for i in \$(seq 1 15); do printf '%s ' \"\$(post -H 'X-Forwarded-For: $ip_a')\"; done; echo
-    post -H 'X-Forwarded-For: $ip_b' -H 'X-Request-Id: $rid_b'; echo
+    post -H 'X-Forwarded-For: $ip_b' -D /tmp/b.headers; echo
+    grep -i '^x-request-id:' /tmp/b.headers | cut -d' ' -f2 | tr -d '\\r'
   " 2>"$TMP/run.err")"
-  codes_a="$(sed -n 1p <<<"$out")"; code_b="$(sed -n 2p <<<"$out")"
+  codes_a="$(sed -n 1p <<<"$out")"; code_b="$(sed -n 2p <<<"$out")"; rid_b="$(sed -n 3p <<<"$out")"
   if grep -qw 429 <<<"$codes_a"; then ok "IP A ($ip_a) queda limitada ($codes_a)"; else fail "IP A no llegó a 429" "$codes_a $(cat "$TMP/run.err")"; fi
   if [ -n "$code_b" ] && [ "$code_b" != 429 ]; then ok "IP B ($ip_b) no se ve afectada por A ($code_b)"; else fail "IP B quedó limitada por la ráfaga de A ($code_b)" "$(cat "$TMP/run.err")"; fi
   line="$(nginx_log_line "$rid_b")"

@@ -9,7 +9,7 @@ Nginx como proxy inverso. **No ejecuta reglas de negocio, no valida JWT como aut
 | Publica `/api/v1/*` y lo reescribe a `/internal/*` | Decidir permisos |
 | Obtiene la IP real del cliente (`X-Forwarded-For`) | Validar cuerpos o tokens |
 | Rate limiting por IP real y límite de tamaño de body | Guardar estado |
-| Genera `requestId` (o respeta uno válido del cliente) y lo reenvía como `X-Request-Id` | Hablar con MongoDB o Redis |
+| Genera **siempre** `requestId` (pisa el del cliente) y lo reenvía como `X-Request-Id` | Hablar con MongoDB o Redis |
 | Proxy de WebSocket para Socket.io | |
 | Responde `GET /health` (puerto 8080) al ALB público | |
 | Sirve los estáticos de `/admin` | |
@@ -46,11 +46,7 @@ Los templates los procesa el entrypoint de la imagen oficial de Nginx (`/etc/ngi
 ## Configuración clave
 
 ```nginx
-# nginx.conf — requestId: se respeta el del cliente solo si tiene formato seguro
-map $http_x_request_id $req_id {
-  "~^[A-Za-z0-9._:-]{1,128}$" $http_x_request_id;
-  default                     $request_id;          # generado por Nginx
-}
+# nginx.conf — requestId: siempre $request_id (generado por Nginx); el del cliente se ignora
 map $http_upgrade $connection_upgrade { default upgrade; '' close; }
 
 # templates/00-realip.conf.template — ver 02-comunicacion-y-red.md
@@ -75,7 +71,7 @@ server {
   listen 8080 default_server;
   client_max_body_size 1m;                         # las fotos van directo a S3, no por acá
   absolute_redirect off;
-  add_header X-Request-Id $req_id always;          # toda respuesta, incluidos errores
+  add_header X-Request-Id $request_id always;          # toda respuesta, incluidos errores
   error_page 429 = @rate_limited;
 
   location = /health { access_log off; return 200 'ok'; }
@@ -100,12 +96,12 @@ server {
 
   location / {                                     # incluye /internal/*: no se publica
     default_type application/json;
-    return 404 '{"code":"NOT_FOUND","message":"Recurso no encontrado","requestId":"$req_id"}';
+    return 404 '{"code":"NOT_FOUND","message":"Recurso no encontrado","requestId":"$request_id"}';
   }
 
   location @rate_limited {
     default_type application/json;
-    return 429 '{"code":"RATE_LIMITED","message":"Demasiadas solicitudes","requestId":"$req_id"}';
+    return 429 '{"code":"RATE_LIMITED","message":"Demasiadas solicitudes","requestId":"$request_id"}';
   }
 }
 
@@ -116,7 +112,7 @@ proxy_http_version 1.1;
 proxy_set_header Upgrade $http_upgrade;
 proxy_set_header Connection $connection_upgrade;
 proxy_set_header Host $host;
-proxy_set_header X-Request-Id $req_id;
+proxy_set_header X-Request-Id $request_id;
 proxy_set_header X-Real-IP $remote_addr;
 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 proxy_hide_header X-Request-Id;                    # el de la respuesta lo agrega el server
@@ -126,8 +122,9 @@ proxy_hide_header X-Request-Id;                    # el de la respuesta lo agreg
 
 ### requestId
 
-- Si el cliente manda `X-Request-Id` con formato `[A-Za-z0-9._:-]{1,128}`, se respeta (trazabilidad de punta a punta, p. ej. la app puede mandar el suyo). Si no viene o tiene otro formato, se usa el `$request_id` de Nginx (32 hex).
-- El mismo valor va al back (`X-Request-Id`), a la respuesta (una sola vez), al access log y al body de los errores que genera Nginx. El formato acotado evita inyectar saltos de línea en logs o romper el JSON del 429.
+- Nginx usa **siempre** su `$request_id` (32 hex) y pisa cualquier `X-Request-Id` que mande el cliente: el cliente no elige el id con el que se correlacionan los logs.
+- El mismo valor va al back (`X-Request-Id`), a la respuesta (una sola vez), al access log y al body de los errores que genera Nginx.
+- El back solo genera uno propio cuando no viene el header, que pasa únicamente sin Nginx (`task back:dev`).
 
 ### Logs
 
@@ -155,7 +152,7 @@ Estáticos servidos por Nginx; sus llamadas van a `/api/v1/admin/*` con un JWT d
 - CI: `docker compose -f infra/docker-compose.dev.yml run --rm --no-deps nginx nginx -t` (renderiza los templates y valida; no necesita el back).
 - `tests/smoke.sh [base_url]` (por defecto `http://localhost:8080`) contra el entorno levantado con docker compose:
   - `/health` = 200 respondido por Nginx.
-  - `X-Request-Id` presente; se respeta uno válido del cliente y se reemplaza uno inválido; llega al back y vuelve una sola vez.
+  - `X-Request-Id` presente y generado por Nginx; el que manda el cliente no llega al back; el back recibe el de Nginx y la respuesta lo trae una sola vez.
   - `/api/v1/health` llega al back; una ruta inexistente `/api/v1/x` devuelve el 404 del back y el access log muestra `upstreamPath: /internal/x` sin query string; `/internal/*` da 404.
   - Body de más de 1 MB → 413.
   - Ráfaga sobre `/api/v1/auth/login` → 429 JSON `{ code: 'RATE_LIMITED', message, requestId }` con el mismo `requestId` que el header; un `X-Forwarded-For` inventado desde fuera de la red de confianza no evade el límite.
