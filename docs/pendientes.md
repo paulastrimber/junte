@@ -110,7 +110,11 @@ Lo que apareció al implementar el sprint 1 y queda para revisar con el equipo.
 ### Base (líder)
 - **ESLint 9, no 10:** `neostandard@0.13` declara `peerDependencies: eslint ^9` y `eslint-plugin-import@2.32` no soporta ESLint 10. Se fija `eslint@^9.39`.
 - **Node ≥ 22.12:** lo exige `vitest@5`. Se fija en `engines` y en `.nvmrc`.
-- **`migrate:check` usa siempre un `MongoMemoryReplSet` efímero:** `down` borra colecciones, así que nunca se corre contra la base de desarrollo.
+- **`migrate:check` usa siempre un `MongoMemoryReplSet` efímero:** nunca se corre contra la base de desarrollo.
+- **Tests en paralelo y `mongodb-memory-server`:** varios archivos de test competían por el lockfile de la descarga del binario (`Cannot unlock file …lock`). Se resolvió con `tests/helpers/global-setup.js` (resuelve el binario una vez y lo pasa por `MONGOMS_SYSTEM_BINARY`) y se fijó MongoDB 9.0.2 en `package.json › config.mongodbMemoryServer`, igual que el compose.
+- **Script `dev` sin `.env`:** ver la nota del Agente C. `task setup` siempre crea `.env`, así que no se cambió el script; decidir si conviene `--env-file` condicional.
+- **`task setup` genera `JWT_SECRET`** aleatorio (`openssl rand -hex 32`) en `back-service/.env` si está vacío, y copia `mobile/.env.example` a `mobile/.env` (lo pidió el Agente D).
+- **`task up` usa `--wait`:** espera a que los cuatro servicios estén healthy, así `task db:migrate` puede ir justo después.
 
 ### back-core (Agente A)
 - **Secretos en producción (S1-BE-02):** no está definido cómo llegan a la instancia (SDK al arrancar vs. variables inyectadas por user-data/systemd desde Secrets Manager). `src/config/index.js` deja `resolveSecrets(env)` como punto de extensión (hoy devuelve `env` tal cual). Si se elige SDK, hace falta la dependencia `@aws-sdk/client-secrets-manager`. **Bloquea:** S1-INF-07/09.
