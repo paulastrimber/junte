@@ -1,6 +1,5 @@
 # Taskfile de junte — https://taskfile.dev
 # Uso: `task --list` muestra todos los comandos.
-# Los archivos referenciados (docker-compose, scripts) se crean en el sprint 1 (S1-INF-02/03).
 version: '3'
 
 vars:
@@ -16,15 +15,20 @@ tasks:
 
   # ── Entorno local ────────────────────────────────────────────────
   setup:
-    desc: Instala dependencias de back y app y crea .env desde .env.example
+    desc: Instala dependencias de back y app y crea los .env desde .env.example (JWT_SECRET aleatorio)
     cmds:
       - test -f {{.BACK}}/.env || cp {{.BACK}}/.env.example {{.BACK}}/.env
+      - |
+        if grep -q '^JWT_SECRET=$' {{.BACK}}/.env; then
+          sed -i.bak "s|^JWT_SECRET=$|JWT_SECRET=$(openssl rand -hex 32)|" {{.BACK}}/.env && rm {{.BACK}}/.env.bak
+        fi
+      - test -f {{.MOBILE}}/.env || cp {{.MOBILE}}/.env.example {{.MOBILE}}/.env
       - npm ci --prefix {{.BACK}}
       - npm ci --prefix {{.MOBILE}}
 
   up:
-    desc: Levanta Nginx, back, MongoDB (replica set 1 nodo) y Redis
-    cmds: ['{{.COMPOSE}} up -d --build']
+    desc: Levanta Nginx, back, MongoDB (replica set 1 nodo) y Redis y espera a que estén healthy
+    cmds: ['{{.COMPOSE}} up -d --build --wait']
 
   down:
     desc: Detiene el entorno local
