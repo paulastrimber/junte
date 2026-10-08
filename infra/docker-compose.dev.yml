@@ -1,0 +1,134 @@
+# Entorno local de junte: Nginx (front service) → back (Express) → MongoDB (replica set rs0) + Redis.
+#   docker compose -f infra/docker-compose.dev.yml up -d --build    (o `task up`)
+#   curl localhost:8080/health
+#   bash front-service/tests/smoke.sh
+# Las rutas relativas se resuelven desde infra/ (la carpeta de este archivo).
+name: junte
+
+services:
+  mongo:
+    image: mongo:9.0.2-noble
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"   # desde el host: mongodb://localhost:27017/?replicaSet=rs0&directConnection=true
+    volumes:
+      - mongo-data:/data/db
+      - mongo-config:/data/configdb
+      - ./mongo/rs-healthcheck.js:/opt/junte/rs-healthcheck.js:ro
+    # El healthcheck además inicia el replica set la primera vez (rs.initiate idempotente).
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--norc", "/opt/junte/rs-healthcheck.js"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+      start_interval: 2s
+    restart: unless-stopped
+
+  redis:
+    image: redis:8.10.2-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+      start_interval: 1s
+    restart: unless-stopped
+
+  back:
+    build:
+      context: ../back-service
+      target: dev
+    entrypoint: ["sh", "/opt/junte/dev-entrypoint.sh"]
+    # Equivale a `npm run dev` sin --env-file-if-exists: acá las variables ya las inyecta compose,
+    # y en Node 22.23 `--watch --env-file-if-exists=.env` se cae si .env no existe
+    # (ver docs/pendientes.md, sección C · infra local + Nginx).
+    command: ["node", "--watch", "src/server.js"]
+    # Variables del back: back-service/.env (lo crea `task setup` desde .env.example).
+    # Es opcional para que el entorno levante igual sin haberlo creado.
+    env_file:
+      - path: ../back-service/.env
+        required: false
+    # Pisan a .env: dentro de la red de compose Mongo y Redis se llaman por nombre de servicio.
+    environment:
+      PORT: "3000"
+      MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "3000:3000"
+    volumes:
+      # Código montado para recarga en caliente (node --watch).
+      - ../back-service:/app
+      # node_modules del contenedor (binarios de Linux): no se pisa con el del host.
+      - back-node-modules:/app/node_modules
+      - ./back/dev-entrypoint.sh:/opt/junte/dev-entrypoint.sh:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/internal/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+      start_interval: 2s
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.30.5-alpine
+    ports:
+      - "8080:8080"
+    environment:
+      # Valores por entorno que se sustituyen en front-service/templates/*.template (envsubst).
+      NGINX_TRUSTED_CIDR: 172.30.0.128/25   # = ip_range de la red default (ver abajo)
+      NGINX_RESOLVER: 127.0.0.11            # DNS embebido de docker (en AWS: 169.254.169.253)
+      NGINX_BACKEND: back:3000              # en AWS: <DNS del ALB interno>:3000
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/env.d
+      NGINX_ENVSUBST_FILTER: ^NGINX_
+    volumes:
+      - ../front-service/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../front-service/conf.d:/etc/nginx/conf.d:ro
+      - ../front-service/snippets:/etc/nginx/snippets:ro
+      - ../front-service/templates:/etc/nginx/templates:ro
+      - ../front-service/admin:/usr/share/nginx/html/admin:ro
+    tmpfs:
+      - /etc/nginx/env.d   # salida de envsubst (los templates se renderizan al arrancar)
+    # Cambios en conf.d/ o snippets/: `exec nginx nginx -s reload`.
+    # Cambios en nginx.conf o templates/: `restart nginx`.
+    # Sin depends_on: el borde arranca aunque el back no esté (resolver + variable en proxy_pass);
+    # /health responde siempre y /api/v1/* devuelve 502 hasta que el back levante.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+      start_interval: 1s
+    restart: unless-stopped
+
+networks:
+  default:
+    ipam:
+      config:
+        # Subred fija para poder declarar en Nginx qué IPs son "de confianza" (como la VPC en AWS).
+        # Los contenedores toman IPs de ip_range (.128–.255). El tráfico publicado desde el host
+        # llega desde el gateway (.1, en Linux) o desde la VM de Docker Desktop (192.168.65.x),
+        # ambos fuera de ese rango: el host cuenta como cliente externo.
+        # Si choca con otra red de tu máquina, cambiá los tres valores y NGINX_TRUSTED_CIDR.
+        - subnet: 172.30.0.0/24
+          ip_range: 172.30.0.128/25
+          gateway: 172.30.0.1
+
+volumes:
+  mongo-data:
+  mongo-config:
+  back-node-modules:
