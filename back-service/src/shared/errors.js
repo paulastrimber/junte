@@ -39,3 +39,29 @@ export class AppError extends Error {
     this.details = details
   }
 }
+
+/**
+ * @param {unknown} err
+ * @returns {err is AppError}
+ */
+export function isAppError (err) {
+  return err instanceof AppError
+}
+
+/**
+ * Fábricas de errores comunes a todos los módulos. Los errores propios de un dominio
+ * (PLAN_FULL, QR_INVALID, …) se crean en su módulo con `new AppError(code, message)`.
+ */
+export const errors = Object.freeze({
+  /** @param {Array<{ path: string, message: string }>} [details] */
+  validation: (details, message = 'Los datos enviados no son válidos') =>
+    new AppError('VALIDATION_ERROR', message, { details }),
+  unauthenticated: (message = 'Tenés que iniciar sesión') =>
+    new AppError('UNAUTHENTICATED', message),
+  forbidden: (message = 'No tenés permiso para esta acción') =>
+    new AppError('FORBIDDEN', message),
+  notFound: (message = 'No encontramos lo que buscabas') =>
+    new AppError('NOT_FOUND', message),
+  internal: (message = 'Ocurrió un error inesperado') =>
+    new AppError('INTERNAL', message)
+})
