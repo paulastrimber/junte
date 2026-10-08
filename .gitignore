@@ -12,3 +12,6 @@ dist/
 *.apk
 *.aab
 *.ipa
+
+# Worktrees de agentes de Claude Code
+.claude/worktrees/
