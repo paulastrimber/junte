@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth.js'
 import HealthScreen, { TEXTS as HEALTH_TEXTS } from '../screens/HealthScreen.jsx'
 import LoadingScreen from '../screens/LoadingScreen.jsx'
 import LoginScreen, { TEXTS as LOGIN_TEXTS } from '../screens/LoginScreen.jsx'
+import OnboardingScreen from '../screens/OnboardingScreen.jsx'
 import ProfileScreen from '../screens/ProfileScreen.jsx'
 import RegisterScreen, { TEXTS as REGISTER_TEXTS } from '../screens/RegisterScreen.jsx'
 import RestoreErrorScreen from '../screens/RestoreErrorScreen.jsx'
@@ -12,6 +13,7 @@ import RestoreErrorScreen from '../screens/RestoreErrorScreen.jsx'
 export const ROUTES = Object.freeze({
   LOGIN: 'Login',
   REGISTER: 'Register',
+  ONBOARDING: 'Onboarding',
   PROFILE: 'Profile',
   HEALTH: 'Health'
 })
@@ -39,9 +41,19 @@ function AppStack () {
   )
 }
 
+// Primer ingreso: el onboarding se muestra hasta que la persona lo termina o lo deja para después ("Más tarde").
+function OnboardingStack () {
+  return (
+    <Stack.Navigator initialRouteName={ROUTES.ONBOARDING}>
+      <Stack.Screen name={ROUTES.ONBOARDING} component={OnboardingScreen} options={{ title: 'Bienvenido a junte', headerBackVisible: false }} />
+    </Stack.Navigator>
+  )
+}
+
 export function RootNavigator () {
-  const { status } = useAuth()
+  const { status, user } = useAuth()
   if (status === AUTH_STATUS.LOADING) return <LoadingScreen />
   if (status === AUTH_STATUS.RESTORE_ERROR) return <RestoreErrorScreen />
-  return status === AUTH_STATUS.SIGNED_IN ? <AppStack /> : <AuthStack />
+  if (status !== AUTH_STATUS.SIGNED_IN) return <AuthStack />
+  return user.onboardingCompleted ? <AppStack /> : <OnboardingStack />
 }

@@ -1,13 +1,16 @@
 import { NavigationContainer } from '@react-navigation/native'
 import { act, fireEvent, screen } from '@testing-library/react-native'
 
-import { COMPLETE_USER, createFakeAuthService, renderWithAuth } from '../../tests/helpers/auth.jsx'
+import { CATALOG, COMPLETE_USER, USER, createFakeAuthService, renderWithAuth } from '../../tests/helpers/auth.jsx'
 import { deferred } from '../../tests/helpers/deferred.js'
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import { TEXTS as LOADING } from '../screens/LoadingScreen.jsx'
 import { TEXTS as LOGIN } from '../screens/LoginScreen.jsx'
+import { TEXTS as ONBOARDING } from '../screens/OnboardingScreen.jsx'
 import { TEXTS as PROFILE } from '../screens/ProfileScreen.jsx'
 import { TEXTS as RESTORE } from '../screens/RestoreErrorScreen.jsx'
+import { getCatalogs } from '../services/api/catalogs.js'
+import * as usersApi from '../services/api/users.js'
 import { RootNavigator } from './RootNavigator.jsx'
 
 jest.mock('@react-native-community/datetimepicker', () => {
@@ -15,11 +18,16 @@ jest.mock('@react-native-community/datetimepicker', () => {
   return { __esModule: true, default: (props) => <View {...props} />, DateTimePickerAndroid: { open: jest.fn() } }
 })
 jest.mock('../services/api/health.js', () => ({ ...jest.requireActual('../services/api/health.js'), getHealth: jest.fn() }))
+jest.mock('../services/api/catalogs.js', () => ({ getCatalogs: jest.fn() }))
 jest.mock('../services/api/users.js', () => ({ getMe: jest.fn(), updateMe: jest.fn(), setPhoto: jest.fn() }))
 
 const renderApp = (service) => renderWithAuth(<NavigationContainer><RootNavigator /></NavigationContainer>, { service })
 
 describe('RootNavigator (navegación protegida)', () => {
+  beforeEach(() => {
+    getCatalogs.mockResolvedValue(CATALOG)
+  })
+
   it('mientras lee la sesión guardada muestra la pantalla de carga', async () => {
     const pending = deferred()
     await renderApp(createFakeAuthService({ restore: jest.fn(() => pending.promise) }))
@@ -49,6 +57,38 @@ describe('RootNavigator (navegación protegida)', () => {
 
     expect(await screen.findByRole('button', { name: PROFILE.save })).toBeOnTheScreen()
     expect(screen.queryByRole('button', { name: LOGIN.submit })).not.toBeOnTheScreen()
+  })
+
+  it('un usuario nuevo (onboarding pendiente) ve el onboarding, no la app', async () => {
+    await renderApp(createFakeAuthService({ user: USER }))
+
+    expect(await screen.findByText('Paso 1 de 3')).toBeOnTheScreen()
+    expect(screen.getByRole('button', { name: ONBOARDING.later })).toBeOnTheScreen()
+    expect(screen.queryByRole('button', { name: PROFILE.save })).not.toBeOnTheScreen()
+  })
+
+  it('al terminar el onboarding ("Más tarde") entra a la app aunque el perfil siga incompleto', async () => {
+    usersApi.updateMe.mockResolvedValue({ ...USER, onboardingCompleted: true })
+    await renderApp(createFakeAuthService({ user: USER }))
+
+    await fireEvent.press(await screen.findByRole('button', { name: ONBOARDING.later }))
+
+    expect(await screen.findByRole('button', { name: PROFILE.save })).toBeOnTheScreen()
+    expect(screen.getByText(PROFILE.incomplete)).toBeOnTheScreen()
+    expect(screen.queryByText('Paso 1 de 3')).not.toBeOnTheScreen()
+  })
+
+  it('al registrarse se abre el onboarding; al iniciar sesión con onboarding hecho, la app', async () => {
+    const service = createFakeAuthService({ user: null, register: jest.fn(async () => USER) })
+    await renderApp(service)
+    await fireEvent.press(await screen.findByRole('button', { name: LOGIN.register }))
+    await fireEvent.changeText(await screen.findByLabelText('Nombre'), 'Ana')
+    await fireEvent.changeText(screen.getByLabelText('Email'), 'ana@um.edu.uy')
+    await fireEvent.changeText(screen.getByLabelText('Contraseña (mínimo 8 caracteres)'), 'secreto-123')
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Registrarme' }))
+
+    expect(await screen.findByText('Paso 1 de 3')).toBeOnTheScreen()
   })
 
   it('al iniciar sesión cambia al stack de la app', async () => {

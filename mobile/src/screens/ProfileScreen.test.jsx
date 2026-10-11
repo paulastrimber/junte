@@ -1,9 +1,11 @@
 import { act, fireEvent, screen } from '@testing-library/react-native'
 import { Platform } from 'react-native'
 
-import { COMPLETE_USER, SignedIn, USER, createFakeAuthService, renderWithAuth } from '../../tests/helpers/auth.jsx'
+import { CATALOG, COMPLETE_USER, SignedIn, USER, createFakeAuthService, renderWithAuth } from '../../tests/helpers/auth.jsx'
 import { deferred } from '../../tests/helpers/deferred.js'
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
+import { resetCatalogsCache } from '../hooks/useCatalogs.js'
+import { getCatalogs } from '../services/api/catalogs.js'
 import * as usersApi from '../services/api/users.js'
 import { pickProfileImage } from '../services/imagePicker.js'
 import { uploadProfilePhoto } from '../services/photoUpload.js'
@@ -13,6 +15,7 @@ jest.mock('@react-native-community/datetimepicker', () => {
   const { View } = require('react-native')
   return { __esModule: true, default: (props) => <View {...props} />, DateTimePickerAndroid: { open: jest.fn() } }
 })
+jest.mock('../services/api/catalogs.js', () => ({ getCatalogs: jest.fn() }))
 jest.mock('../services/api/users.js', () => ({ getMe: jest.fn(), updateMe: jest.fn(), setPhoto: jest.fn() }))
 jest.mock('../services/imagePicker.js', () => ({ pickProfileImage: jest.fn() }))
 jest.mock('../services/photoUpload.js', () => ({ uploadProfilePhoto: jest.fn() }))
@@ -22,16 +25,26 @@ const navigation = { navigate: jest.fn() }
 async function renderProfile (user = USER, service = createFakeAuthService({ user })) {
   const view = await renderWithAuth(<SignedIn><ProfileScreen navigation={navigation} /></SignedIn>, { service })
   await screen.findByRole('button', { name: TEXTS.save })
+  await screen.findByRole('button', { name: TEXTS.university }) // los catálogos terminaron de cargar
   return view
 }
 
 const saveButton = () => screen.getByRole('button', { name: TEXTS.save })
 const field = (label) => screen.getByLabelText(label)
 
+// Abre el selector de un campo y elige una opción de la lista.
+async function choose (label, option) {
+  await fireEvent.press(screen.getByRole('button', { name: label }))
+  await fireEvent.press(screen.getByRole('button', { name: option }))
+}
+
 describe('ProfileScreen', () => {
   beforeEach(() => {
     jest.replaceProperty(Platform, 'OS', 'ios')
     navigation.navigate.mockReset()
+    resetCatalogsCache()
+    getCatalogs.mockReset()
+    getCatalogs.mockResolvedValue(CATALOG)
     usersApi.updateMe.mockReset()
     pickProfileImage.mockReset()
     uploadProfilePhoto.mockReset()
@@ -47,10 +60,19 @@ describe('ProfileScreen', () => {
       expect(screen.getByText(`${TEXTS.age}: 25`)).toBeOnTheScreen()
       expect(field(TEXTS.name).props.value).toBe('Ana')
       expect(screen.getByText('09/03/2001')).toBeOnTheScreen()
-      expect(field(TEXTS.neighborhood).props.value).toBe('Pocitos')
-      expect(field(TEXTS.city).props.value).toBe('Montevideo')
+      expect(screen.getByText('Universidad de Montevideo (UM)')).toBeOnTheScreen()
+      expect(screen.getByText('Ingeniería en Informática')).toBeOnTheScreen()
+      expect(screen.getByText('Montevideo')).toBeOnTheScreen()
+      expect(screen.getByText('Pocitos')).toBeOnTheScreen()
       expect(screen.getByRole('checkbox', { name: 'Fútbol' })).toBeChecked()
-      expect(screen.getByRole('checkbox', { name: 'Running' })).not.toBeChecked()
+      expect(screen.getByRole('checkbox', { name: 'Pádel' })).not.toBeChecked()
+    })
+
+    it('los intereses se muestran agrupados por categoría', async () => {
+      await renderProfile(COMPLETE_USER)
+
+      expect(screen.getByRole('header', { name: 'Deportes' })).toBeOnTheScreen()
+      expect(screen.getByRole('header', { name: 'Salidas y gastronomía' })).toBeOnTheScreen()
     })
 
     it('la edad no es un campo editable', async () => {
@@ -73,6 +95,27 @@ describe('ProfileScreen', () => {
       await renderProfile(USER)
       expect(screen.queryByText(new RegExp(`^${TEXTS.age}:`))).not.toBeOnTheScreen()
     })
+
+    it('las opciones con edad mínima ("Bares") no aparecen sin fecha de nacimiento ni para un menor; sí para un mayor', async () => {
+      await renderProfile(USER)
+      expect(screen.queryByRole('checkbox', { name: 'Bares y cervecerías' })).not.toBeOnTheScreen()
+    })
+
+    it('un mayor de 18 sí las ve', async () => {
+      await renderProfile(COMPLETE_USER)
+      expect(screen.getByRole('checkbox', { name: 'Bares y cervecerías' })).toBeOnTheScreen()
+    })
+
+    it('mientras cargan los catálogos muestra "Cargando opciones" y si fallan permite reintentar', async () => {
+      getCatalogs.mockRejectedValueOnce(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR }))
+      const view = await renderWithAuth(<SignedIn><ProfileScreen navigation={navigation} /></SignedIn>, { service: createFakeAuthService({ user: COMPLETE_USER }) })
+
+      expect(await screen.findByText('No pudimos cargar las opciones.')).toBeOnTheScreen()
+      await fireEvent.press(screen.getByRole('button', { name: 'Reintentar' }))
+
+      expect(await screen.findByRole('button', { name: TEXTS.university })).toBeOnTheScreen()
+      expect(view.service).toBeDefined()
+    })
   })
 
   describe('guardar', () => {
@@ -83,16 +126,69 @@ describe('ProfileScreen', () => {
     })
 
     it('manda solo los campos que cambiaron y refleja el perfil actualizado', async () => {
-      usersApi.updateMe.mockResolvedValue({ ...COMPLETE_USER, city: 'Canelones', neighborhood: 'Las Piedras' })
+      usersApi.updateMe.mockResolvedValue({ ...COMPLETE_USER, neighborhood: 'cordon', name: 'Ana María' })
       await renderProfile(COMPLETE_USER)
-      await fireEvent.changeText(field(TEXTS.city), '  Canelones ')
-      await fireEvent.changeText(field(TEXTS.neighborhood), 'Las Piedras')
+      await fireEvent.changeText(field(TEXTS.name), '  Ana María ')
+      await choose(TEXTS.neighborhood, 'Cordón')
 
       await fireEvent.press(saveButton())
 
-      expect(usersApi.updateMe).toHaveBeenCalledWith({ city: 'Canelones', neighborhood: 'Las Piedras' })
+      expect(usersApi.updateMe).toHaveBeenCalledWith({ name: 'Ana María', neighborhood: 'cordon' })
       expect(await screen.findByText(TEXTS.saved)).toBeOnTheScreen()
       expect(saveButton()).toBeDisabled()
+    })
+
+    it('cambiar de universidad vacía la carrera y NO la manda (el back la quita)', async () => {
+      usersApi.updateMe.mockResolvedValue({ ...COMPLETE_USER, university: 'ort', career: null })
+      await renderProfile(COMPLETE_USER)
+
+      await choose(TEXTS.university, 'Universidad ORT Uruguay (ORT)')
+
+      expect(screen.getByRole('button', { name: TEXTS.career })).toBeEnabled()
+      expect(screen.queryByText('Ingeniería en Informática')).not.toBeOnTheScreen()
+      await fireEvent.press(saveButton())
+      expect(usersApi.updateMe).toHaveBeenCalledWith({ university: 'ort' })
+    })
+
+    it('cambiar de universidad y elegir su carrera manda las dos', async () => {
+      usersApi.updateMe.mockResolvedValue({ ...COMPLETE_USER, university: 'ort', career: 'ingenieria-en-sistemas' })
+      await renderProfile(COMPLETE_USER)
+
+      await choose(TEXTS.university, 'Universidad ORT Uruguay (ORT)')
+      await choose(TEXTS.career, 'Ingeniería en Sistemas')
+      await fireEvent.press(saveButton())
+
+      expect(usersApi.updateMe).toHaveBeenCalledWith({ university: 'ort', career: 'ingenieria-en-sistemas' })
+    })
+
+    it('"Otra" universidad manda other y deshabilita la carrera (no hay carreras de "Otra")', async () => {
+      usersApi.updateMe.mockResolvedValue({ ...COMPLETE_USER, university: 'other', career: null })
+      await renderProfile(COMPLETE_USER)
+
+      await choose(TEXTS.university, 'Otra')
+
+      expect(screen.getByRole('button', { name: TEXTS.career })).toBeDisabled()
+      await fireEvent.press(saveButton())
+      expect(usersApi.updateMe).toHaveBeenCalledWith({ university: 'other' })
+    })
+
+    it('"Otra" ciudad manda other y deshabilita el barrio', async () => {
+      usersApi.updateMe.mockResolvedValue({ ...COMPLETE_USER, city: 'other', neighborhood: null })
+      await renderProfile(COMPLETE_USER)
+
+      await choose(TEXTS.city, 'Otra')
+
+      expect(screen.getByRole('button', { name: TEXTS.neighborhood })).toBeDisabled()
+      await fireEvent.press(saveButton())
+      expect(usersApi.updateMe).toHaveBeenCalledWith({ city: 'other' })
+    })
+
+    it('sin universidad la carrera está deshabilitada; sin ciudad, el barrio', async () => {
+      await renderProfile(USER)
+
+      expect(screen.getByRole('button', { name: TEXTS.career })).toBeDisabled()
+      expect(screen.getByRole('button', { name: TEXTS.neighborhood })).toBeDisabled()
+      expect(screen.getByText(TEXTS.careerHint)).toBeOnTheScreen()
     })
 
     it('elegir la fecha de nacimiento manda YYYY-MM-DD', async () => {
@@ -107,24 +203,25 @@ describe('ProfileScreen', () => {
       expect(await screen.findByText(`${TEXTS.age}: 27`)).toBeOnTheScreen()
     })
 
-    it('los intereses admiten hasta 5: el sexto queda deshabilitado', async () => {
-      await renderProfile(USER)
-      for (const label of ['Fútbol', 'Running', 'Estudio', 'Música', 'Cine']) {
-        await fireEvent.press(screen.getByRole('checkbox', { name: label }))
-      }
-
-      expect(screen.getByRole('checkbox', { name: 'Juegos de mesa' })).toBeDisabled()
-      expect(screen.getByRole('checkbox', { name: 'Cine' })).toBeEnabled()
-    })
-
     it('guardar intereses manda la lista completa', async () => {
-      usersApi.updateMe.mockResolvedValue({ ...COMPLETE_USER, interests: ['futbol', 'cine', 'musica'] })
+      usersApi.updateMe.mockResolvedValue({ ...COMPLETE_USER, interests: ['futbol', 'cine', 'padel'] })
       await renderProfile(COMPLETE_USER)
 
-      await fireEvent.press(screen.getByRole('checkbox', { name: 'Música' }))
+      await fireEvent.press(screen.getByRole('checkbox', { name: 'Pádel' }))
       await fireEvent.press(saveButton())
 
-      expect(usersApi.updateMe).toHaveBeenCalledWith({ interests: ['futbol', 'cine', 'musica'] })
+      expect(usersApi.updateMe).toHaveBeenCalledWith({ interests: ['futbol', 'cine', 'padel'] })
+    })
+
+    it('quitar todos los intereses se manda como lista vacía', async () => {
+      usersApi.updateMe.mockResolvedValue({ ...COMPLETE_USER, interests: [], profileComplete: false })
+      await renderProfile(COMPLETE_USER)
+
+      await fireEvent.press(screen.getByRole('checkbox', { name: 'Fútbol' }))
+      await fireEvent.press(screen.getByRole('checkbox', { name: 'Cine' }))
+      await fireEvent.press(saveButton())
+
+      expect(usersApi.updateMe).toHaveBeenCalledWith({ interests: [] })
     })
 
     it('valida en el teléfono: nombre vacío no llama a la API', async () => {
@@ -137,37 +234,27 @@ describe('ProfileScreen', () => {
       expect(usersApi.updateMe).not.toHaveBeenCalled()
     })
 
-    it('un dato opcional ya guardado no se puede dejar vacío (todavía no hay forma de borrarlo)', async () => {
-      await renderProfile(COMPLETE_USER)
-      await fireEvent.changeText(field(TEXTS.neighborhood), '')
-
-      await fireEvent.press(saveButton())
-
-      expect(screen.getByText(/no se puede borrar/i)).toBeOnTheScreen()
-      expect(usersApi.updateMe).not.toHaveBeenCalled()
-    })
-
     it('un VALIDATION_ERROR del servidor se muestra en el campo que corresponde', async () => {
       usersApi.updateMe.mockRejectedValue(new ApiError({
-        status: 400, code: 'VALIDATION_ERROR', details: [{ path: 'city', message: 'La localidad es demasiado larga (servidor)' }]
+        status: 400, code: 'VALIDATION_ERROR', details: [{ path: 'neighborhood', message: 'El barrio elegido ya no está disponible' }]
       }))
       await renderProfile(COMPLETE_USER)
-      await fireEvent.changeText(field(TEXTS.city), 'Otra')
+      await choose(TEXTS.neighborhood, 'Cordón')
 
       await fireEvent.press(saveButton())
 
-      expect(await screen.findByText('La localidad es demasiado larga (servidor)')).toBeOnTheScreen()
+      expect(await screen.findByText('El barrio elegido ya no está disponible')).toBeOnTheScreen()
     })
 
-    it('un error de red se muestra como error general y conserva lo escrito', async () => {
+    it('un error de red se muestra como error general y conserva lo elegido', async () => {
       usersApi.updateMe.mockRejectedValue(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR }))
       await renderProfile(COMPLETE_USER)
-      await fireEvent.changeText(field(TEXTS.city), 'Otra')
+      await fireEvent.changeText(field(TEXTS.name), 'Otra')
 
       await fireEvent.press(saveButton())
 
       expect(await screen.findByText(/No pudimos conectarnos/)).toBeOnTheScreen()
-      expect(field(TEXTS.city).props.value).toBe('Otra')
+      expect(field(TEXTS.name).props.value).toBe('Otra')
       expect(saveButton()).toBeEnabled()
     })
 
@@ -175,12 +262,12 @@ describe('ProfileScreen', () => {
       const pending = deferred()
       usersApi.updateMe.mockReturnValue(pending.promise)
       await renderProfile(COMPLETE_USER)
-      await fireEvent.changeText(field(TEXTS.city), 'Otra')
+      await fireEvent.changeText(field(TEXTS.name), 'Otra')
 
       await fireEvent.press(saveButton())
 
       expect(saveButton()).toBeDisabled()
-      await act(async () => pending.resolve({ ...COMPLETE_USER, city: 'Otra' }))
+      await act(async () => pending.resolve({ ...COMPLETE_USER, name: 'Otra' }))
     })
   })
 

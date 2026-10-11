@@ -6,8 +6,6 @@ import { MAX_AGE, MIN_AGE, ageOn, parseCalendarDate, today } from './dates.js'
 export const PASSWORD_MIN = 8
 export const PASSWORD_MAX = 128
 export const NAME_MAX = 80
-export const PLACE_MAX = 60
-export const UNIVERSITY_MAX = 120
 
 // Forma básica (algo@dominio.tld); la validación real del formato la hace el back.
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -31,13 +29,6 @@ export function validatePassword (value, { checkLength = true } = {}) {
   if (value === '') return 'Ingresá tu contraseña.'
   if (checkLength && value.length < PASSWORD_MIN) return `La contraseña debe tener al menos ${PASSWORD_MIN} caracteres.`
   if (value.length > PASSWORD_MAX) return `La contraseña admite hasta ${PASSWORD_MAX} caracteres.`
-  return null
-}
-
-/** Opcionales (universidad, barrio, localidad): vacío es válido; si hay texto, 1 a `max` caracteres. */
-export function validateOptionalText (value, { max, label }) {
-  const text = value.trim()
-  if (text.length > max) return `${label} admite hasta ${max} caracteres.`
   return null
 }
 

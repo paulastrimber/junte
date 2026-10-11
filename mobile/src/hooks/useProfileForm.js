@@ -1,23 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 
 import * as usersApi from '../services/api/users.js'
 import { fieldErrorsFrom, messageForError } from '../utils/errorMessages.js'
-import { toggleInterest } from '../utils/interests.js'
-import { NAME_MAX, PLACE_MAX, UNIVERSITY_MAX, validateBirthDate, validateName, validateOptionalText } from '../utils/validation.js'
+import { NAME_MAX, validateBirthDate, validateName } from '../utils/validation.js'
 import { useAuth } from './useAuth.js'
+import { useCatalogs } from './useCatalogs.js'
+import { useProfileDraft } from './useProfileDraft.js'
 
-const TEXT_FIELDS = ['name', 'university', 'neighborhood', 'city']
-
-const fromUser = (user) => ({
-  name: user?.name ?? '',
-  birthDate: user?.birthDate ?? '',
-  university: user?.university ?? '',
-  neighborhood: user?.neighborhood ?? '',
-  city: user?.city ?? '',
-  interests: user?.interests ?? []
-})
-
-const sameItems = (a, b) => a.length === b.length && a.every((item) => b.includes(item))
+const FIELDS = ['name', 'birthDate', 'university', 'career', 'city', 'neighborhood', 'interests']
 
 /**
  * Edición del perfil propio. Solo se manda lo que cambió (PUT /users/me admite cambios parciales).
@@ -25,65 +15,49 @@ const sameItems = (a, b) => a.length === b.length && a.every((item) => b.include
  */
 export function useProfileForm () {
   const { user, setUser } = useAuth()
-  const initial = useMemo(() => fromUser(user), [user])
-  const [values, setValues] = useState(initial)
+  const catalogs = useCatalogs()
+  const draft = useProfileDraft(user, catalogs.catalog)
   const [errors, setErrors] = useState({})
   const [formError, setFormError] = useState(null)
   const [isSaving, setIsSaving] = useState(false)
   const [savedAt, setSavedAt] = useState(null)
 
-  const changes = useMemo(() => {
-    const changed = {}
-    for (const field of TEXT_FIELDS) {
-      if (values[field].trim() !== initial[field]) changed[field] = values[field].trim()
-    }
-    if (values.birthDate !== initial.birthDate) changed.birthDate = values.birthDate
-    if (!sameItems(values.interests, initial.interests)) changed.interests = values.interests
-    return changed
-  }, [values, initial])
-
+  const changes = draft.changesFor(FIELDS)
   const isDirty = Object.keys(changes).length > 0
 
-  function setValue (field, value) {
-    setValues((current) => ({ ...current, [field]: value }))
+  function clear (field) {
     setErrors((current) => ({ ...current, [field]: undefined }))
     setSavedAt(null)
   }
 
-  function toggle (id) {
-    setValue('interests', toggleInterest(values.interests, id))
+  function setValue (field, value) {
+    draft.setField(field, value)
+    clear(field)
+    if (field === 'university') clear('career')
+    if (field === 'city') clear('neighborhood')
   }
 
-  function validate () {
-    const found = {
-      name: validateName(values.name),
-      birthDate: validateBirthDate(values.birthDate),
-      university: validateOptionalText(values.university, { max: UNIVERSITY_MAX, label: 'La universidad' }),
-      neighborhood: validateOptionalText(values.neighborhood, { max: PLACE_MAX, label: 'El barrio' }),
-      city: validateOptionalText(values.city, { max: PLACE_MAX, label: 'La localidad' })
-    }
-    // Todavía no hay forma de borrar un dato opcional ya guardado (ver docs/pendientes.md).
-    for (const field of ['university', 'neighborhood', 'city']) {
-      if (!found[field] && initial[field] !== '' && values[field].trim() === '') {
-        found[field] = 'Por ahora no se puede borrar este dato. Podés cambiarlo por otro.'
-      }
-    }
-    return Object.fromEntries(Object.entries(found).filter(([, message]) => message))
+  function toggleInterest (key) {
+    draft.toggleInterest(key)
+    clear('interests')
   }
 
   async function submit () {
     if (isSaving || !isDirty) return
-    const found = validate()
-    if (Object.keys(found).length > 0) {
-      setErrors(found)
+    const found = {
+      name: validateName(draft.values.name),
+      birthDate: validateBirthDate(draft.values.birthDate)
+    }
+    const local = Object.fromEntries(Object.entries(found).filter(([, message]) => message))
+    if (Object.keys(local).length > 0) {
+      setErrors(local)
       return
     }
 
     setIsSaving(true)
     setFormError(null)
     try {
-      const updated = await usersApi.updateMe(changes)
-      setUser(updated)
+      setUser(await usersApi.updateMe(changes))
       setSavedAt(Date.now())
     } catch (error) {
       const fields = fieldErrorsFrom(error)
@@ -95,15 +69,18 @@ export function useProfileForm () {
   }
 
   return {
-    values,
+    values: draft.values,
+    options: draft.options,
+    catalogStatus: catalogs.status,
+    retryCatalogs: catalogs.retry,
     setValue,
-    toggleInterest: toggle,
+    toggleInterest,
     errors,
     formError,
     isSaving,
     isDirty,
     justSaved: savedAt !== null && !isDirty,
-    maxLengths: { name: NAME_MAX, university: UNIVERSITY_MAX, neighborhood: PLACE_MAX, city: PLACE_MAX },
+    maxNameLength: NAME_MAX,
     submit
   }
 }

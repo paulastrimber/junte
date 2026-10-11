@@ -10,12 +10,14 @@ export const USER = Object.freeze({
   birthDate: null,
   age: null,
   university: null,
-  neighborhood: null,
+  career: null,
   city: null,
+  neighborhood: null,
   interests: [],
   reputation: 0,
   photoUrl: null,
   profileComplete: false,
+  onboardingCompleted: false,
   createdAt: '2026-10-11T15:00:00.000Z'
 })
 
@@ -23,11 +25,36 @@ export const COMPLETE_USER = Object.freeze({
   ...USER,
   birthDate: '2001-03-09',
   age: 25,
-  university: 'Universidad de Montevideo',
-  neighborhood: 'Pocitos',
-  city: 'Montevideo',
+  university: 'um',
+  career: 'ingenieria-en-informatica',
+  city: 'montevideo',
+  neighborhood: 'pocitos',
   interests: ['futbol', 'cine'],
-  profileComplete: true
+  profileComplete: true,
+  onboardingCompleted: true
+})
+
+/** Respuesta de GET /catalogs (recortada pero con la misma forma). */
+export const CATALOG = Object.freeze({
+  version: 'v1',
+  interestCategories: [
+    { key: 'deportes', name: 'Deportes', interests: [{ key: 'futbol', name: 'Fútbol' }, { key: 'padel', name: 'Pádel' }, { key: 'rugby', name: 'Rugby' }] },
+    { key: 'salidas', name: 'Salidas y gastronomía', interests: [{ key: 'cafe', name: 'Tomar un café' }, { key: 'bares', name: 'Bares y cervecerías', minAge: 18 }] },
+    { key: 'entretenimiento', name: 'Entretenimiento', interests: [{ key: 'cine', name: 'Cine' }] }
+  ],
+  universities: [
+    {
+      key: 'um',
+      name: 'Universidad de Montevideo',
+      shortName: 'UM',
+      careers: [
+        { key: 'ingenieria-en-informatica', name: 'Ingeniería en Informática', group: 'Facultad de Ingeniería' },
+        { key: 'economia', name: 'Economía', group: 'Facultad de Ciencias Empresariales y Economía' }
+      ]
+    },
+    { key: 'ort', name: 'Universidad ORT Uruguay', shortName: 'ORT', careers: [{ key: 'ingenieria-en-sistemas', name: 'Ingeniería en Sistemas', group: 'Facultad de Ingeniería' }] }
+  ],
+  cities: [{ key: 'montevideo', name: 'Montevideo', neighborhoods: [{ key: 'pocitos', name: 'Pocitos' }, { key: 'cordon', name: 'Cordón' }] }]
 })
 
 /** Servicio de sesión falso: nada toca SecureStore ni la red. `user` es la sesión que "había guardada". */

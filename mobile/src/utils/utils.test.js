@@ -1,8 +1,7 @@
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import { ageOn, formatForDisplay, parseCalendarDate, toCalendarDate, toLocalDate, today } from './dates.js'
 import { fieldErrorsFrom, messageForError } from './errorMessages.js'
-import { INTERESTS, MAX_INTERESTS, toggleInterest } from './interests.js'
-import { validateBirthDate, validateEmail, validateName, validateOptionalText, validatePassword } from './validation.js'
+import { validateBirthDate, validateEmail, validateName, validatePassword } from './validation.js'
 
 describe('dates', () => {
   it('toCalendarDate usa el día LOCAL, no el de UTC', () => {
@@ -63,11 +62,6 @@ describe('validation', () => {
     expect(validatePassword('x'.repeat(129))).toMatch(/128/)
   })
 
-  it('validateOptionalText acepta vacío y rechaza largos excesivos', () => {
-    expect(validateOptionalText('', { max: 60, label: 'El barrio' })).toBeNull()
-    expect(validateOptionalText('x'.repeat(61), { max: 60, label: 'El barrio' })).toMatch(/barrio.*60/)
-  })
-
   it('validateBirthDate: opcional, existente, no futura y entre 16 y 100 años', () => {
     expect(validateBirthDate('', now)).toBeNull()
     expect(validateBirthDate('2001-03-09', now)).toBeNull()
@@ -77,16 +71,6 @@ describe('validation', () => {
     expect(validateBirthDate('2010-10-11', now)).toBeNull()
     expect(validateBirthDate('1925-10-11', now)).toMatch(/100/)
     expect(validateBirthDate('1926-10-11', now)).toBeNull()
-  })
-})
-
-describe('interests', () => {
-  it('toggleInterest agrega, quita y respeta el máximo', () => {
-    expect(toggleInterest([], 'cine')).toEqual(['cine'])
-    expect(toggleInterest(['cine'], 'cine')).toEqual([])
-    const full = INTERESTS.slice(0, MAX_INTERESTS).map((item) => item.id)
-    expect(toggleInterest(full, INTERESTS[MAX_INTERESTS].id)).toEqual(full)
-    expect(toggleInterest(full, full[0])).toHaveLength(MAX_INTERESTS - 1)
   })
 })
 
