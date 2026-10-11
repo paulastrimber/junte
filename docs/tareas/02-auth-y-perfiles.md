@@ -39,3 +39,20 @@
 ## Pruebas obligatorias
 
 Las de "Auth y permisos" y "Validación" de [testing.md](../practicas/testing.md#qué-se-testea-sí-o-sí).
+
+## Sprint 2b · Catálogos y onboarding
+
+**Objetivo:** el perfil se completa con opciones de catálogos (universidad, carrera, ciudad, barrio, intereses por categoría) y una persona nueva entra a un onboarding de 3 pasos, todo salteable. Decisiones y alcance en [ADR-0009](../arquitectura/adr/0009-catalogos-en-la-base.md) y [pendientes](../pendientes.md#e-notas-del-sprint-2b-catálogos-y-onboarding). El CRUD de los catálogos desde `/admin` queda para S6.
+
+- [x] **S2b-BE-01 · Colecciones de catálogos** (`interestCategories`, `interests`, `universities`, `careers`, `cities`, `neighborhoods`) con validadores e índices por migración, y carga inicial automática (`seed-catalogs`, solo inserta; `npm run catalogs:sync`).
+- [x] **S2b-BE-02 · Datos iniciales**: 8 categorías y 57 intereses (con `minAge`), 7 universidades con 250 carreras de grado relevadas de los sitios oficiales, Montevideo con sus 62 barrios (INE).
+- [x] **S2b-BE-03 · `GET /catalogs`** (activos, anidados, con `version`).
+- [x] **S2b-BE-04 · Perfil con keys de catálogo**: `university`, `career`, `city`, `neighborhood` e `interests` (máx. 10) validados contra los catálogos (existencia, estado, carrera de la universidad, barrio de la ciudad, edad mínima); "Otra" = `other`; al cambiar la universidad/ciudad se quita la carrera/barrio.
+- [x] **S2b-BE-05 · Onboarding en el perfil**: `onboardingCompleted` (solo `true`) → `onboardingCompletedAt`. El registro pide solo nombre, email y contraseña.
+- [x] **S2b-BE-06 · Migración de usuarios existentes** (texto libre → keys o `other`) y seeds con las keys nuevas (más un usuario con onboarding pendiente).
+- [x] **S2b-MOB-01 · `SelectField`** (lista con buscador y "Otra"), `InterestPicker` (por categoría, con máximo y edad mínima) y `useCatalogs`.
+- [x] **S2b-MOB-02 · Onboarding de 3 pasos** (`Paso X de 3`, Atrás, Siguiente/Finalizar, Saltar este paso, Más tarde) que se muestra mientras `onboardingCompleted` sea `false`.
+- [x] **S2b-MOB-03 · Perfil con los mismos selectores** (reemplaza los campos de texto de barrio, localidad y universidad).
+- [ ] **S6 · Admin de catálogos** (listar, crear, renombrar, ordenar, activar/desactivar) con `catalogService.invalidate()`.
+
+**Estado:** back ✅ (tests, `task ci`, migración sobre la base local). App ✅ con tests y lint, **sin probar en emulador ni teléfono**.

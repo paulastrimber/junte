@@ -1,6 +1,6 @@
 # 07 · Modelo de datos (MongoDB)
 
-Ocho colecciones. Todas con `_id: ObjectId`, `createdAt` y `updatedAt` (`timestamps: true` en Mongoose). Referencias por `ObjectId`, controladas por la aplicación. Fechas como `Date`.
+Catorce colecciones: las de la app y seis catálogos. Todas con `_id: ObjectId`, `createdAt` y `updatedAt` (`timestamps: true` en Mongoose). Referencias por `ObjectId`, controladas por la aplicación. Fechas como `Date`.
 
 **Los índices y validadores se crean solo por migraciones** ([migraciones.md](../practicas/migraciones.md)); Mongoose corre con `autoIndex: false` y `autoCreate: false`.
 
@@ -14,9 +14,11 @@ Ocho colecciones. Todas con `_id: ObjectId`, `createdAt` y `updatedAt` (`timesta
 | `passwordHash` | string | Argon2id. Nunca se serializa |
 | `name` | string | 1–80 |
 | `birthDate` | Date? | Día del calendario guardado a medianoche UTC. La edad **no se guarda**: el serializer la calcula (`age`). Solo se le muestra al dueño |
-| `university` | string? | Opcional ("si corresponde": no todo usuario estudia en una universidad) |
-| `neighborhood`, `city` | string? | Barrio y localidad donde vive. Texto libre, 1–60. Datos del perfil, no ubicación en tiempo real; no se exponen a otros usuarios ni se loguean |
-| `interests` | string[] | Máx. 5, de una lista cerrada compartida (`shared/interests.js`). Se usa en Jaccard del feed |
+| `university` | string? | **Key** de `universities` o `other` ("Otra"). Opcional ("si corresponde": no todo usuario estudia) |
+| `career` | string? | **Key** de `careers` de esa universidad o `other`. Se quita sola si cambia la universidad |
+| `city`, `neighborhood` | string? | **Keys** de `cities` y `neighborhoods` (el barrio, de esa ciudad) o `other`. Datos del perfil, no ubicación en tiempo real; no se exponen a otros usuarios ni se loguean |
+| `interests` | string[] | **Keys** de `interests`, máx. 10. Se usa en Jaccard del feed |
+| `onboardingCompletedAt` | Date? | Cuándo terminó o dejó para después el onboarding. Sin valor = el onboarding sigue pendiente |
 | `role` | `'user'` \| `'admin'` | **➕ revisión.** Default `user`. Solo cambia por migración/seed o por otro admin. Ver [ADR-0004](adr/0004-rol-y-estado-de-usuario.md) |
 | `status` | `'active'` \| `'suspended'` | **➕ revisión.** El middleware JWT exige `active` (el informe pide verificar "estado del usuario" pero no definía el campo) |
 | `reputation` | number | Default 0. Solo la escribe el back |
@@ -24,6 +26,24 @@ Ocho colecciones. Todas con `_id: ObjectId`, `createdAt` y `updatedAt` (`timesta
 
 Perfil completo = `name` + `birthDate` + al menos 1 interés (regla `isProfileComplete` del servicio de usuarios).
 `refreshTokenHash` ya **no existe** en `users`: se reemplazó por la colección `sessions` ([ADR-0008](adr/0008-sesiones-multiples.md)).
+
+### Catálogos
+
+Seis colecciones de datos de referencia, **editables por el admin** (S6) y cargadas con datos iniciales por migración ([ADR-0009](adr/0009-catalogos-en-la-base.md)). Todas tienen `key` (inmutable, kebab-case), `name` (editable), `order` y `active` (se desactiva en lugar de borrar: quien ya eligió esa opción la conserva). Los usuarios guardan la `key`.
+
+| Colección | Campos propios | Datos iniciales |
+|-----------|----------------|-----------------|
+| `interestCategories` | — | 8 categorías (Deportes, Salidas y gastronomía, Música, Arte y cultura, Entretenimiento, Aire libre, Estudio y carrera, Comunidad) |
+| `interests` | `categoryKey`, `minAge?` (16–99) | 57 opciones; "Bares y cervecerías" y "Salir a bailar" con `minAge: 18` |
+| `universities` | `shortName` | UM, ORT, UCU, Udelar, UDE, UCLAEH, UTEC |
+| `careers` | `universityKey`, `group?` (facultad) | 250 carreras **de grado** de esas siete universidades, relevadas en sus sitios oficiales (UM 26, ORT 30, UCU 53, Udelar 102, UDE 21, UCLAEH 6, UTEC 12) |
+| `cities` | `department` | Montevideo |
+| `neighborhoods` | `cityKey`, `ineCode?` | Los 62 barrios de Montevideo (áreas del INE) |
+
+- **"Otra"** no es una fila: es la key reservada `other`, válida en `university`, `career`, `city` y `neighborhood`. Sin texto libre.
+- Los datos iniciales viven en `back-service/catalogs/` (fuentes y criterios en los comentarios de cada archivo). `syncCatalogs` **solo inserta** lo que falta: nunca pisa lo que el admin editó. Lo corre la migración `seed-catalogs` (así queda cargado en todo entorno, producción incluida) y `npm run catalogs:sync` (`task db:catalogs:sync`) para sumar entradas nuevas a una base existente.
+- Criterio de las carreras: solo grado. Quedan afuera tecnicaturas, tecnólogos, ciclos iniciales, cursos, diplomas, posgrados y carreras de menos de 3 años.
+- El back lee los catálogos completos (unas 400 filas) y los cachea 60 s por instancia.
 
 ### `sessions`
 
@@ -100,6 +120,10 @@ Un **único registro por par** plan–usuario; una baja lo pasa a `cancelled` y 
 | `sessions` | `{ sid: 1 }` único | Una sesión por `sid` (lo usa la rotación del refresh) |
 | `sessions` | `{ userId: 1 }` | Contar, listar y cerrar las sesiones de un usuario |
 | `sessions` | `{ expiresAt: 1 }` TTL (`expireAfterSeconds: 0`) | MongoDB borra las sesiones vencidas |
+| `interestCategories`, `universities`, `cities` | `{ key: 1 }` único | Una fila por key |
+| `interests` | `{ key: 1 }` único; `{ categoryKey: 1, order: 1 }` | Una fila por key; listar por categoría |
+| `careers` | `{ universityKey: 1, key: 1 }` único | La key es única dentro de cada universidad |
+| `neighborhoods` | `{ cityKey: 1, key: 1 }` único | La key es única dentro de cada ciudad |
 
 Los índices que no figuran en el informe (`creatorId`, `userId+status`, `deviceTokens.userId`, los de `sessions`) se agregan porque las consultas de esas pantallas los necesitan; cualquier índice nuevo entra por migración con su justificación.
 
@@ -141,4 +165,4 @@ Quién y cuándo dispara cada transición está en [pendientes](../pendientes.md
 
 ## Validadores `$jsonSchema` (defensa en profundidad)
 
-Además de Zod y Mongoose, las migraciones agregan validadores en MongoDB para los invariantes críticos (`capacity ≥ 1`, `participantCount ≥ 0`, enums de `status` y `role`, `users.birthDate` de tipo fecha, `neighborhood`/`city` de 1 a 60 caracteres, `interests` con máximo 5, campos obligatorios de `sessions`) con `validationLevel: 'moderate'`. Así ni un script manual puede dejar datos inválidos.
+Además de Zod y Mongoose, las migraciones agregan validadores en MongoDB para los invariantes críticos (`capacity ≥ 1`, `participantCount ≥ 0`, enums de `status` y `role`, `users.birthDate` de tipo fecha, `university`/`career`/`city`/`neighborhood`/`interests` con forma de key, `interests` con máximo 10, campos obligatorios de `sessions` y de cada catálogo, `minAge` entero de 16 a 99) con `validationLevel: 'moderate'`. Así ni un script manual puede dejar datos inválidos.

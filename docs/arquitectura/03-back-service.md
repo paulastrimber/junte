@@ -30,6 +30,7 @@ back-service/
     modules/
       auth/                # register, login, refresh, logout, sesiones (colección sessions), tokens
       users/               # perfil, foto, isProfileComplete
+      catalogs/            # intereses, universidades, carreras, ciudades, barrios (GET /catalogs + reglas de validación)
       plans/               # CRUD de planes, QR, cierre
       participations/      # join / leave (transacción de cupo)
       checkins/            # check-in + reputación
@@ -44,6 +45,7 @@ back-service/
     adapters/              # db (Mongo + withTransaction), redis, storage (s3 + memoria), passwordHasher (Argon2id), fcm, secrets, clock, logger
     shared/                # AppError + catálogo de errores, paginación por cursor, utils puros (interests: lista cerrada, age: fechas de calendario y edad, uploads, validation: Zod en español, router: enrutado estricto)
   migrations/              # migrate-mongo (ver practicas/migraciones.md)
+  catalogs/                # datos iniciales de los catálogos + syncCatalogs (solo inserta); los carga una migración
   seeds/                   # datos de desarrollo, nunca en producción
   tests/
     integration/           # repos + Mongo en memoria (replica set)

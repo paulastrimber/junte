@@ -65,6 +65,10 @@ Estos casos salen del informe (7.5) y de las reglas de negocio. Cada uno tiene s
 - [ ] Todo error tiene `{ code, message, requestId }` y nunca stack ni detalles internos.
 - [ ] Paginación: `limit` > 100 → 400; último page con `nextCursor: null`; sin duplicados ni saltos entre páginas.
 
+**Catálogos y perfil**
+- [x] Universidad, carrera, ciudad, barrio e intereses inexistentes, desactivados, de otra universidad/ciudad o con edad mínima → 400 con `details` por campo. *(src/modules/catalogs/catalog.rules.test.js, tests/contract/users.test.js)*
+- [x] Los datos iniciales de los catálogos son consistentes (keys válidas y únicas, carreras de universidades que existen, sin tecnicaturas) y `syncCatalogs` solo inserta. *(tests/integration/catalogs.test.js)*
+
 ## Convenciones
 
 - **Ubicación:** unitarios junto al archivo (`plan.service.test.js`); integración y contrato en `back-service/tests/`.

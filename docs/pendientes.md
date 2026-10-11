@@ -23,7 +23,7 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 
 ### Intereses del plan
 **Problema:** el feed usa Jaccard entre intereses del usuario y del plan, pero `plans` no tiene `interests`.
-**Propuesta:** agregar `interests: string[]` (máx. 5, de una lista cerrada compartida con el registro) a `plans` y a `POST /plans`.
+**Propuesta:** agregar `interests: string[]` (keys del catálogo `interests`, el mismo que usa el perfil; [ADR-0009](arquitectura/adr/0009-catalogos-en-la-base.md)) a `plans` y a `POST /plans`.
 **Bloquea:** S3 (feed).
 
 ### Compatibilidad horaria
@@ -180,7 +180,7 @@ Lo que apareció al implementar el sprint 1 y queda para revisar con el equipo.
 Lo que apareció al implementar auth y perfiles (S2) y queda para revisar con el equipo. Las decisiones ya tomadas ([sesiones múltiples](#sesiones-múltiples), [fecha de nacimiento](#fecha-de-nacimiento-y-ubicación-del-perfil), [perfil completo](#perfil-completo)) se implementaron tal cual; abajo, lo que **no** estaba definido y se resolvió con la opción más chica. Cada punto se puede cambiar sin tocar el resto.
 
 ### Lista de intereses
-La lista cerrada vive en `back-service/src/shared/interests.js` con los valores de los seeds (`futbol`, `running`, `estudio`, `musica`, `cine`, `juegos-de-mesa`) y máximo 5 por usuario. **Falta cerrarla con el equipo.** La app la duplica en `mobile/src/utils/interests.js` (con etiquetas en español); propuesta: un `GET /interests` para que la app no la duplique, o mantener ambas listas y un test que las compare. Cambiar la lista cambia el contrato de la API.
+✅ **Resuelto en S2b:** los intereses ya no son una lista fija del código. Son el catálogo `interests` (8 categorías, 57 opciones) que edita el admin en S6 ([ADR-0009](arquitectura/adr/0009-catalogos-en-la-base.md)). La lista inicial es una propuesta del equipo de desarrollo: **falta revisarla con el equipo** (qué categorías y opciones, orden, y qué opciones llevan edad mínima).
 
 ### Visibilidad del perfil público
 Solo existe una vista mínima para otros usuarios (`serializePublic`: `id`, `name`, `photoUrl`). Qué más se muestra del creador o de los inscriptos (edad, barrio, universidad, reputación) se decide en S3–S4. `birthDate`, `age`, `neighborhood` y `city` quedan solo para el dueño hasta entonces.
@@ -190,9 +190,9 @@ Solo existe una vista mínima para otros usuarios (`serializePublic`: `id`, `nam
 - **`login` devuelve también `user`** (además de los tokens, que era lo documentado) y los perfiles incluyen `profileComplete` (derivado). Cambios compatibles.
 - **"Sesión más antigua" = por `createdAt`.** Al abrir la sexta sesión se revoca la creada primero, aunque se use todos los días. Alternativa: la menos usada (`lastUsedAt`), que no expulsa al teléfono principal.
 - **Zona horaria de "hoy": `America/Montevideo`** para validar `birthDate` (no futura, 16–100 años) y calcular `age`. En UTC la edad subiría 3 horas antes del cumpleaños. Si la app sale de Uruguay, hay que parametrizarla. Quien nació un 29 de febrero cumple el 1 de marzo en los años no bisiestos.
-- **`PUT /users/me` es parcial** y exige al menos un campo. Largos máximos (no estaban definidos): `name` 80, `university` 120; barrio y localidad 60 como se decidió.
-- **No se puede borrar** `university`, `neighborhood` ni `city` una vez guardados (no se aceptan `null` ni vacío). La app muestra "por ahora no se puede borrar". Propuesta: aceptar `null` para quitarlos.
-- **El registro no pide** `birthDate`, barrio ni localidad: se completan en Perfil (y `POST /plans` exige perfil completo). Alternativa: pedirlos en el registro.
+- **`PUT /users/me` es parcial** y exige al menos un campo. Largo máximo de `name`: 80 (no estaba definido).
+- **No se puede dejar vacío** un campo de universidad, carrera, ciudad o barrio ya elegido (solo cambiarlo por otro, incluida "Otra"); la carrera y el barrio sí se quitan solos cuando cambia la universidad o la ciudad. Propuesta: aceptar `null` para quitarlos.
+- ✅ **Resuelto en S2b:** el registro pide solo nombre, email y contraseña; el resto se completa en el onboarding o en el Perfil.
 - **`planId` en `POST /uploads/presign`** se rechaza (400) hasta que exista el módulo de planes (S3); ahí se agrega la comprobación de creador.
 - **Enrutado estricto** en toda la API (`case sensitive routing` + `strict routing`): `/internal/health/` y `/auth/LOGIN` dan 404. Es defensa en profundidad del límite de Nginx. **El equipo de AWS debe confirmar que el health check del ALB usa `/internal/health` sin barra final y con esa capitalización.**
 - **Zod con mensajes en español** (`z.config(z.locales.es())` en `shared/validation.js`) y los campos desconocidos se informan en `details` con el nombre del campo.
@@ -216,3 +216,35 @@ Solo existe una vista mínima para otros usuarios (`serializePublic`: `id`, `nam
 ### Sin probar
 - **La app no se probó en emulador ni en teléfono.** Verificado: tests (jest-expo), lint, `expo-doctor` y `expo export --platform android`. Sin probar: `expo-secure-store`, `expo-image-picker` y `@react-native-community/datetimepicker` nativos, los permisos que agregan sus plugins al manifiesto (`cameraPermission: false` en el plugin de imágenes), teclado y layout reales, y el flujo completo contra un bucket de S3 real.
 - La app contra el back real tampoco se probó de punta a punta; sí el back por HTTP (Supertest y `curl` a través de Nginx local) y el smoke test de Nginx.
+
+## E. Notas del sprint 2b: catálogos y onboarding
+
+Decididos con Phillip el 2026-10-11 (ver [ADR-0009](arquitectura/adr/0009-catalogos-en-la-base.md)): todo en la base, carreras ligadas a la universidad, "Otra" sin texto libre, solo Montevideo, edad mínima en algunas opciones, todo salteable en el onboarding, registro sin fecha de nacimiento, y el CRUD del admin en S6. Lo que quedó abierto o se resolvió con la opción más chica:
+
+### Datos de los catálogos
+- **Solo Montevideo.** Se interpretó "solo Montevideo" como una única ciudad en el catálogo (con sus 62 barrios) más "Otra". Agregar Canelones, Maldonado u otra ciudad es solo datos (`catalogs/geography.js` + `npm run catalogs:sync`, o el admin), sin cambios de código. Los barrios son las **62 áreas del INE** ([codificador](https://www5.ine.gub.uy/documents/Codificadores/Barrios%20Montevideo/Codificador%20de%20barrios%20Montevideo.pdf)): algunos nombres agrupan barrios vecinos ("Capurro, Bella Vista", "Castro, P. Castellanos"). Si se prefiere la lista de la Intendencia, hay que reemplazarla.
+- **Carreras relevadas el 2026-10-11 de los sitios oficiales**, solo de **grado** (sin tecnicaturas, tecnólogos, ciclos iniciales, cursos, diplomas, posgrados ni carreras de menos de 3 años): UM 26, ORT 30, UCU 53, Udelar 102, UDE 21, UCLAEH 6, UTEC 12 (250 en total). Fuentes en `back-service/catalogs/careers.js`. Para revisar con el equipo:
+  - ORT sale de la API pública de su propio sitio (nivel "Carrera universitaria"); Udelar, de su buscador de carreras (se descartaron las de menos de 36 meses y las tecnicaturas/tecnólogos); UCU, de `carreras.ucu.edu.uy` (se quitaron 6: 2 años o menos, tecnicaturas y la profesionalización de Enfermería).
+  - Las páginas de UDE y UCLAEH se leyeron con un navegador común; UDE puede tener carreras que solo figuran en su campus virtual.
+  - **Sedes:** UCU y Udelar dictan algunas carreras solo en el interior o en Punta del Este; el catálogo no distingue sede.
+  - **Agrupación:** en UM, ORT, UDE, UCLAEH y Udelar el `group` es la facultad del sitio; en UCU es un área propia (su sitio no agrupa).
+  - UM: se omitió "Negocios Digitales (Online)" (misma carrera, otra modalidad). UCLAEH: el sitio escribe "Fonaudiología"; se corrigió a "Fonoaudiología".
+  - Los institutos universitarios (IUACJ, Crandon, Francisco de Asís, Mariano Soler, BIOS…), el IPA, los CERP y UTU no están: los suma el admin o se piden.
+- **Intereses:** 8 categorías y 57 opciones propuestas por desarrollo ([lista en el ADR](arquitectura/adr/0009-catalogos-en-la-base.md)); incluyen opciones típicas de Uruguay (pádel, mate en la rambla, candombe). "Bares y cervecerías" y "Salir a bailar" tienen `minAge: 18`; si no se quiere esa distinción, se quita el `minAge` desde el admin.
+- **Máximo de intereses: 10** (antes 5), con 3 recomendados en la app. No es obligatorio llegar a 3.
+
+### Reglas que se resolvieron con la opción más chica
+- **Un menor o quien no cargó la fecha de nacimiento no ve las opciones con edad mínima.** Si más tarde cambia su fecha a una que lo deja por debajo de la edad mínima de una opción que ya eligió, el back lo rechaza (tiene que sacar esa opción primero).
+- **Desactivar una opción** (admin) la oculta para elecciones nuevas pero no se la quita a quien ya la tenía.
+- **Caché de 60 s por instancia** de los catálogos en el back: un cambio del admin tarda hasta un minuto en verse. Alternativa: invalidar por Redis.
+- **Los datos iniciales viven en `back-service/catalogs/`**, no dentro de la migración. La migración `seed-catalogs` toma los datos vigentes al correr; una base ya migrada recibe lo nuevo con `npm run catalogs:sync` (solo inserta, nunca pisa lo que el admin editó). Una corrección de un nombre ya cargado hay que hacerla desde el admin: `catalogs:sync` no la aplica.
+- **La migración de usuarios existentes** convierte el texto libre a keys si coincide con un nombre o sigla (sin tildes ni mayúsculas) y si no pasa a `other` (sin conservar el texto). `down` no revierte los datos.
+- **`GET /catalogs` pide sesión.** Está pensado para el onboarding (ya logueado); no hace falta en el registro.
+- **Los catálogos solo se piden una vez por sesión de la app** (caché en memoria). Si el admin cambia algo, la app lo ve al reabrirse. El caché offline entra en S6.
+
+### Onboarding
+- **Todo opcional**, con "Saltar este paso" en cada paso y "Más tarde" para salir en cualquier momento. Terminar, saltar el último paso o "Más tarde" marcan `onboardingCompleted` y **no vuelve a aparecer**; lo que falte se completa desde el Perfil (que avisa que el perfil está incompleto). Alternativa: mostrar un recordatorio cada tanto.
+- **Cada "Siguiente" guarda ese paso**, así que cerrar la app a mitad no pierde lo cargado; al reabrir empieza de nuevo en el paso 1 con lo ya guardado.
+- **"Saltar" no guarda lo elegido en ese paso** (se descarta).
+- Pasos: 1 (fecha de nacimiento y foto), 2 (universidad, carrera, ciudad y barrio), 3 (intereses por categoría).
+- **Sin probar en emulador ni teléfono**, igual que el resto de la app: el selector con buscador (`Modal` + `FlatList`) y el selector de fecha nativo.

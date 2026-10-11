@@ -90,21 +90,24 @@ Flujo: `ruta → middlewares → controlador → servicio → repositorio/modelo
 - Paginación: `limit` (20, máx 100) + `cursor` opaco → `{ items, nextCursor }` (`null` al final).
 - Todas las rutas de negocio requieren `Authorization: Bearer <access_token>`. Públicas: `/auth/register`, `/auth/login`, `/auth/refresh` y `GET /health` (sin prefijo, 200/503).
 - Códigos: 400 validación, 401 token ausente/inválido/vencido, 403 sin permiso, 404 inexistente, 409 conflicto (cupo, duplicado, estado), 429 rate limit, 500 sin detalles sensibles.
-- Endpoints: `auth/*` (`register`, `login`, `refresh`, `logout`, `logout-all`), `users/me` (+ `/photo`), `plans` (GET/POST), `plans/:id` (GET/PATCH), `plans/:id/join` (POST/DELETE), `plans/:id/qr`, `plans/:id/check-in`, `plans/:id/messages` (GET/POST), `plans/:id/photo`, `reports`, `uploads/presign`. Parámetros y permisos en [06-api.md](docs/arquitectura/06-api.md).
+- Endpoints: `auth/*` (`register`, `login`, `refresh`, `logout`, `logout-all`), `users/me` (+ `/photo`), `catalogs`, `plans` (GET/POST), `plans/:id` (GET/PATCH), `plans/:id/join` (POST/DELETE), `plans/:id/qr`, `plans/:id/check-in`, `plans/:id/messages` (GET/POST), `plans/:id/photo`, `reports`, `uploads/presign`. Parámetros y permisos en [06-api.md](docs/arquitectura/06-api.md).
 
 ## Modelo de datos
 
-Colecciones: `users`, `sessions`, `plans`, `planParticipants`, `checkIns`, `messages`, `reports`, `deviceTokens`. Todas con `createdAt`/`updatedAt`, referencias por `ObjectId`. Detalle en [07-modelo-de-datos.md](docs/arquitectura/07-modelo-de-datos.md).
+Colecciones: `users`, `sessions`, `plans`, `planParticipants`, `checkIns`, `messages`, `reports`, `deviceTokens` y los catálogos editables por el admin (`interestCategories`, `interests`, `universities`, `careers`, `cities`, `neighborhoods`; ADR-0009). Todas con `createdAt`/`updatedAt`, referencias por `ObjectId`. Detalle en [07-modelo-de-datos.md](docs/arquitectura/07-modelo-de-datos.md).
 
 Índices obligatorios:
 - `users.email` único
 - `sessions`: `{ sid }` único, `{ userId }` y TTL sobre `expiresAt` (una sesión por dispositivo; máx. 5 activas por usuario)
+- catálogos: `key` único (`careers`: `{ universityKey, key }`; `neighborhoods`: `{ cityKey, key }`)
 - `plans`: `{ status, startsAt }` y `2dsphere` en `location`
 - `planParticipants` único en `{ planId, userId }` (un registro por par, reactivable)
 - `checkIns` único en `{ planId, userId }`
 - `messages`: `{ planId, createdAt, _id }`
 - `reports`: `{ status, createdAt }`
 - `deviceTokens.token` único
+
+**Perfil y catálogos:** universidad, carrera, ciudad, barrio e intereses son **keys** de los catálogos (`um`, `padel`…), nunca texto libre; "Otra" es la key reservada `other`, sin texto. La carrera cuelga de la universidad y el barrio de la ciudad; los intereses pueden llevar `minAge`. Se validan en el servicio contra la base (reglas en `catalogs/catalog.rules.js`) y los datos iniciales se cargan con `back-service/catalogs/` (ver ADR-0009). El registro pide solo nombre, email y contraseña; el resto se completa en el onboarding (todo salteable).
 
 ## Feed de recomendación
 
@@ -138,6 +141,7 @@ Los pesos deben ser configurables sin cambiar el contrato de la API.
 task setup        # dependencias + .env
 task up           # entorno local (Nginx, back, Mongo RS, Redis)
 task db:migrate   # migraciones
+task db:catalogs:sync # suma a la base entradas nuevas de back-service/catalogs/ (solo inserta)
 task db:seed      # datos de desarrollo (usa SEED_PASSWORD de back-service/.env; `task setup` la genera)
 task ci           # lint + tests + migraciones + nginx -t (antes de cada PR)
 task front:smoke  # smoke test de Nginx contra el entorno local

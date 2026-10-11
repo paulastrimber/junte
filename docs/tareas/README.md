@@ -15,7 +15,7 @@ Siete sprints de una semana, tal como el informe (sección 8). Cada sprint tiene
 | Sprint | Archivo | Entregable | Estado |
 |--------|---------|-----------|--------|
 | 1 | [01-base-tecnica.md](01-base-tecnica.md) | Estructura, entorno local, modelos + migraciones, topología AWS, `/health` por HTTPS | 🔄 (local ✅, AWS ⬜ a cargo del equipo de AWS) |
-| 2 | [02-auth-y-perfiles.md](02-auth-y-perfiles.md) | Registro, login, refresh, perfil y foto desde el teléfono | ✅ (app sin probar en emulador/teléfono; el bucket S3 lo crea el equipo de AWS) |
+| 2 | [02-auth-y-perfiles.md](02-auth-y-perfiles.md) | Registro, login, refresh, perfil y foto desde el teléfono | ✅ + 2b catálogos y onboarding (app sin probar en emulador/teléfono; el bucket S3 lo crea el equipo de AWS) |
 | 3 | [03-planes-y-feed.md](03-planes-y-feed.md) | CRUD de planes y feed geográfico recomendado | ⬜ |
 | 4 | [04-inscripciones-asistencia.md](04-inscripciones-asistencia.md) | Inscripción transaccional, QR, check-in, reputación, `noShow` | ⬜ |
 | 5 | [05-chat-y-notificaciones.md](05-chat-y-notificaciones.md) | Chat por plan con Socket.io + fallback, push FCM | ⬜ |
