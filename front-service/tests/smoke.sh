@@ -5,7 +5,9 @@
 #
 # Verifica: /health, X-Request-Id (siempre generado por Nginx; el del cliente no llega al back), proxy /api/v1/* → /internal/*,
 # /internal no publicado, límite de body, 429 JSON tras una ráfaga en /api/v1/auth/login,
-# que un X-Forwarded-For de un cliente externo no evade el límite y que el límite es por IP real.
+# que las variantes de esa URL y /auth/register comparten el límite estricto, que /auth/refresh NO lo
+# comparte (usa la zona general), que un X-Forwarded-For de un cliente externo no evade el límite y que
+# el límite es por IP real.
 #
 # Las verificaciones marcadas [local] necesitan el entorno de docker compose levantado:
 #   - leen el access log de Nginx (para ver el path reescrito y la IP real), y
@@ -191,6 +193,32 @@ if [ -n "$limited" ]; then
   login spoof -H "X-Forwarded-For: 198.51.100.$((RANDOM % 250 + 1))"
   [ "$(status spoof)" = 429 ] && ok "X-Forwarded-For de un cliente externo se ignora (sigue en 429)" \
     || fail "con un X-Forwarded-For inventado el cliente externo evadió el límite ($(status spoof))"
+
+  # Login y registro comparten la zona estricta; las variantes de la URL de login también.
+  # (La IP ya agotó la zona con la ráfaga: cualquier request de esa zona da 429.)
+  for variant in auth/register auth/Login auth/LOGIN auth/login/ auth/Register/; do
+    request variant -X POST -H 'Content-Type: application/json' --data '{}' "$BASE_URL/api/v1/$variant"
+    [ "$(status variant)" = 429 ] && ok "/api/v1/$variant comparte el límite estricto (429)" \
+      || fail "/api/v1/$variant → $(status variant), se esperaba 429 (zona estricta)"
+  done
+
+  # Refresh, logout y logout-all usan la zona general: siguen respondiendo (el back, no Nginx)
+  # aunque login y registro de esta IP estén bloqueados.
+  refresh_codes=()
+  for i in $(seq 1 12); do
+    request "refresh$i" -X POST -H 'Content-Type: application/json' --data '{}' "$BASE_URL/api/v1/auth/refresh"
+    refresh_codes+=("$(status "refresh$i")")
+  done
+  if grep -qw 429 <<<"${refresh_codes[*]}"; then
+    fail "/api/v1/auth/refresh quedó limitado por la zona estricta de login" "${refresh_codes[*]}"
+  else
+    ok "/api/v1/auth/refresh no está en la zona estricta: 12 requests seguidos sin 429 (${refresh_codes[0]})"
+  fi
+  for path in auth/logout auth/logout-all; do
+    request out -X POST -H 'Content-Type: application/json' --data '{}' "$BASE_URL/api/v1/$path"
+    [ "$(status out)" != 429 ] && ok "/api/v1/$path no está en la zona estricta ($(status out))" \
+      || fail "/api/v1/$path → 429: no debería usar la zona estricta de login"
+  done
 else
   fail "15 requests seguidos no dieron 429" "${codes[*]}"
 fi
