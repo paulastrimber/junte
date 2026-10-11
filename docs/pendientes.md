@@ -53,15 +53,24 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 **Bloquea:** S4.
 
 ### Sesiones múltiples
-**Problema:** con un único `refreshTokenHash` por usuario, iniciar sesión en otro dispositivo cierra la sesión del primero.
-**Opciones:** aceptarlo (alcance académico) o una colección `sessions` (un hash por dispositivo).
-**Propuesta:** aceptarlo y documentarlo; `POST /auth/logout` para revocar explícitamente.
-**Bloquea:** S2.
+✅ **Decidido (2026-10-11, Phillip):** un usuario puede tener sesión abierta en varios dispositivos a la vez. Se descarta el único `users.refreshTokenHash`.
+**Diseño:** colección `sessions` (una por dispositivo/login): `userId`, `sid`, `refreshTokenHash` (hash del refresh vigente de esa sesión), `deviceLabel?`, `lastUsedAt`, `expiresAt`, `revokedAt?`. Índices por migración: `{ sid: 1 }` único, `{ userId: 1 }` y TTL sobre `expiresAt`. Máximo 5 sesiones activas por usuario (al exceder, se revoca la más antigua).
+**Reglas:** el refresh token lleva `sid` y `jti`; la rotación es por sesión y con actualización condicional sobre el hash vigente. Reuso de un refresh viejo → se revoca **solo esa sesión** (401). `POST /auth/logout` cierra la sesión actual; `POST /auth/logout-all` cierra todas. Un usuario `suspended` pierde todas sus sesiones.
+**Impacto en docs:** 07 (colección nueva y `users` sin `refreshTokenHash`), 09 (tabla de autenticación), 06 (`logout`/`logout-all`), CLAUDE.md (lista de colecciones). Lo actualiza la implementación de S2.
+
+### Fecha de nacimiento y ubicación del perfil (nuevo)
+✅ **Decidido (2026-10-11, Phillip):** el perfil guarda `birthDate` (no `age`) y la zona donde vive el usuario.
+- **`birthDate`:** fecha sin hora (`YYYY-MM-DD`; en Mongo, `Date` a medianoche UTC). Zod: fecha válida, no futura, y edad calculada entre 16 y 100. La edad se **deriva** en el serializer (`age`, solo lectura); `age` en el body se rechaza (`.strict()`).
+- **`neighborhood`** (barrio) y **`city`** (localidad): strings opcionales, `trim`, 1–60 caracteres. Texto libre por ahora; una lista cerrada (barrios de Montevideo y localidades) queda para más adelante.
+- **Privacidad:** son datos del perfil, no ubicación en tiempo real. No se usan para el feed (el feed usa las coordenadas del plan y la posición que manda la app) y **no se exponen a otros usuarios** hasta definir su visibilidad. No se loguean. `GET /users/me` devuelve `birthDate`, `age`, `neighborhood` y `city` solo al dueño.
+- **Abierto:** si se muestran la edad, el barrio o la localidad en el perfil público de un creador o inscripto (S3–S4), y si `neighborhood`/`city` deberían ser obligatorios. Por ahora son opcionales: no cambian la definición de "perfil completo".
+**Bloquea:** nada. S2 lo implementa con estos valores.
 
 ### Perfil completo
-**Problema:** `POST /plans` devuelve 409 si "falta completar el perfil", sin definir "completo". Y `GET /users/me` responde 404 "si aún no existe", pero el registro ya crea el usuario.
-**Propuesta:** completo = `name`, `university` y ≥ 1 interés. Quitar el 404 de `GET /users/me` (o reservarlo para un usuario borrado).
-**Bloquea:** S2–S3.
+✅ **Decidido (2026-10-11, Phillip):** perfil completo = `name` + `birthDate` + al menos 1 interés. `university`, `neighborhood` y `city` son **opcionales** ("si corresponde": no todo usuario estudia en una universidad).
+- `POST /plans` sin perfil completo → 409 `PROFILE_INCOMPLETE`.
+- `GET /users/me` ya no documenta 404: el registro crea el usuario y `authenticate` responde 401 si el usuario no existe, así que ese 404 no se puede alcanzar.
+- Consecuencia: `plans.university` es "derivada del perfil del creador" y puede ser `null`. Revisar si el feed o el panel admin lo asumen siempre presente.
 
 ### Visibilidad de planes
 **Problema:** `GET /plans/:id` devuelve 404 "si no es visible", sin regla.

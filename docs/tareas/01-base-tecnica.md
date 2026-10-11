@@ -49,7 +49,17 @@
 
 ## Infraestructura AWS
 
-⛔ Fuera del alcance de la primera tanda del sprint (se hace en un prompt aparte).
+⛔ **Traspaso al equipo de AWS.** Fuera del alcance del equipo de la app: lo implementan y cierran las personas que se encargan de AWS (decidido 2026-10-11). Las tareas siguen abiertas en este tablero hasta que ellas las marquen.
+
+**Qué necesitan saber del lado de la app y el back:**
+
+- **Decisiones que les tocan** (propuestas en [pendientes](../pendientes.md)): [Redis](../pendientes.md#redis) (ElastiCache con réplica en la otra AZ), cómo corre el back en EC2 (contenedor con el target `prod` del `Dockerfile` o proceso con systemd) y [TLS interno](../pendientes.md#tls-interno).
+- **Secretos:** `src/config/index.js` deja `resolveSecrets(env)` como punto de extensión. Falta elegir entre SDK al arrancar (`@aws-sdk/client-secrets-manager`) o variables inyectadas por user-data/systemd. Hasta entonces `NODE_ENV=production` rechaza `JWT_SECRET` con valores del repo.
+- **Variables que el back exige:** `MONGO_URI`, `MONGO_DB_NAME`, `REDIS_URL`, `JWT_SECRET` (ver `back-service/.env.example`). Del Sprint 2 en adelante se suman las de S3 (nombres propuestos: `S3_BUCKET`, `AWS_REGION`; confirmar con `.env.example` cuando se implemente). No hay credenciales en el código: usa el rol IAM de la instancia.
+- **S3 (lo necesita el Sprint 2 para fotos):** bucket privado con Block Public Access. El rol del back necesita `s3:PutObject` y `s3:GetObject` sobre el bucket (`HeadObject` se autoriza con `GetObject`); las claves llevan prefijo del dueño (`users/<userId>/…`, `plans/<planId>/…`). Sin CORS: la app móvil no es un navegador.
+- **Dominios y DNS (S1-INF-10):** cuando existan, reemplazar los `*.invalid` de `mobile/eas.json`. Hasta entonces `app.config.js` aborta los builds de `preview` y `production`.
+- **Health checks de los ALB:** público → Nginx `/health`; interno → `/internal/health` en `:3000`. Ambos con idle timeout de 300 s.
+- **Verificación pendiente de punta a punta:** el proxy WebSocket de Nginx (upgrade, 300 s) solo se probará con Socket.io en el Sprint 5.
 
 - [ ] ⛔ **S1-INF-05 · VPC:** subredes públicas (2 AZ), privadas de borde y aplicación (2 AZ), de datos (3 AZ); IGW; **NAT por AZ**; tablas de rutas; VPC endpoints (S3, Secrets Manager, Logs, SSM).
 - [ ] ⛔ **S1-INF-06 · Security Groups** con la cadena de [02](../arquitectura/02-comunicacion-y-red.md#matriz-de-security-groups).

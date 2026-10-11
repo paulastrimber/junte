@@ -2,7 +2,7 @@
 
 Guía para trabajar en **junte**: app móvil de planes universitarios (crear planes, feed cercano recomendado, inscripción, asistencia por QR + ubicación, chat por plan, push, reportes, panel `/admin`).
 
-La fuente de verdad del diseño es el *Informe de arquitectura técnico* (entrega prevista: 23/09/2026); el detalle vive en [`docs/`](docs/README.md). Este archivo resume **lo que no se puede romper** y dónde buscar lo demás. Los contratos y reglas son una propuesta preliminar: si algo no está definido acá, en `docs/` o en el informe, **preguntar antes de inventarlo** y anotarlo en [`docs/pendientes.md`](docs/pendientes.md).
+La fuente de verdad del diseño es el *Informe de arquitectura técnico* (ya entregado; la etapa actual es construir la app); el detalle vive en [`docs/`](docs/README.md). Este archivo resume **lo que no se puede romper** y dónde buscar lo demás. Los contratos y reglas son una propuesta preliminar: si algo no está definido acá, en `docs/` o en el informe, **preguntar antes de inventarlo** y anotarlo en [`docs/pendientes.md`](docs/pendientes.md).
 
 ## Stack
 
