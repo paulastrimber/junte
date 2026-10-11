@@ -12,22 +12,23 @@ const messages = (result) => result.error.issues.map((issue) => issue.message).j
 describe('PUT /users/me', () => {
   it('acepta los campos editables', () => {
     const result = parse({
-      name: '  Ana  ', birthDate: '2001-03-09', university: 'UM', neighborhood: ' Pocitos ', city: 'Montevideo', interests: ['futbol', 'cine']
+      name: '  Ana  ', birthDate: '2001-03-09', university: 'um', career: 'ingenieria-en-informatica', city: 'montevideo', neighborhood: 'pocitos', interests: ['futbol', 'cine']
     })
 
     expect(result.success).toBe(true)
     expect(result.data).toEqual({
       name: 'Ana',
       birthDate: new Date('2001-03-09T00:00:00.000Z'),
-      university: 'UM',
-      neighborhood: 'Pocitos',
-      city: 'Montevideo',
+      university: 'um',
+      career: 'ingenieria-en-informatica',
+      city: 'montevideo',
+      neighborhood: 'pocitos',
       interests: ['futbol', 'cine']
     })
   })
 
   it('acepta una actualización parcial', () => {
-    expect(parse({ city: 'Canelones' }).success).toBe(true)
+    expect(parse({ city: 'montevideo' }).success).toBe(true)
   })
 
   it('rechaza un body vacío', () => {
@@ -95,12 +96,19 @@ describe('PUT /users/me', () => {
     })
   })
 
-  describe('texto libre', () => {
-    it.each(['neighborhood', 'city'])('%s: 1 a 60 caracteres después del trim', (field) => {
-      expect(parse({ [field]: 'x'.repeat(60) }).success).toBe(true)
-      expect(parse({ [field]: 'x'.repeat(61) }).success).toBe(false)
+  describe('referencias a catálogos (universidad, carrera, ciudad, barrio)', () => {
+    it.each(['university', 'career', 'city', 'neighborhood'])('%s: acepta una key, incluida la opción "Otra" (other)', (field) => {
+      expect(parse({ [field]: 'otra-opcion-valida' }).success).toBe(true)
+      expect(parse({ [field]: 'other' }).success).toBe(true)
+    })
+
+    it.each(['university', 'career', 'city', 'neighborhood'])('%s: rechaza texto libre, mayúsculas, vacío y keys enormes', (field) => {
+      expect(parse({ [field]: 'Universidad de Montevideo' }).success).toBe(false)
+      expect(parse({ [field]: 'UM' }).success).toBe(false)
+      expect(parse({ [field]: 'Pocitos' }).success).toBe(false)
       expect(parse({ [field]: '' }).success).toBe(false)
-      expect(parse({ [field]: '   ' }).success).toBe(false)
+      expect(parse({ [field]: 'a'.repeat(81) }).success).toBe(false)
+      expect(parse({ [field]: '../etc' }).success).toBe(false)
     })
 
     it('name no puede ser vacío ni larguísimo', () => {
@@ -110,18 +118,33 @@ describe('PUT /users/me', () => {
   })
 
   describe('interests', () => {
-    it('acepta hasta 5 de la lista cerrada y el arreglo vacío', () => {
-      expect(parse({ interests: ['futbol', 'running', 'estudio', 'musica', 'cine'] }).success).toBe(true)
+    it('acepta hasta 10 keys y el arreglo vacío', () => {
+      expect(parse({ interests: ['futbol', 'rugby', 'tenis', 'padel', 'cine', 'anime', 'teatro', 'playa', 'asado', 'yoga'] }).success).toBe(true)
       expect(parse({ interests: [] }).success).toBe(true)
     })
 
-    it('rechaza más de 5', () => {
-      expect(parse({ interests: ['futbol', 'running', 'estudio', 'musica', 'cine', 'juegos-de-mesa'] }).success).toBe(false)
+    it('rechaza más de 10', () => {
+      const eleven = Array.from({ length: 11 }, (_, i) => `interes-${i}`)
+
+      expect(parse({ interests: eleven }).success).toBe(false)
     })
 
-    it('rechaza intereses fuera de la lista y repetidos', () => {
-      expect(parse({ interests: ['paracaidismo'] }).success).toBe(false)
+    it('rechaza repetidos y valores que no son una key', () => {
       expect(parse({ interests: ['futbol', 'futbol'] }).success).toBe(false)
+      expect(parse({ interests: ['Fútbol'] }).success).toBe(false)
+      expect(parse({ interests: [{ $gt: '' }] }).success).toBe(false)
+    })
+  })
+
+  describe('onboardingCompleted', () => {
+    it('solo acepta true (no se puede volver atrás) y cuenta como un campo', () => {
+      expect(parse({ onboardingCompleted: true }).success).toBe(true)
+      expect(parse({ onboardingCompleted: false }).success).toBe(false)
+      expect(parse({ onboardingCompleted: 'true' }).success).toBe(false)
+    })
+
+    it('no se puede forzar la fecha interna', () => {
+      expect(parse({ onboardingCompletedAt: '2026-01-01T00:00:00Z' }).success).toBe(false)
     })
   })
 

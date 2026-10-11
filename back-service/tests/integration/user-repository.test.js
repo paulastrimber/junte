@@ -7,7 +7,7 @@ import { createUserRepository } from '../../src/modules/users/user.repository.js
 useTestDb()
 
 const repo = createUserRepository(User)
-const base = { email: 'ana@um.edu.uy', passwordHash: 'hash', name: 'Ana', university: 'UM', interests: ['futbol'] }
+const base = { email: 'ana@um.edu.uy', passwordHash: 'hash', name: 'Ana', university: 'um', interests: ['futbol'] }
 
 describe('create', () => {
   it('guarda el usuario con defaults de rol, estado y reputación', async () => {
@@ -63,9 +63,9 @@ describe('updateProfile', () => {
   it('actualiza solo los campos recibidos y devuelve el usuario nuevo', async () => {
     const { id } = await repo.create(base)
 
-    const updated = await repo.updateProfile(id, { name: 'Ana María', neighborhood: 'Pocitos', birthDate: new Date('2001-03-09T00:00:00Z') })
+    const updated = await repo.updateProfile(id, { name: 'Ana María', city: 'montevideo', neighborhood: 'pocitos', birthDate: new Date('2001-03-09T00:00:00Z') })
 
-    expect(updated).toMatchObject({ name: 'Ana María', neighborhood: 'Pocitos', university: 'UM', interests: ['futbol'] })
+    expect(updated).toMatchObject({ name: 'Ana María', city: 'montevideo', neighborhood: 'pocitos', university: 'um', interests: ['futbol'] })
     expect(updated.birthDate).toEqual(new Date('2001-03-09T00:00:00Z'))
   })
 
@@ -79,6 +79,48 @@ describe('updateProfile', () => {
     const updated = await repo.updateProfile(id, { name: 'Ana', role: 'admin', reputation: 99, status: 'suspended', passwordHash: 'otro' })
 
     expect(updated).toMatchObject({ role: 'user', reputation: 0, status: 'active', passwordHash: 'hash' })
+  })
+})
+
+describe('updateProfile con unset', () => {
+  it('quita la carrera y el barrio en la misma operación que guarda lo nuevo', async () => {
+    const { id } = await repo.create(base)
+    await repo.updateProfile(id, { career: 'economia', city: 'montevideo', neighborhood: 'pocitos' })
+
+    const updated = await repo.updateProfile(id, { university: 'ort', city: 'other' }, { unset: ['career', 'neighborhood'] })
+
+    expect(updated).toMatchObject({ university: 'ort', city: 'other' })
+    expect(updated.career).toBeUndefined()
+    expect(updated.neighborhood).toBeUndefined()
+  })
+
+  it('solo se pueden quitar career y neighborhood', async () => {
+    const { id } = await repo.create(base)
+
+    const updated = await repo.updateProfile(id, { name: 'Ana' }, { unset: ['passwordHash', 'email', 'university'] })
+
+    expect(updated).toMatchObject({ email: 'ana@um.edu.uy', passwordHash: 'hash', university: 'um' })
+  })
+
+  it('un campo que se guarda y se quita a la vez se guarda', async () => {
+    const { id } = await repo.create(base)
+
+    const updated = await repo.updateProfile(id, { career: 'economia' }, { unset: ['career'] })
+
+    expect(updated.career).toBe('economia')
+  })
+
+  it('sin cambios devuelve el usuario tal cual', async () => {
+    const { id } = await repo.create(base)
+
+    expect(await repo.updateProfile(id, {}, { unset: [] })).toMatchObject({ id, name: 'Ana' })
+  })
+
+  it('guarda onboardingCompletedAt', async () => {
+    const { id } = await repo.create(base)
+    const at = new Date('2026-10-11T15:00:00Z')
+
+    expect((await repo.updateProfile(id, { onboardingCompletedAt: at })).onboardingCompletedAt).toEqual(at)
   })
 })
 

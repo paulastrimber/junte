@@ -19,7 +19,14 @@ export const EXPECTED_INDEXES = Object.freeze([
   { collection: 'deviceTokens', name: 'userId', key: { userId: 1 } },
   { collection: 'sessions', name: 'sid_unique', key: { sid: 1 }, unique: true },
   { collection: 'sessions', name: 'userId', key: { userId: 1 } },
-  { collection: 'sessions', name: 'expiresAt_ttl', key: { expiresAt: 1 }, expireAfterSeconds: 0 }
+  { collection: 'sessions', name: 'expiresAt_ttl', key: { expiresAt: 1 }, expireAfterSeconds: 0 },
+  { collection: 'interestCategories', name: 'key_unique', key: { key: 1 }, unique: true },
+  { collection: 'interests', name: 'key_unique', key: { key: 1 }, unique: true },
+  { collection: 'interests', name: 'categoryKey_order', key: { categoryKey: 1, order: 1 } },
+  { collection: 'universities', name: 'key_unique', key: { key: 1 }, unique: true },
+  { collection: 'careers', name: 'universityKey_key_unique', key: { universityKey: 1, key: 1 }, unique: true },
+  { collection: 'cities', name: 'key_unique', key: { key: 1 }, unique: true },
+  { collection: 'neighborhoods', name: 'cityKey_key_unique', key: { cityKey: 1, key: 1 }, unique: true }
 ])
 
 export const COLLECTIONS = Object.freeze([...new Set(EXPECTED_INDEXES.map((index) => index.collection))])

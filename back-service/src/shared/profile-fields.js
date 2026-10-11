@@ -1,20 +1,21 @@
 // Campos de perfil compartidos por el registro y por PUT /users/me: una sola definición de las
 // reglas (largos, lista cerrada de intereses, fecha de nacimiento). Ver docs/pendientes.md#perfil.
 import { MAX_AGE, MIN_AGE, ageOn, calendarDateIn, compareCalendarDates, parseCalendarDate, toUtcMidnight } from './age.js'
-import { INTERESTS, MAX_INTERESTS } from './interests.js'
+import { KEY_MAX_LENGTH, KEY_PATTERN, MAX_INTERESTS } from './catalog-keys.js'
 import { z } from './validation.js'
 
 export const NAME_MAX = 80
-export const UNIVERSITY_MAX = 120
-export const PLACE_MAX = 60
 
 export const nameField = z.string().trim().min(1).max(NAME_MAX)
-export const universityField = z.string().trim().min(1).max(UNIVERSITY_MAX)
-/** Barrio y localidad: texto libre, opcionales, 1–60 caracteres. */
-export const neighborhoodField = z.string().trim().min(1).max(PLACE_MAX)
-export const cityField = z.string().trim().min(1).max(PLACE_MAX)
 
-export const interestsField = z.array(z.enum(INTERESTS)).max(MAX_INTERESTS)
+/**
+ * Referencia a un catálogo (universidad, carrera, ciudad, barrio, interés): solo se valida la forma de la key;
+ * que exista y esté disponible lo decide el servicio contra la base (catálogos editables por el admin).
+ * La opción "Otra" es la key reservada `other`.
+ */
+export const catalogKeyField = z.string().regex(KEY_PATTERN, { error: 'La opción elegida no es válida' }).max(KEY_MAX_LENGTH)
+
+export const interestsField = z.array(catalogKeyField).max(MAX_INTERESTS)
   .refine((items) => new Set(items).size === items.length, { error: 'No repitas intereses' })
 
 /**

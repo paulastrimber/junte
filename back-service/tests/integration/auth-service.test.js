@@ -24,9 +24,9 @@ describe('register', () => {
   it('crea el usuario con la contraseña hasheada y abre una sesión', async () => {
     const { signUp, passwordHasher } = setup()
 
-    const { user, accessToken, refreshToken } = await signUp({ email: 'ana@um.edu.uy', university: 'UM', interests: ['cine'] })
+    const { user, accessToken, refreshToken } = await signUp({ email: 'ana@um.edu.uy' })
 
-    expect(user).toMatchObject({ email: 'ana@um.edu.uy', name: 'Ana', university: 'UM', interests: ['cine'], role: 'user', status: 'active' })
+    expect(user).toMatchObject({ email: 'ana@um.edu.uy', name: 'Ana', interests: [], role: 'user', status: 'active' })
     expect(user.passwordHash).not.toContain(TEST_PASSWORD)
     expect(await passwordHasher.verify(user.passwordHash, TEST_PASSWORD)).toBe(true)
     expect(accessToken).toEqual(expect.any(String))
@@ -34,13 +34,15 @@ describe('register', () => {
     expect(await Session.countDocuments({ userId: user.id })).toBe(1)
   })
 
-  it('interests y university son opcionales', async () => {
+  it('el registro solo guarda lo básico: el resto del perfil se completa en el onboarding', async () => {
     const { signUp } = setup()
 
-    const { user } = await signUp()
+    const { user } = await signUp({ email: 'ana@um.edu.uy' })
 
+    for (const field of ['birthDate', 'university', 'career', 'city', 'neighborhood', 'photoKey', 'onboardingCompletedAt']) {
+      expect(user[field], field).toBeUndefined()
+    }
     expect(user.interests).toEqual([])
-    expect(user.university).toBeUndefined()
   })
 
   it('EMAIL_TAKEN con el mismo email, aunque cambien mayúsculas o espacios', async () => {

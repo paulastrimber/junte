@@ -48,12 +48,12 @@ export function createAuthService ({
 
   return {
     /**
-     * @param {{ name: string, email: string, password: string, university?: string, interests?: string[], deviceLabel?: string }} data  Ya validado.
+     * @param {{ name: string, email: string, password: string, deviceLabel?: string }} data  Ya validado. El resto del perfil se completa después (onboarding).
      * @throws {AppError} EMAIL_TAKEN
      */
-    async register ({ name, email, password, university, interests, deviceLabel }) {
+    async register ({ name, email, password, deviceLabel }) {
       const passwordHash = await passwordHasher.hash(password)
-      const user = await userRepo.create({ name, email, passwordHash, university, interests })
+      const user = await userRepo.create({ name, email, passwordHash })
       return openSession(user, deviceLabel)
     },
 

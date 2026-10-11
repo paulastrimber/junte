@@ -1,5 +1,5 @@
 // Esquemas Zod de /auth. Estrictos: un campo desconocido es 400. La contraseña no se recorta ni se normaliza.
-import { interestsField, nameField, universityField } from '../../shared/profile-fields.js'
+import { nameField } from '../../shared/profile-fields.js'
 import { z } from '../../shared/validation.js'
 
 export const PASSWORD_MIN = 8
@@ -15,8 +15,6 @@ export const registerBody = z.strictObject({
   name: nameField,
   email: emailField,
   password: z.string().min(PASSWORD_MIN).max(PASSWORD_MAX),
-  university: universityField.optional(),
-  interests: interestsField.optional(),
   deviceLabel: deviceLabelField
 })
 

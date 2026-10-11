@@ -21,17 +21,20 @@ const userSchema = new mongoose.Schema(
     name: { type: String, trim: true },
     // Día del calendario (sin hora) guardado a medianoche UTC. La edad no se guarda: se calcula.
     birthDate: { type: Date },
-    // Opcionales: no todo usuario estudia en una universidad.
+    // Claves de los catálogos (o `other`), todas opcionales: no todo usuario estudia, ni todos completan el onboarding.
     university: { type: String, trim: true },
-    neighborhood: { type: String, trim: true },
+    career: { type: String, trim: true },
     city: { type: String, trim: true },
+    neighborhood: { type: String, trim: true },
     interests: { type: [String], default: [] },
     // Solo-backend (ADR-0004): cambian por migración/seed o por otro admin.
     role: { type: String, enum: USER_ROLES, default: 'user', required: true },
     status: { type: String, enum: USER_STATUSES, default: 'active', required: true },
     // Solo-backend: +1 por check-in válido, dentro de la transacción del check-in.
     reputation: { type: Number, default: 0 },
-    photoKey: { type: String }
+    photoKey: { type: String },
+    // Se completa cuando la persona termina o abandona el onboarding (no vuelve a aparecer).
+    onboardingCompletedAt: { type: Date }
   },
   {
     collection: 'users',

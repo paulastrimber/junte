@@ -12,14 +12,16 @@ const DUPLICATE_KEY = 11000
  * @property {string} passwordHash  Solo para auth: el serializer nunca lo expone.
  * @property {string} [name]
  * @property {Date} [birthDate]
- * @property {string} [university]
- * @property {string} [neighborhood]
+ * @property {string} [university]  Clave del catálogo, o `other`.
+ * @property {string} [career]
  * @property {string} [city]
+ * @property {string} [neighborhood]
  * @property {string[]} interests
  * @property {'user' | 'admin'} role
  * @property {'active' | 'suspended'} status
  * @property {number} reputation
  * @property {string} [photoKey]
+ * @property {Date} [onboardingCompletedAt]
  * @property {Date} createdAt
  */
 
@@ -32,13 +34,15 @@ function toEntity (doc) {
     name: doc.name,
     birthDate: doc.birthDate,
     university: doc.university,
-    neighborhood: doc.neighborhood,
+    career: doc.career,
     city: doc.city,
+    neighborhood: doc.neighborhood,
     interests: doc.interests ?? [],
     role: doc.role,
     status: doc.status,
     reputation: doc.reputation ?? 0,
     photoKey: doc.photoKey,
+    onboardingCompletedAt: doc.onboardingCompletedAt,
     createdAt: doc.createdAt
   }
 }
@@ -47,7 +51,9 @@ const isDuplicateEmail = (err) => err?.code === DUPLICATE_KEY && (err.keyPattern
 
 // Campos que un perfil puede cambiar. Lo demás (role, status, reputation, passwordHash…) se descarta
 // acá aunque alguien lo pase por error: el repositorio no es la barrera de validación, es la última red.
-const PROFILE_FIELDS = ['name', 'birthDate', 'university', 'neighborhood', 'city', 'interests']
+const PROFILE_FIELDS = ['name', 'birthDate', 'university', 'career', 'city', 'neighborhood', 'interests', 'onboardingCompletedAt']
+// Campos que se pueden quitar cuando deja de valer lo que los sostenía (carrera sin universidad, barrio sin ciudad).
+const UNSETTABLE_FIELDS = ['career', 'neighborhood']
 
 /**
  * @param {import('mongoose').Model} UserModel
@@ -87,13 +93,17 @@ export function createUserRepository (UserModel) {
 
     /**
      * @param {string} id
-     * @param {Partial<Pick<UserEntity, 'name' | 'birthDate' | 'university' | 'neighborhood' | 'city' | 'interests'>>} changes
+     * @param {Partial<Pick<UserEntity, 'name' | 'birthDate' | 'university' | 'career' | 'city' | 'neighborhood' | 'interests' | 'onboardingCompletedAt'>>} changes
+     * @param {{ unset?: Array<'career' | 'neighborhood'> }} [options]  Campos a quitar en la misma operación.
      * @returns {Promise<UserEntity | null>}
      */
-    async updateProfile (id, changes) {
+    async updateProfile (id, changes, { unset = [] } = {}) {
       if (!mongoose.isValidObjectId(id)) return null
       const $set = Object.fromEntries(Object.entries(changes).filter(([field]) => PROFILE_FIELDS.includes(field)))
-      const doc = await UserModel.findByIdAndUpdate(id, { $set }, { returnDocument: 'after', runValidators: true }).lean()
+      const $unset = Object.fromEntries(unset.filter((field) => UNSETTABLE_FIELDS.includes(field) && !(field in $set)).map((field) => [field, '']))
+      const update = { ...(Object.keys($set).length > 0 ? { $set } : {}), ...(Object.keys($unset).length > 0 ? { $unset } : {}) }
+      if (Object.keys(update).length === 0) return this.findById(id)
+      const doc = await UserModel.findByIdAndUpdate(id, update, { returnDocument: 'after', runValidators: true }).lean()
       return doc ? toEntity(doc) : null
     },
 

@@ -5,7 +5,8 @@ import { buildTestModules } from '../helpers/modules.js'
 import { seed } from '../../seeds/seed.js'
 import { USERS } from '../../seeds/data.js'
 import { MAX_AGE, MIN_AGE, ageOn, calendarDateIn, fromUtcMidnight, parseCalendarDate } from '../../src/shared/age.js'
-import { INTERESTS, MAX_INTERESTS } from '../../src/shared/interests.js'
+import { MAX_INTERESTS } from '../../src/shared/catalog-keys.js'
+import { buildCatalogDocuments } from '../../catalogs/index.js'
 import { User } from '../../src/modules/users/user.model.js'
 import { Plan } from '../../src/modules/plans/plan.model.js'
 import { Participation } from '../../src/modules/participations/participation.model.js'
@@ -118,18 +119,34 @@ describe('seeds', () => {
   })
 
   describe('perfiles de ejemplo', () => {
-    it('cargan birthDate (medianoche UTC), barrio y localidad', async () => {
+    it('cargan birthDate (medianoche UTC), universidad, carrera, ciudad y barrio como keys de los catálogos', async () => {
       await run()
 
       const lucia = await User.findOne({ email: 'lucia@junte.test' })
       expect(lucia.birthDate.toISOString()).toMatch(/T00:00:00\.000Z$/)
-      expect(lucia.neighborhood).toBeTruthy()
-      expect(lucia.city).toBeTruthy()
+      expect(lucia).toMatchObject({ university: 'um', career: 'ingenieria-en-informatica', city: 'montevideo', neighborhood: 'pocitos' })
+    })
+
+    it('todas las referencias de los usuarios de ejemplo existen en los catálogos y son válidas entre sí', () => {
+      const catalogs = Object.fromEntries(buildCatalogDocuments().map(({ collection, docs }) => [collection, docs]))
+      for (const user of USERS.filter((item) => item.university)) {
+        expect(catalogs.universities.some((item) => item.key === user.university), `${user.key}: universidad`).toBe(true)
+        expect(catalogs.careers.some((item) => item.universityKey === user.university && item.key === user.career), `${user.key}: carrera`).toBe(true)
+        expect(catalogs.cities.some((item) => item.key === user.city), `${user.key}: ciudad`).toBe(true)
+        expect(catalogs.neighborhoods.some((item) => item.cityKey === user.city && item.key === user.neighborhood), `${user.key}: barrio`).toBe(true)
+      }
+    })
+
+    it('los usuarios con onboarding hecho lo tienen marcado y "nuevo" lo tiene pendiente', async () => {
+      await run()
+
+      expect((await User.findOne({ email: 'lucia@junte.test' })).onboardingCompletedAt).toEqual(NOW)
+      expect((await User.findOne({ email: 'nuevo@junte.test' })).onboardingCompletedAt).toBeUndefined()
     })
 
     it('las fechas de nacimiento del seed dan una edad válida (16 a 100)', () => {
       const today = calendarDateIn(NOW)
-      for (const { birthDate } of USERS) {
+      for (const { birthDate } of USERS.filter((item) => item.birthDate)) {
         const birth = parseCalendarDate(birthDate)
         expect(birth, birthDate).not.toBeNull()
         const age = ageOn(birth, today)
@@ -138,10 +155,11 @@ describe('seeds', () => {
       }
     })
 
-    it('los intereses son de la lista cerrada y no pasan del máximo', () => {
+    it('los intereses existen en el catálogo y no pasan del máximo', () => {
+      const catalog = buildCatalogDocuments().find(({ collection }) => collection === 'interests').docs.map((item) => item.key)
       for (const { interests } of USERS) {
         expect(interests.length).toBeLessThanOrEqual(MAX_INTERESTS)
-        for (const interest of interests) expect(INTERESTS).toContain(interest)
+        for (const interest of interests) expect(catalog).toContain(interest)
       }
     })
 

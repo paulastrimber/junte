@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "migrate:check": "node --env-file-if-exists=.env scripts/migrate-check.js",
-    "seed": "node --env-file-if-exists=.env seeds/index.js"
+    "seed": "node --env-file-if-exists=.env seeds/index.js",
+    "catalogs:sync": "node --env-file-if-exists=.env scripts/sync-catalogs.js"
   },
   "engines": {
     "node": ">=22.12"

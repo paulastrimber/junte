@@ -110,6 +110,11 @@ tasks:
         msg: Los seeds no se corren en producción
     cmds: [npm run seed]
 
+  db:catalogs:sync:
+    desc: Suma a la base las entradas nuevas de back-service/catalogs/ (solo inserta; nunca pisa lo que editó el admin)
+    dir: '{{.BACK}}'
+    cmds: [npm run catalogs:sync]
+
   # ── Front service (Nginx) ────────────────────────────────────────
   front:check:
     desc: Valida la configuración de Nginx

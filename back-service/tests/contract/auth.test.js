@@ -44,20 +44,22 @@ describe('POST /auth/register', () => {
   it('201 con el usuario serializado y los dos tokens, sin hashes ni datos de sesión', async () => {
     const { post } = setup()
 
-    const res = await post('/auth/register', { name: '  Ana ', email: ' Ana@UM.edu.uy ', password: TEST_PASSWORD, university: 'UM', interests: ['cine', 'futbol'] })
+    const res = await post('/auth/register', { name: '  Ana ', email: ' Ana@UM.edu.uy ', password: TEST_PASSWORD })
 
     expect(res.status).toBe(201)
     expect(res.body.user).toMatchObject({
       email: 'ana@um.edu.uy',
       name: 'Ana',
-      university: 'UM',
-      interests: ['cine', 'futbol'],
+      interests: [],
       birthDate: null,
       age: null,
-      neighborhood: null,
+      university: null,
+      career: null,
       city: null,
+      neighborhood: null,
       photoUrl: null,
       profileComplete: false,
+      onboardingCompleted: false,
       reputation: 0
     })
     expect(res.body.accessToken).toEqual(expect.any(String))
@@ -82,8 +84,6 @@ describe('POST /auth/register', () => {
     ['email inválido', { email: 'no-es-un-email' }],
     ['contraseña de 7 caracteres', { password: '1234567' }],
     ['contraseña enorme', { password: 'x'.repeat(129) }],
-    ['interés fuera de la lista', { interests: ['paracaidismo'] }],
-    ['más de 5 intereses', { interests: ['futbol', 'running', 'estudio', 'musica', 'cine', 'juegos-de-mesa'] }],
     ['operador de Mongo en el email', { email: { $ne: null } }],
     ['operador de Mongo en el name', { name: { $gt: '' } }],
     ['name como arreglo', { name: ['a'] }]
@@ -98,7 +98,9 @@ describe('POST /auth/register', () => {
 
   it.each([
     ['role', 'admin'], ['status', 'suspended'], ['reputation', 50], ['age', 30], ['birthDate', '2000-01-01'],
-    ['passwordHash', 'x'], ['id', '665f1c2a9b1e8a0012345678'], ['photoKey', 'users/x/y.jpg']
+    ['passwordHash', 'x'], ['id', '665f1c2a9b1e8a0012345678'], ['photoKey', 'users/x/y.jpg'],
+    // El perfil (universidad, carrera, ciudad, intereses…) se completa después, en el onboarding.
+    ['university', 'um'], ['career', 'economia'], ['city', 'montevideo'], ['neighborhood', 'pocitos'], ['interests', ['futbol']]
   ])('400 si el body trae el campo no permitido %s (.strict)', async (field, value) => {
     const { post } = setup()
 

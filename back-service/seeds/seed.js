@@ -24,16 +24,17 @@ async function passwordHashFor (existing, { passwordHasher, password }) {
   return passwordHasher.hash(password)
 }
 
-async function seedUsers ({ passwordHasher, password }) {
+async function seedUsers ({ passwordHasher, password, now }) {
   const byKey = new Map()
-  for (const { key, email, birthDate, ...profile } of USERS) {
+  for (const { key, email, birthDate, onboarded, ...profile } of USERS) {
     const existing = await User.findOne({ email }).lean()
     const user = await User.findOneAndUpdate(
       { email },
       {
         $set: {
           ...profile,
-          birthDate: toUtcMidnight(parseCalendarDate(birthDate)),
+          ...(birthDate ? { birthDate: toUtcMidnight(parseCalendarDate(birthDate)) } : {}),
+          ...(onboarded ? { onboardingCompletedAt: existing?.onboardingCompletedAt ?? now } : {}),
           passwordHash: await passwordHashFor(existing, { passwordHasher, password })
         },
         $setOnInsert: { email }
@@ -98,7 +99,7 @@ export async function seed ({ passwordHasher, password, now = new Date() }) {
   if (typeof password !== 'string' || password === '') {
     throw new Error('seed: falta la contraseña de los usuarios de ejemplo (variable SEED_PASSWORD)')
   }
-  const users = await seedUsers({ passwordHasher, password })
+  const users = await seedUsers({ passwordHasher, password, now })
   let participations = 0
   for (const spec of PLANS) {
     await seedPlan(spec, users, now)

@@ -15,9 +15,9 @@ describe('isProfileComplete', () => {
     expect(isProfileComplete(completeUser())).toBe(true)
   })
 
-  it('university, barrio y localidad son opcionales: no cambian el resultado', () => {
-    expect(isProfileComplete({ ...completeUser(), university: undefined, neighborhood: undefined, city: undefined })).toBe(true)
-    expect(isProfileComplete({ ...completeUser(), university: 'UM', neighborhood: 'Pocitos', city: 'Montevideo' })).toBe(true)
+  it('universidad, carrera, barrio y ciudad son opcionales: no cambian el resultado', () => {
+    expect(isProfileComplete({ ...completeUser(), university: undefined, career: undefined, neighborhood: undefined, city: undefined })).toBe(true)
+    expect(isProfileComplete({ ...completeUser(), university: 'um', career: 'economia', neighborhood: 'pocitos', city: 'montevideo' })).toBe(true)
   })
 
   it.each([
@@ -47,9 +47,10 @@ function setup ({ user = completeUser() } = {}) {
   const state = { user }
   const userRepo = {
     findById: vi.fn(async (id) => (state.user && id === state.user.id ? { ...state.user } : null)),
-    updateProfile: vi.fn(async (id, changes) => {
+    updateProfile: vi.fn(async (id, changes, { unset = [] } = {}) => {
       if (!state.user || id !== state.user.id) return null
       state.user = { ...state.user, ...changes }
+      for (const field of unset) delete state.user[field]
       return { ...state.user }
     }),
     setPhotoKey: vi.fn(async (id, photoKey) => {
@@ -59,8 +60,9 @@ function setup ({ user = completeUser() } = {}) {
     })
   }
   const logger = { warn: vi.fn() }
-  const service = createUserService({ userRepo, storage, logger })
-  return { service, userRepo, storage, deleteObject, state, logger }
+  const catalogs = { checkProfileReferences: vi.fn(async () => []) }
+  const service = createUserService({ userRepo, storage, catalogs, clock, logger })
+  return { service, userRepo, storage, deleteObject, state, logger, catalogs, clock }
 }
 
 describe('getProfile', () => {
@@ -81,16 +83,125 @@ describe('updateProfile', () => {
   it('guarda los cambios y devuelve el usuario actualizado', async () => {
     const { service, userRepo } = setup()
 
-    const updated = await service.updateProfile({ userId: USER_ID, changes: { city: 'Montevideo' } })
+    const updated = await service.updateProfile({ userId: USER_ID, changes: { city: 'montevideo' } })
 
-    expect(userRepo.updateProfile).toHaveBeenCalledWith(USER_ID, { city: 'Montevideo' })
-    expect(updated.city).toBe('Montevideo')
+    expect(userRepo.updateProfile).toHaveBeenCalledWith(USER_ID, { city: 'montevideo' }, { unset: [] })
+    expect(updated.city).toBe('montevideo')
   })
 
   it('si el usuario ya no existe responde 401', async () => {
     const { service } = setup({ user: null })
 
-    await expect(service.updateProfile({ userId: USER_ID, changes: { city: 'X' } })).rejects.toMatchObject({ code: 'UNAUTHENTICATED' })
+    await expect(service.updateProfile({ userId: USER_ID, changes: { city: 'montevideo' } })).rejects.toMatchObject({ code: 'UNAUTHENTICATED' })
+  })
+
+  describe('validación contra los catálogos', () => {
+    it('valida el perfil RESULTANTE: lo guardado más los cambios, con la edad calculada', async () => {
+      const { service, catalogs, state } = setup()
+      state.user = { ...completeUser(), university: 'um', interests: ['futbol'] }
+
+      await service.updateProfile({ userId: USER_ID, changes: { career: 'economia' } })
+
+      expect(catalogs.checkProfileReferences).toHaveBeenCalledWith({
+        current: expect.objectContaining({ university: 'um' }),
+        next: expect.objectContaining({ university: 'um', career: 'economia', interests: ['futbol'] }),
+        age: 25 // nació el 2001-03-09; hoy es 11/10/2026
+      })
+    })
+
+    it('sin fecha de nacimiento la edad es null', async () => {
+      const { service, catalogs } = setup({ user: { id: USER_ID, name: 'Ana', interests: [] } })
+
+      await service.updateProfile({ userId: USER_ID, changes: { university: 'um' } })
+
+      expect(catalogs.checkProfileReferences).toHaveBeenCalledWith(expect.objectContaining({ age: null }))
+    })
+
+    it('si el catálogo rechaza algo → VALIDATION_ERROR con details por campo y no guarda nada', async () => {
+      const { service, catalogs, userRepo } = setup()
+      catalogs.checkProfileReferences.mockResolvedValue([{ path: 'university', message: 'La universidad elegida no existe' }])
+
+      const error = await service.updateProfile({ userId: USER_ID, changes: { university: 'harvard' } }).catch((e) => e)
+
+      expect(error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400, details: [{ path: 'university', message: 'La universidad elegida no existe' }] })
+      expect(userRepo.updateProfile).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('campos que dependen de otros', () => {
+    const withCareer = () => ({ ...completeUser(), university: 'um', career: 'economia', city: 'montevideo', neighborhood: 'pocitos' })
+
+    it('al cambiar la universidad se quita la carrera (ya no corresponde)', async () => {
+      const { service, userRepo, catalogs } = setup({ user: withCareer() })
+
+      const updated = await service.updateProfile({ userId: USER_ID, changes: { university: 'ort' } })
+
+      expect(userRepo.updateProfile).toHaveBeenCalledWith(USER_ID, { university: 'ort' }, { unset: ['career'] })
+      expect(catalogs.checkProfileReferences).toHaveBeenCalledWith(expect.objectContaining({ next: expect.objectContaining({ university: 'ort', career: undefined }) }))
+      expect(updated.career).toBeUndefined()
+    })
+
+    it('si la carrera nueva llega en el mismo pedido se conserva y se valida contra la universidad nueva', async () => {
+      const { service, userRepo } = setup({ user: withCareer() })
+
+      await service.updateProfile({ userId: USER_ID, changes: { university: 'ort', career: 'ingenieria-en-sistemas' } })
+
+      expect(userRepo.updateProfile).toHaveBeenCalledWith(USER_ID, { university: 'ort', career: 'ingenieria-en-sistemas' }, { unset: [] })
+    })
+
+    it('mandar la misma universidad no quita la carrera', async () => {
+      const { service, userRepo } = setup({ user: withCareer() })
+
+      await service.updateProfile({ userId: USER_ID, changes: { university: 'um' } })
+
+      expect(userRepo.updateProfile).toHaveBeenCalledWith(USER_ID, { university: 'um' }, { unset: [] })
+    })
+
+    it('al cambiar la ciudad se quita el barrio', async () => {
+      const { service, userRepo } = setup({ user: withCareer() })
+
+      await service.updateProfile({ userId: USER_ID, changes: { city: 'other' } })
+
+      expect(userRepo.updateProfile).toHaveBeenCalledWith(USER_ID, { city: 'other' }, { unset: ['neighborhood'] })
+    })
+
+    it('no pide quitar lo que el usuario no tenía', async () => {
+      const { service, userRepo } = setup()
+
+      await service.updateProfile({ userId: USER_ID, changes: { university: 'ort', city: 'other' } })
+
+      expect(userRepo.updateProfile).toHaveBeenCalledWith(USER_ID, { university: 'ort', city: 'other' }, { unset: [] })
+    })
+  })
+
+  describe('onboarding', () => {
+    it('onboardingCompleted: true guarda la fecha con el reloj inyectado y no pasa por los catálogos como campo', async () => {
+      const { service, userRepo, state } = setup()
+
+      const updated = await service.updateProfile({ userId: USER_ID, changes: { onboardingCompleted: true } })
+
+      expect(userRepo.updateProfile).toHaveBeenCalledWith(USER_ID, { onboardingCompletedAt: new Date('2026-10-11T15:00:00Z') }, { unset: [] })
+      expect(updated.onboardingCompletedAt).toEqual(new Date('2026-10-11T15:00:00Z'))
+      expect(state.user.onboardingCompleted).toBeUndefined()
+    })
+
+    it('no cambia la fecha si ya había terminado', async () => {
+      const done = new Date('2026-09-01T10:00:00Z')
+      const { service, userRepo } = setup({ user: { ...completeUser(), onboardingCompletedAt: done } })
+
+      const updated = await service.updateProfile({ userId: USER_ID, changes: { onboardingCompleted: true } })
+
+      expect(userRepo.updateProfile).toHaveBeenCalledWith(USER_ID, {}, { unset: [] })
+      expect(updated.onboardingCompletedAt).toEqual(done)
+    })
+
+    it('se puede terminar el onboarding junto con otros cambios', async () => {
+      const { service, userRepo } = setup()
+
+      await service.updateProfile({ userId: USER_ID, changes: { interests: ['futbol'], onboardingCompleted: true } })
+
+      expect(userRepo.updateProfile).toHaveBeenCalledWith(USER_ID, { interests: ['futbol'], onboardingCompletedAt: expect.any(Date) }, { unset: [] })
+    })
   })
 })
 

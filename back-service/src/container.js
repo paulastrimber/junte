@@ -8,6 +8,10 @@ import { connectRedis, disconnectRedis, pingRedis } from './adapters/redis.js'
 import { createMemoryStorage, createS3Storage } from './adapters/storage/index.js'
 import { createAuthenticate } from './middlewares/authenticate.js'
 import {
+  Career, City, Interest, InterestCategory, Neighborhood, University,
+  createCatalogController, createCatalogRepository, createCatalogRoutes, createCatalogService
+} from './modules/catalogs/index.js'
+import {
   Session, createAuthController, createAuthRoutes, createAuthService, createSessionRepository, createTokenService
 } from './modules/auth/index.js'
 import { createUploadController, createUploadRoutes, createUploadService } from './modules/uploads/index.js'
@@ -32,7 +36,9 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const tokens = createTokenService({ secret: config.jwt.secret, clock })
 
   const authService = createAuthService({ userRepo, sessionRepo, passwordHasher, tokens, clock, maxActiveSessions })
-  const userService = createUserService({ userRepo, storage, logger })
+  const catalogRepo = createCatalogRepository({ InterestCategory, Interest, University, Career, City, Neighborhood })
+  const catalogService = createCatalogService({ catalogRepo, clock })
+  const userService = createUserService({ userRepo, storage, catalogs: catalogService, clock, logger })
   const uploadService = createUploadService({ storage })
   const userSerializer = createUserSerializer({ storage, clock })
 
@@ -41,14 +47,16 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const authController = createAuthController({ authService, serializeUser: userSerializer.serializeOwner })
   const userController = createUserController({ userService, userSerializer })
   const uploadController = createUploadController({ uploadService })
+  const catalogController = createCatalogController({ catalogService })
 
   const routes = [
     { path: '/auth', router: createAuthRoutes({ authController, authenticate }) },
     { path: '/users', router: createUserRoutes({ userController, validators: createUserValidators({ clock }), authenticate }) },
-    { path: '/uploads', router: createUploadRoutes({ uploadController, authenticate }) }
+    { path: '/uploads', router: createUploadRoutes({ uploadController, authenticate }) },
+    { path: '/catalogs', router: createCatalogRoutes({ catalogController, authenticate }) }
   ]
 
-  return { routes, authenticate, authService, userService, uploadService, userSerializer, userRepo, sessionRepo }
+  return { routes, authenticate, authService, userService, uploadService, catalogService, userSerializer, userRepo, sessionRepo }
 }
 
 /**

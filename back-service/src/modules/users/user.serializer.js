@@ -17,7 +17,7 @@ export function createUserSerializer ({ storage, clock }) {
   return {
     /**
      * Vista del dueño (GET/PUT /users/me, registro y login). Es la única que lleva birthDate, age,
-     * barrio y localidad: no se exponen a otros usuarios. `age` se calcula acá, nunca se guarda.
+     * barrio y ciudad: no se exponen a otros usuarios. `age` se calcula acá, nunca se guarda.
      * @param {import('./user.repository.js').UserEntity} user
      */
     async serializeOwner (user) {
@@ -29,12 +29,14 @@ export function createUserSerializer ({ storage, clock }) {
         birthDate: user.birthDate ? formatCalendarDate(user.birthDate) : null,
         age: birth ? ageOn(birth, calendarDateIn(clock.now())) : null,
         university: user.university ?? null,
-        neighborhood: user.neighborhood ?? null,
+        career: user.career ?? null,
         city: user.city ?? null,
+        neighborhood: user.neighborhood ?? null,
         interests: user.interests,
         reputation: user.reputation,
         photoUrl: await photoUrlOf(user),
         profileComplete: isProfileComplete(user),
+        onboardingCompleted: Boolean(user.onboardingCompletedAt),
         createdAt: user.createdAt.toISOString()
       }
     },

@@ -11,8 +11,11 @@ import { connectDb, disconnectDb, getConnection } from '../../src/adapters/db/in
 import { runMigrations } from '../../src/adapters/db/migrations.js'
 
 const TEST_DB_NAME = 'junte_test'
-// Colecciones de migrate-mongo: se conservan para que la base siga "migrada" entre tests.
-const KEEP = new Set(['changelog', 'changelog_lock'])
+// Se conservan entre tests: las colecciones de migrate-mongo (la base sigue "migrada") y los catálogos, que son datos
+// de referencia cargados por la migración (los tests de perfil dependen de ellos). Un test que agrega filas a un catálogo
+// las crea con una key `test-…` y las borra al terminar (ver `removeTestCatalogRows`).
+export const CATALOG_COLLECTIONS = ['interestCategories', 'interests', 'universities', 'careers', 'cities', 'neighborhoods']
+const KEEP = new Set(['changelog', 'changelog_lock', ...CATALOG_COLLECTIONS])
 
 let replSet = null
 
@@ -39,6 +42,12 @@ export async function clearDb () {
       .filter(({ name }) => !KEEP.has(name) && !name.startsWith('system.'))
       .map(({ name }) => db.collection(name).deleteMany({}))
   )
+}
+
+/** Borra las filas de catálogo que un test creó (las de key `test-…`) y devuelve los catálogos a su estado inicial. */
+export async function removeTestCatalogRows () {
+  const { db } = getConnection()
+  await Promise.all(CATALOG_COLLECTIONS.map((name) => db.collection(name).deleteMany({ key: /^test-/ })))
 }
 
 /** Desconecta Mongoose y apaga el replica set. Idempotente. */

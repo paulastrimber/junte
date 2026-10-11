@@ -3,6 +3,7 @@ import request from 'supertest'
 import { describe, expect, it } from 'vitest'
 import { createLogger } from '../../src/adapters/logger.js'
 import { Session } from '../../src/modules/auth/session.model.js'
+import { Interest } from '../../src/modules/catalogs/index.js'
 import { User } from '../../src/modules/users/user.model.js'
 import { useTestDb } from '../helpers/db.js'
 import { TEST_PASSWORD, buildTestModules, registerViaHttp } from '../helpers/modules.js'
@@ -40,12 +41,14 @@ describe('GET /users/me', () => {
       birthDate: null,
       age: null,
       university: null,
-      neighborhood: null,
+      career: null,
       city: null,
+      neighborhood: null,
       interests: [],
       reputation: 0,
       photoUrl: null,
       profileComplete: false,
+      onboardingCompleted: false,
       createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
     })
   })
@@ -74,9 +77,10 @@ describe('PUT /users/me', () => {
   const full = {
     name: 'Ana María',
     birthDate: '2001-03-09',
-    university: 'Universidad de Montevideo',
-    neighborhood: 'Pocitos',
-    city: 'Montevideo',
+    university: 'um',
+    career: 'ingenieria-en-informatica',
+    city: 'montevideo',
+    neighborhood: 'pocitos',
     interests: ['futbol', 'cine']
   }
 
@@ -116,25 +120,18 @@ describe('PUT /users/me', () => {
 
   it('actualización parcial: lo que no se manda no cambia', async () => {
     const { as, signUp } = setup()
-    const { accessToken } = await signUp({ university: 'UM', interests: ['cine'] })
-
-    const res = await as(accessToken).put('/users/me', { city: 'Canelones' })
-
-    expect(res.body).toMatchObject({ name: 'Ana', university: 'UM', interests: ['cine'], city: 'Canelones' })
-  })
-
-  it('barrio y localidad se recortan (trim)', async () => {
-    const { as, signUp } = setup()
     const { accessToken } = await signUp()
+    await as(accessToken).put('/users/me', { university: 'um', interests: ['cine'] })
 
-    const res = await as(accessToken).put('/users/me', { neighborhood: '  Cordón  ', city: ' Montevideo ' })
+    const res = await as(accessToken).put('/users/me', { city: 'montevideo' })
 
-    expect(res.body).toMatchObject({ neighborhood: 'Cordón', city: 'Montevideo' })
+    expect(res.body).toMatchObject({ name: 'Ana', university: 'um', interests: ['cine'], city: 'montevideo' })
   })
 
   it.each([
     ['age', 25], ['email', 'otro@um.edu.uy'], ['role', 'admin'], ['status', 'suspended'], ['reputation', 99],
-    ['passwordHash', 'x'], ['refreshTokenHash', 'x'], ['photoKey', 'users/x/y.jpg'], ['userId', '665f1c2a9b1e8a0012345678'], ['id', 'x']
+    ['passwordHash', 'x'], ['refreshTokenHash', 'x'], ['photoKey', 'users/x/y.jpg'], ['userId', '665f1c2a9b1e8a0012345678'], ['id', 'x'],
+    ['onboardingCompletedAt', '2026-01-01T00:00:00Z']
   ])('400 si el body trae %s (.strict) y no cambia nada', async (field, value) => {
     const { as, signUp } = setup()
     const { accessToken, user } = await signUp()
@@ -153,12 +150,12 @@ describe('PUT /users/me', () => {
     ['futura', { birthDate: '2026-10-12' }],
     ['menor de 16', { birthDate: '2010-10-12' }],
     ['mayor de 100', { birthDate: '1925-10-11' }],
-    ['barrio vacío', { neighborhood: '' }],
-    ['barrio de 61 caracteres', { neighborhood: 'x'.repeat(61) }],
-    ['localidad solo espacios', { city: '   ' }],
-    ['interés fuera de la lista', { interests: ['paracaidismo'] }],
-    ['6 intereses', { interests: ['futbol', 'running', 'estudio', 'musica', 'cine', 'juegos-de-mesa'] }],
+    ['universidad en texto libre', { university: 'Universidad de Montevideo' }],
+    ['barrio en texto libre', { neighborhood: 'Pocitos' }],
+    ['más de 10 intereses', { interests: Array.from({ length: 11 }, (_, i) => `interes-${i}`) }],
+    ['intereses repetidos', { interests: ['futbol', 'futbol'] }],
     ['operador de Mongo', { name: { $set: { role: 'admin' } } }],
+    ['onboardingCompleted false', { onboardingCompleted: false }],
     ['body vacío', {}]
   ])('400: %s', async (_label, body) => {
     const { as, signUp } = setup()
@@ -184,6 +181,144 @@ describe('PUT /users/me', () => {
 
     expect((await as(beto.accessToken).get('/users/me')).body.name).toBe('Beto')
   })
+
+  describe('catálogos (universidad, carrera, ciudad, barrio, intereses)', () => {
+    const put = async (body, setupOptions) => {
+      const { as, signUp, ...rest } = setup(setupOptions)
+      const { accessToken } = await signUp()
+      const api = as(accessToken)
+      return { api, res: await api.put('/users/me', body), ...rest }
+    }
+
+    it('rechaza una universidad que no existe, con el detalle en el campo', async () => {
+      const { res } = await put({ university: 'harvard' })
+
+      expectValidationError(res)
+      expect(res.body.details).toEqual([{ path: 'university', message: expect.stringMatching(/no existe/) }])
+    })
+
+    it('"Otra" vale para universidad, ciudad y barrio, sin texto libre', async () => {
+      const { res } = await put({ university: 'other', city: 'other' })
+
+      expect(res.status).toBe(200)
+      expect(res.body).toMatchObject({ university: 'other', city: 'other', career: null, neighborhood: null })
+    })
+
+    it('rechaza una carrera que no es de la universidad elegida', async () => {
+      const { res } = await put({ university: 'um', career: 'ingenieria-en-sistemas' }) // es de ORT
+
+      expectValidationError(res)
+      expect(res.body.details).toEqual([{ path: 'career', message: expect.stringMatching(/esa universidad/) }])
+    })
+
+    it('acepta la carrera de cada universidad y "Otra" carrera', async () => {
+      const { api } = await put({ university: 'ort', career: 'ingenieria-en-sistemas' })
+
+      expect((await api.put('/users/me', { career: 'other' })).body.career).toBe('other')
+    })
+
+    it('la carrera exige universidad, y con universidad "Otra" no se elige carrera', async () => {
+      const { api, res } = await put({ career: 'economia' })
+      expect(res.body.details[0]).toMatchObject({ path: 'career' })
+
+      const other = await api.put('/users/me', { university: 'other', career: 'economia' })
+      expect(other.body.details[0]).toMatchObject({ path: 'career' })
+    })
+
+    it('al cambiar de universidad se quita la carrera anterior', async () => {
+      const { api } = await put({ university: 'um', career: 'economia' })
+
+      const res = await api.put('/users/me', { university: 'ort' })
+
+      expect(res.status).toBe(200)
+      expect(res.body).toMatchObject({ university: 'ort', career: null })
+    })
+
+    it('al cambiar de universidad con una carrera nueva en el mismo pedido, se guarda la nueva', async () => {
+      const { api } = await put({ university: 'um', career: 'economia' })
+
+      const res = await api.put('/users/me', { university: 'ort', career: 'ingenieria-en-sistemas' })
+
+      expect(res.body).toMatchObject({ university: 'ort', career: 'ingenieria-en-sistemas' })
+    })
+
+    it('el barrio exige una ciudad del catálogo y que sea de esa ciudad; al cambiar de ciudad se quita', async () => {
+      const { api, res } = await put({ neighborhood: 'pocitos' })
+      expect(res.body.details[0]).toMatchObject({ path: 'neighborhood' })
+
+      expect((await api.put('/users/me', { city: 'montevideo', neighborhood: 'pocitos' })).body).toMatchObject({ neighborhood: 'pocitos' })
+      expect((await api.put('/users/me', { city: 'montevideo', neighborhood: 'narnia' })).status).toBe(400)
+      expect((await api.put('/users/me', { city: 'other' })).body).toMatchObject({ city: 'other', neighborhood: null })
+    })
+
+    it('"Bares y cervecerías" tiene edad mínima 18: un menor de 17 no la puede elegir', async () => {
+      const { api, res } = await put({ birthDate: '2009-10-11' }) // 17 años el 11/10/2026
+      expect(res.status).toBe(200)
+
+      const attempt = await api.put('/users/me', { interests: ['futbol', 'bares-y-cervecerias'] })
+
+      expectValidationError(attempt)
+      expect(attempt.body.details).toEqual([{ path: 'interests', message: expect.stringMatching(/18/) }])
+    })
+
+    it('sin fecha de nacimiento no se puede elegir una opción con edad mínima', async () => {
+      const { res } = await put({ interests: ['salir-a-bailar'] })
+
+      expectValidationError(res)
+      expect(res.body.details[0].message).toMatch(/fecha de nacimiento/)
+    })
+
+    it('un mayor de 18 sí la elige; y no puede bajar su edad mientras tenga una opción con edad mínima', async () => {
+      const { api } = await put({ birthDate: '2000-01-01', interests: ['bares-y-cervecerias'] })
+
+      const younger = await api.put('/users/me', { birthDate: '2010-10-11' }) // 16 años
+
+      expectValidationError(younger)
+      expect(younger.body.details[0]).toMatchObject({ path: 'interests' })
+    })
+
+    it('una opción desactivada por el admin: quien ya la tenía la conserva; si la suelta, no la puede volver a elegir', async () => {
+      const { api, catalogService } = await put({ interests: ['rugby', 'futbol'] })
+      await Interest.updateOne({ key: 'rugby' }, { active: false })
+      catalogService.invalidate()
+
+      try {
+        expect((await api.put('/users/me', { interests: ['rugby', 'cine'] })).status).toBe(200) // la conserva
+        expect((await api.put('/users/me', { interests: ['cine'] })).status).toBe(200) // la suelta
+        const again = await api.put('/users/me', { interests: ['cine', 'rugby'] })
+        expectValidationError(again)
+        expect(again.body.details[0].message).toMatch(/Rugby/)
+      } finally {
+        await Interest.updateOne({ key: 'rugby' }, { active: true })
+        catalogService.invalidate()
+      }
+    })
+  })
+
+  describe('onboarding', () => {
+    it('onboardingCompleted: true marca el onboarding como hecho y no se puede deshacer', async () => {
+      const { as, signUp } = setup()
+      const { accessToken, user } = await signUp()
+      const api = as(accessToken)
+
+      const res = await api.put('/users/me', { onboardingCompleted: true })
+
+      expect(res.status).toBe(200)
+      expect(res.body.onboardingCompleted).toBe(true)
+      expect(res.body.profileComplete).toBe(false) // se puede saltar todo: el perfil sigue incompleto
+      expect((await User.findById(user.id)).onboardingCompletedAt).toEqual(new Date('2026-10-11T15:00:00Z'))
+      expectValidationError(await api.put('/users/me', { onboardingCompleted: false }))
+    })
+
+    it('se puede terminar junto con los datos del último paso', async () => {
+      const { as, signUp } = setup()
+      const { accessToken } = await signUp()
+
+      const res = await as(accessToken).put('/users/me', { interests: ['cine'], onboardingCompleted: true })
+
+      expect(res.body).toMatchObject({ interests: ['cine'], onboardingCompleted: true })
+    })
+  })
 })
 
 describe('privacidad de birthDate, barrio y localidad', () => {
@@ -193,17 +328,17 @@ describe('privacidad de birthDate, barrio y localidad', () => {
     const { as, signUp } = setup({ logger })
     const { accessToken } = await signUp()
 
-    await as(accessToken).put('/users/me', { birthDate: '2001-03-09', neighborhood: 'Punta Carretas', city: 'Montevideo' })
+    await as(accessToken).put('/users/me', { birthDate: '2001-03-09', city: 'montevideo', neighborhood: 'punta-carretas' })
 
     const logs = lines.join('')
     expect(logs).toContain('/internal/users/me')
-    expect(logs).not.toMatch(/2001-03-09|Punta Carretas|Montevideo|birthDate/)
+    expect(logs).not.toMatch(/2001-03-09|punta-carretas|montevideo|birthDate/)
   })
 
   it('el serializer público (otros usuarios) solo expone id, nombre y foto', async () => {
     const { signUp, userSerializer, userRepo } = setup()
     const { user } = await signUp({ email: 'ana@um.edu.uy' })
-    await userRepo.updateProfile(user.id, { birthDate: new Date('2001-03-09T00:00:00Z'), neighborhood: 'Pocitos', city: 'Montevideo', university: 'UM', interests: ['cine'] })
+    await userRepo.updateProfile(user.id, { birthDate: new Date('2001-03-09T00:00:00Z'), neighborhood: 'pocitos', city: 'montevideo', university: 'um', career: 'economia', interests: ['cine'] })
 
     const view = await userSerializer.serializePublic(await userRepo.findById(user.id))
 
