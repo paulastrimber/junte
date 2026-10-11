@@ -15,6 +15,8 @@ const validEnv = Object.freeze({
   FEED_WEIGHTS: ''
 })
 
+const S3_ENV = Object.freeze({ S3_BUCKET: 'junte-prod-photos', AWS_REGION: 'us-east-1' })
+
 function errorOf (env) {
   try {
     loadConfig(env)
@@ -36,6 +38,7 @@ describe('loadConfig', () => {
       mongo: { uri: validEnv.MONGO_URI, dbName: 'junte' },
       redis: { url: 'redis://localhost:6379' },
       jwt: { secret: SECRET },
+      storage: null,
       feed: { weightsRaw: null }
     })
     expect(Object.isFrozen(config)).toBe(true)
@@ -77,15 +80,22 @@ describe('loadConfig', () => {
   })
 
   it('en producción rechaza un JWT_SECRET que está en el repo, sin mostrarlo', () => {
-    const err = errorOf({ ...validEnv, NODE_ENV: 'production' })
+    const err = errorOf({ ...validEnv, ...S3_ENV, NODE_ENV: 'production' })
 
     expect(err.variables).toEqual(['JWT_SECRET'])
     expect(err.message).toMatch(/repositorio/)
     expect(err.message).not.toContain(SECRET)
   })
 
+  it('en producción rechaza también el secreto fijo de los tests de auth', () => {
+    const err = errorOf({ ...validEnv, ...S3_ENV, NODE_ENV: 'production', JWT_SECRET: 'a-test-only-secret-with-at-least-32-chars!!' })
+
+    expect(err.variables).toEqual(['JWT_SECRET'])
+    expect(err.message).toMatch(/repositorio/)
+  })
+
   it('en producción acepta un JWT_SECRET que no está en el repo', () => {
-    const config = loadConfig({ ...validEnv, NODE_ENV: 'production', JWT_SECRET: randomBytes(32).toString('hex') })
+    const config = loadConfig({ ...validEnv, ...S3_ENV, NODE_ENV: 'production', JWT_SECRET: randomBytes(32).toString('hex') })
 
     expect(config.isProduction).toBe(true)
   })
@@ -132,5 +142,45 @@ describe('loadConfig', () => {
 
   it('ignora variables que no son de la app', () => {
     expect(loadConfig({ ...validEnv, PATH: '/usr/bin', HOME: '/home/x' })).not.toHaveProperty('PATH')
+  })
+
+  describe('storage (S3)', () => {
+    it('S3_BUCKET y AWS_REGION son opcionales fuera de producción: sin ellas no hay storage real', () => {
+      expect(loadConfig(validEnv).storage).toBeNull()
+      expect(loadConfig({ ...validEnv, NODE_ENV: 'test' }).storage).toBeNull()
+    })
+
+    it('con las dos variables expone { bucket, region }', () => {
+      expect(loadConfig({ ...validEnv, ...S3_ENV }).storage).toEqual({ bucket: 'junte-prod-photos', region: 'us-east-1' })
+    })
+
+    it('en producción son obligatorias y el error las nombra', () => {
+      const err = errorOf({ ...validEnv, NODE_ENV: 'production', JWT_SECRET: randomBytes(32).toString('hex') })
+
+      expect(err.variables.sort()).toEqual(['AWS_REGION', 'S3_BUCKET'])
+      expect(err.message).toMatch(/obligatoria en producción/)
+    })
+
+    it('definir solo una de las dos es un error también en desarrollo', () => {
+      expect(errorOf({ ...validEnv, S3_BUCKET: 'junte-photos' }).variables).toEqual(['AWS_REGION'])
+      expect(errorOf({ ...validEnv, AWS_REGION: 'us-east-1' }).variables).toEqual(['S3_BUCKET'])
+    })
+
+    it('una variable vacía (`S3_BUCKET=` en .env) cuenta como ausente', () => {
+      expect(loadConfig({ ...validEnv, S3_BUCKET: '', AWS_REGION: '' }).storage).toBeNull()
+    })
+
+    it('valida el formato del bucket y de la región sin mostrar su valor', () => {
+      const err = errorOf({ ...validEnv, S3_BUCKET: 'Bucket Con Espacios', AWS_REGION: 'región' })
+
+      expect(err.variables.sort()).toEqual(['AWS_REGION', 'S3_BUCKET'])
+      expect(err.message).not.toContain('Bucket Con Espacios')
+    })
+
+    it('no pide credenciales de AWS: vienen de la cadena por defecto del SDK / rol IAM', () => {
+      const config = loadConfig({ ...validEnv, ...S3_ENV, AWS_ACCESS_KEY_ID: 'x', AWS_SECRET_ACCESS_KEY: 'y' })
+
+      expect(JSON.stringify(config)).not.toMatch(/AWS_ACCESS|AWS_SECRET|"x"|"y"/)
+    })
   })
 })

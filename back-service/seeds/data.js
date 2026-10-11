@@ -3,13 +3,15 @@
 
 const UM = 'Universidad de Montevideo'
 
+// `birthDate` es un día del calendario (YYYY-MM-DD, se guarda a medianoche UTC). Barrio y localidad son
+// texto libre. La contraseña de todos sale de SEED_PASSWORD (ver seeds/index.js), nunca de este archivo.
 export const USERS = Object.freeze([
-  { key: 'admin', email: 'admin@junte.test', name: 'Admin junte', university: UM, interests: [], role: 'admin', status: 'active' },
-  { key: 'lucia', email: 'lucia@junte.test', name: 'Lucía Pérez', university: UM, interests: ['futbol', 'running', 'musica'], role: 'user', status: 'active' },
-  { key: 'mateo', email: 'mateo@junte.test', name: 'Mateo Rodríguez', university: UM, interests: ['estudio', 'juegos-de-mesa', 'cine'], role: 'user', status: 'active' },
-  { key: 'sofia', email: 'sofia@junte.test', name: 'Sofía González', university: UM, interests: ['running', 'cine'], role: 'user', status: 'active' },
+  { key: 'admin', email: 'admin@junte.test', name: 'Admin junte', birthDate: '1990-05-20', university: UM, neighborhood: 'Centro', city: 'Montevideo', interests: [], role: 'admin', status: 'active' },
+  { key: 'lucia', email: 'lucia@junte.test', name: 'Lucía Pérez', birthDate: '2002-03-14', university: UM, neighborhood: 'Pocitos', city: 'Montevideo', interests: ['futbol', 'running', 'musica'], role: 'user', status: 'active' },
+  { key: 'mateo', email: 'mateo@junte.test', name: 'Mateo Rodríguez', birthDate: '2001-11-02', university: UM, neighborhood: 'Cordón', city: 'Montevideo', interests: ['estudio', 'juegos-de-mesa', 'cine'], role: 'user', status: 'active' },
+  { key: 'sofia', email: 'sofia@junte.test', name: 'Sofía González', birthDate: '2003-07-29', university: UM, neighborhood: 'Punta Carretas', city: 'Montevideo', interests: ['running', 'cine'], role: 'user', status: 'active' },
   // Para probar el 401 de cuentas suspendidas.
-  { key: 'suspendido', email: 'suspendido@junte.test', name: 'Cuenta Suspendida', university: UM, interests: ['futbol'], role: 'user', status: 'suspended' }
+  { key: 'suspendido', email: 'suspendido@junte.test', name: 'Cuenta Suspendida', birthDate: '2000-01-15', university: UM, neighborhood: 'Parque Rodó', city: 'Montevideo', interests: ['futbol'], role: 'user', status: 'suspended' }
 ])
 
 // `daysFromNow` + `hour` (hora de Montevideo, UTC−3) se convierten a fecha al sembrar, así los planes

@@ -15,12 +15,17 @@ tasks:
 
   # ── Entorno local ────────────────────────────────────────────────
   setup:
-    desc: Instala dependencias de back y app y crea los .env desde .env.example (JWT_SECRET aleatorio)
+    desc: Instala dependencias de back y app y crea los .env desde .env.example (JWT_SECRET y SEED_PASSWORD aleatorios)
     cmds:
       - test -f {{.BACK}}/.env || cp {{.BACK}}/.env.example {{.BACK}}/.env
       - |
         if grep -q '^JWT_SECRET=$' {{.BACK}}/.env; then
           sed -i.bak "s|^JWT_SECRET=$|JWT_SECRET=$(openssl rand -hex 32)|" {{.BACK}}/.env && rm {{.BACK}}/.env.bak
+        fi
+      - grep -q '^SEED_PASSWORD=' {{.BACK}}/.env || printf '\nSEED_PASSWORD=\n' >> {{.BACK}}/.env
+      - |
+        if grep -q '^SEED_PASSWORD=$' {{.BACK}}/.env; then
+          sed -i.bak "s|^SEED_PASSWORD=$|SEED_PASSWORD=$(openssl rand -hex 12)|" {{.BACK}}/.env && rm {{.BACK}}/.env.bak
         fi
       - test -f {{.MOBILE}}/.env || cp {{.MOBILE}}/.env.example {{.MOBILE}}/.env
       - npm ci --prefix {{.BACK}}

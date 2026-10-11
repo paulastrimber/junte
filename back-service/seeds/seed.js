@@ -5,11 +5,8 @@ import { withTransaction } from '../src/adapters/db/index.js'
 import { User } from '../src/modules/users/user.model.js'
 import { Plan } from '../src/modules/plans/plan.model.js'
 import { Participation } from '../src/modules/participations/participation.model.js'
+import { parseCalendarDate, toUtcMidnight } from '../src/shared/age.js'
 import { PLANS, USERS } from './data.js'
-
-// No es un hash válido de Argon2/bcrypt: estas cuentas no pueden iniciar sesión hasta que auth
-// defina cómo se hashea (ver docs/pendientes.md, sección C · back-data).
-export const NO_LOGIN_PASSWORD_HASH = '!seed-no-login'
 
 const MONTEVIDEO_UTC_OFFSET_HOURS = -3
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -20,12 +17,27 @@ function startsAtFor ({ daysFromNow, hour }, now) {
   return new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hour - MONTEVIDEO_UTC_OFFSET_HOURS))
 }
 
-async function seedUsers () {
+// El hash se recalcula solo si hace falta: Argon2 usa una sal nueva en cada hash, así que volver a
+// hashear en cada corrida cambiaría el documento sin que cambie nada de verdad.
+async function passwordHashFor (existing, { passwordHasher, password }) {
+  if (existing && await passwordHasher.verify(existing.passwordHash, password)) return existing.passwordHash
+  return passwordHasher.hash(password)
+}
+
+async function seedUsers ({ passwordHasher, password }) {
   const byKey = new Map()
-  for (const { key, email, ...profile } of USERS) {
+  for (const { key, email, birthDate, ...profile } of USERS) {
+    const existing = await User.findOne({ email }).lean()
     const user = await User.findOneAndUpdate(
       { email },
-      { $set: profile, $setOnInsert: { email, passwordHash: NO_LOGIN_PASSWORD_HASH } },
+      {
+        $set: {
+          ...profile,
+          birthDate: toUtcMidnight(parseCalendarDate(birthDate)),
+          passwordHash: await passwordHashFor(existing, { passwordHasher, password })
+        },
+        $setOnInsert: { email }
+      },
       UPSERT
     )
     byKey.set(key, user)
@@ -76,11 +88,17 @@ async function seedPlan (spec, users, now) {
 
 /**
  * Carga los datos de desarrollo. Requiere la conexión abierta y las migraciones aplicadas.
- * @param {{ now?: Date }} [options]  `now` fijo para tests.
+ * @param {object} options
+ * @param {import('../src/adapters/passwordHasher.js').PasswordHasher} options.passwordHasher
+ * @param {string} options.password  Contraseña de todos los usuarios de ejemplo (SEED_PASSWORD). Nunca fija en el código.
+ * @param {Date} [options.now]  Fijo para tests.
  * @returns {Promise<{ users: number, plans: number, participations: number }>}
  */
-export async function seed ({ now = new Date() } = {}) {
-  const users = await seedUsers()
+export async function seed ({ passwordHasher, password, now = new Date() }) {
+  if (typeof password !== 'string' || password === '') {
+    throw new Error('seed: falta la contraseña de los usuarios de ejemplo (variable SEED_PASSWORD)')
+  }
+  const users = await seedUsers({ passwordHasher, password })
   let participations = 0
   for (const spec of PLANS) {
     await seedPlan(spec, users, now)

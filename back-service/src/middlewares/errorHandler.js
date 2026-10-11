@@ -8,8 +8,16 @@ function isZodError (err) {
   return Array.isArray(err?.issues) && (err.name === 'ZodError' || err.name === '$ZodError')
 }
 
+// Un campo desconocido (.strict) se informa con el nombre del campo, no con el del objeto.
+function detailsOf (issue) {
+  if (issue.code === 'unrecognized_keys') {
+    return issue.keys.map((key) => ({ path: [...issue.path, key].join('.'), message: 'Este campo no está permitido' }))
+  }
+  return [{ path: issue.path.join('.'), message: issue.message }]
+}
+
 function fromZod (err) {
-  const details = err.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message }))
+  const details = err.issues.flatMap(detailsOf)
   return new AppError('VALIDATION_ERROR', 'Los datos enviados no son válidos', { details })
 }
 
