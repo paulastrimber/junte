@@ -97,6 +97,76 @@ describe('validadores $jsonSchema (sin pasar por Mongoose)', () => {
   })
 })
 
+describe('sessions', () => {
+  const session = (overrides = {}) => ({
+    userId: new mongoose.Types.ObjectId(),
+    sid: `sid-${Math.random()}`,
+    refreshTokenHash: 'a'.repeat(64),
+    lastUsedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+    ...overrides
+  })
+
+  it('el índice TTL de expiresAt borra la sesión al vencer (expireAfterSeconds: 0)', async () => {
+    const indexes = await raw('sessions').indexes()
+
+    expect(indexes.find((index) => index.name === 'expiresAt_ttl')).toMatchObject({ key: { expiresAt: 1 }, expireAfterSeconds: 0 })
+  })
+
+  it('rechaza dos sesiones con el mismo sid', async () => {
+    await raw('sessions').insertOne(session({ sid: 'dup' }))
+
+    await expect(raw('sessions').insertOne(session({ sid: 'dup' }))).rejects.toMatchObject({ code: 11000 })
+  })
+
+  it('rechaza una sesión sin refreshTokenHash', async () => {
+    const { refreshTokenHash, ...incomplete } = session()
+
+    await expect(raw('sessions').insertOne(incomplete)).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+
+  it('rechaza un expiresAt que no es fecha', async () => {
+    await expect(raw('sessions').insertOne(session({ expiresAt: '2030-01-01' })))
+      .rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+})
+
+describe('validador de users: perfil', () => {
+  it('rechaza un birthDate que no es fecha', async () => {
+    const user = await makeUser()
+
+    await expect(raw('users').updateOne({ _id: user._id }, { $set: { birthDate: '2000-01-01' } }))
+      .rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+
+  it.each([
+    ['neighborhood', ''],
+    ['neighborhood', 'x'.repeat(61)],
+    ['city', ''],
+    ['city', 'x'.repeat(61)]
+  ])('rechaza %s con largo inválido', async (field, value) => {
+    const user = await makeUser()
+
+    await expect(raw('users').updateOne({ _id: user._id }, { $set: { [field]: value } }))
+      .rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+
+  it('rechaza más de 5 intereses', async () => {
+    const user = await makeUser()
+
+    await expect(raw('users').updateOne({ _id: user._id }, { $set: { interests: ['a', 'b', 'c', 'd', 'e', 'f'] } }))
+      .rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+
+  it('acepta un perfil completo', async () => {
+    const user = await makeUser()
+
+    await expect(raw('users').updateOne({ _id: user._id }, {
+      $set: { birthDate: new Date('2001-03-09T00:00:00Z'), neighborhood: 'Pocitos', city: 'Montevideo' }
+    })).resolves.toBeDefined()
+  })
+})
+
 describe('índice 2dsphere', () => {
   it('ordena por cercanía con coordenadas [lng, lat]', async () => {
     const creator = await makeUser()

@@ -38,4 +38,20 @@ describe('migraciones', () => {
     expect(plans.options.validator ?? {}).toEqual({})
     await runMigrations(connection.db, connection.getClient())
   })
+
+  it('la migración de perfil quita users.refreshTokenHash de los usuarios existentes y conserva el resto', async () => {
+    const { db } = getConnection()
+    const { up, down } = await import('../../migrations/20261011180100-users-profile-and-drop-refresh-token-hash.js')
+    await down(db) // estado anterior: validador viejo, sin que cambie el changelog
+    await db.collection('users').insertOne({
+      email: 'viejo@test.junte', passwordHash: 'x', role: 'user', status: 'active', refreshTokenHash: 'abc', name: 'Viejo'
+    })
+
+    await up(db)
+
+    const user = await db.collection('users').findOne({ email: 'viejo@test.junte' })
+    expect(user).not.toHaveProperty('refreshTokenHash')
+    expect(user).toMatchObject({ name: 'Viejo', email: 'viejo@test.junte' })
+    await db.collection('users').deleteMany({})
+  })
 })
