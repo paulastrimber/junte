@@ -1,6 +1,6 @@
 # 07 · Modelo de datos (MongoDB)
 
-Siete colecciones. Todas con `_id: ObjectId`, `createdAt` y `updatedAt` (`timestamps: true` en Mongoose). Referencias por `ObjectId`, controladas por la aplicación. Fechas como `Date`.
+Ocho colecciones. Todas con `_id: ObjectId`, `createdAt` y `updatedAt` (`timestamps: true` en Mongoose). Referencias por `ObjectId`, controladas por la aplicación. Fechas como `Date`.
 
 **Los índices y validadores se crean solo por migraciones** ([migraciones.md](../practicas/migraciones.md)); Mongoose corre con `autoIndex: false` y `autoCreate: false`.
 
@@ -11,14 +11,35 @@ Siete colecciones. Todas con `_id: ObjectId`, `createdAt` y `updatedAt` (`timest
 | Campo | Tipo | Notas |
 |-------|------|-------|
 | `email` | string | Único, normalizado (trim + minúsculas) |
-| `passwordHash` | string | Argon2id (o bcrypt). Nunca se serializa |
-| `name`, `university` | string | |
-| `interests` | string[] | Se usa en Jaccard del feed |
+| `passwordHash` | string | Argon2id. Nunca se serializa |
+| `name` | string | 1–80 |
+| `birthDate` | Date? | Día del calendario guardado a medianoche UTC. La edad **no se guarda**: el serializer la calcula (`age`). Solo se le muestra al dueño |
+| `university` | string? | Opcional ("si corresponde": no todo usuario estudia en una universidad) |
+| `neighborhood`, `city` | string? | Barrio y localidad donde vive. Texto libre, 1–60. Datos del perfil, no ubicación en tiempo real; no se exponen a otros usuarios ni se loguean |
+| `interests` | string[] | Máx. 5, de una lista cerrada compartida (`shared/interests.js`). Se usa en Jaccard del feed |
 | `role` | `'user'` \| `'admin'` | **➕ revisión.** Default `user`. Solo cambia por migración/seed o por otro admin. Ver [ADR-0004](adr/0004-rol-y-estado-de-usuario.md) |
 | `status` | `'active'` \| `'suspended'` | **➕ revisión.** El middleware JWT exige `active` (el informe pide verificar "estado del usuario" pero no definía el campo) |
 | `reputation` | number | Default 0. Solo la escribe el back |
-| `refreshTokenHash` | string? | Hash del refresh vigente (rotación/revocación) |
 | `photoKey` | string? | Clave del objeto en S3, no la imagen |
+
+Perfil completo = `name` + `birthDate` + al menos 1 interés (regla `isProfileComplete` del servicio de usuarios).
+`refreshTokenHash` ya **no existe** en `users`: se reemplazó por la colección `sessions` ([ADR-0008](adr/0008-sesiones-multiples.md)).
+
+### `sessions`
+
+Una por login/dispositivo.
+
+| Campo | Tipo | Notas |
+|-------|------|-------|
+| `userId` | ObjectId → users | |
+| `sid` | string | Identificador público de la sesión (va dentro de los tokens). Único |
+| `refreshTokenHash` | string | sha256 (hex) del refresh token **vigente** de esa sesión. Nunca el token |
+| `deviceLabel` | string? | "android", "ios"… (máx. 60). Solo para listar sesiones |
+| `lastUsedAt` | Date | Último login o refresh |
+| `expiresAt` | Date | Vencimiento del refresh vigente (30 días desde el último uso). El índice TTL borra el documento al llegar |
+| `revokedAt` | Date? | Sin valor mientras está activa. Se conserva (hasta el TTL) para detectar el reuso de un refresh viejo |
+
+Reglas: máximo 5 sesiones activas (`revokedAt` vacío y `expiresAt` futuro) por usuario; al abrir otra se revoca la más antigua por `createdAt`. La rotación es una actualización condicional sobre `{ sid, userId, refreshTokenHash, revokedAt: null, expiresAt > ahora }`.
 
 ### `plans`
 
@@ -76,8 +97,11 @@ Un **único registro por par** plan–usuario; una baja lo pasa a `cancelled` y 
 | `reports` | `{ status: 1, createdAt: 1 }` | Cola de moderación |
 | `deviceTokens` | `{ token: 1 }` único | Un registro por dispositivo |
 | `deviceTokens` | `{ userId: 1 }` | Enviar push a un usuario |
+| `sessions` | `{ sid: 1 }` único | Una sesión por `sid` (lo usa la rotación del refresh) |
+| `sessions` | `{ userId: 1 }` | Contar, listar y cerrar las sesiones de un usuario |
+| `sessions` | `{ expiresAt: 1 }` TTL (`expireAfterSeconds: 0`) | MongoDB borra las sesiones vencidas |
 
-Los índices que no figuran en el informe (`creatorId`, `userId+status`, `deviceTokens.userId`) se agregan porque las consultas de esas pantallas los necesitan; cualquier índice nuevo entra por migración con su justificación.
+Los índices que no figuran en el informe (`creatorId`, `userId+status`, `deviceTokens.userId`, los de `sessions`) se agregan porque las consultas de esas pantallas los necesitan; cualquier índice nuevo entra por migración con su justificación.
 
 ## Invariantes (no se rompen nunca)
 
@@ -117,4 +141,4 @@ Quién y cuándo dispara cada transición está en [pendientes](../pendientes.md
 
 ## Validadores `$jsonSchema` (defensa en profundidad)
 
-Además de Zod y Mongoose, las migraciones agregan validadores en MongoDB para los invariantes críticos (`capacity ≥ 1`, `participantCount ≥ 0`, enums de `status` y `role`) con `validationLevel: 'moderate'`. Así ni un script manual puede dejar datos inválidos.
+Además de Zod y Mongoose, las migraciones agregan validadores en MongoDB para los invariantes críticos (`capacity ≥ 1`, `participantCount ≥ 0`, enums de `status` y `role`, `users.birthDate` de tipo fecha, `neighborhood`/`city` de 1 a 60 caracteres, `interests` con máximo 5, campos obligatorios de `sessions`) con `validationLevel: 'moderate'`. Así ni un script manual puede dejar datos inválidos.

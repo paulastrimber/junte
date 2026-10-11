@@ -17,6 +17,7 @@ Cuando la decisión es difícil de revertir o afecta a más de un módulo: elegi
 | [0005](0005-nat-por-zona.md) | Un NAT Gateway por zona de disponibilidad | Aceptada |
 | [0006](0006-javascript-esm-y-estilo.md) | JavaScript ESM + neostandard en todo el código | Aceptada |
 | [0007](0007-herramientas-de-testing.md) | Vitest en el back, jest-expo en la app | Aceptada |
+| [0008](0008-sesiones-multiples.md) | Una sesión por dispositivo (colección `sessions`) | Aceptada |
 
 ## Reglas
 

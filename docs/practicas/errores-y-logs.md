@@ -19,15 +19,15 @@ Toda respuesta de error, venga de donde venga (Express o Nginx), tiene esta form
 | `code` | HTTP | Cuándo |
 |--------|------|--------|
 | `VALIDATION_ERROR` | 400 | Zod rechazó params, query o body |
-| `UNAUTHENTICATED` | 401 | Sin token, token inválido, firma o algoritmo incorrectos, refresh revocado |
-| `TOKEN_EXPIRED` | 401 | Access token vencido (la app intenta refresh) |
-| `INVALID_CREDENTIALS` | 401 | Login fallido (mismo mensaje para email inexistente y contraseña mala) |
-| `ACCOUNT_SUSPENDED` | 401 | Usuario con `status: 'suspended'` |
+| `UNAUTHENTICATED` | 401 | Sin token, token inválido, firma o algoritmo incorrectos; refresh vencido, revocado o reutilizado; usuario inexistente |
+| `TOKEN_EXPIRED` | 401 | Access token vencido (la app intenta refresh). Un refresh vencido NO usa este código |
+| `INVALID_CREDENTIALS` | 401 | Login fallido (mismo mensaje para email inexistente, contraseña mala y hash guardado con formato inválido) |
+| `ACCOUNT_SUSPENDED` | 401 | Usuario con `status: 'suspended'` (en login, refresh o con cualquier token). Pierde todas sus sesiones |
 | `FORBIDDEN` | 403 | Autenticado sin permiso (plan ajeno, no participante, no admin) |
 | `QR_INVALID` | 403 | QR inexistente, vencido o de otro plan |
 | `OUT_OF_RANGE` | 403 | Distancia mayor al radio o precisión insuficiente |
 | `NOT_FOUND` | 404 | Recurso inexistente o no visible |
-| `EMAIL_TAKEN` | 409 | Registro con email existente |
+| `EMAIL_TAKEN` | 409 | Registro con email existente (también con otras mayúsculas o espacios) |
 | `PROFILE_INCOMPLETE` | 409 | Crear plan sin perfil completo |
 | `PLAN_FULL` | 409 | Sin cupos |
 | `PLAN_CLOSED` | 409 | El plan no admite inscripciones/bajas en su estado actual |
@@ -93,8 +93,8 @@ Logger estructurado en JSON (**pino**), una línea por evento, salida a stdout �
 
 ### Qué NO se loguea nunca
 
-Contraseñas, `Authorization`, access/refresh tokens, `qrToken`, coordenadas exactas, bodies completos, URLs firmadas de S3, secretos de configuración.
-pino con `redact: ['req.headers.authorization', '*.password', '*.refreshToken', '*.qrToken', '*.latitude', '*.longitude']` como red de seguridad, además de no pasarlos.
+Contraseñas, `Authorization`, access/refresh tokens, `qrToken`, coordenadas exactas, bodies completos, URLs firmadas de S3, secretos de configuración, y los datos personales del perfil (`birthDate`, `neighborhood`, `city`).
+pino con `redact` sobre `req.headers.authorization`, `password`, `passwordHash`, `refreshTokenHash`, `accessToken`, `refreshToken`, `token`, `qrToken`, `latitude`, `longitude`, `birthDate`, `neighborhood`, `city`, `photoUrl` (en la raíz y un nivel anidado; lista completa en `adapters/logger.js`) como red de seguridad, además de no pasarlos.
 
 ### Niveles
 
@@ -107,5 +107,6 @@ Retención limitada en CloudWatch (propuesta: 14–30 días). Los logs no son un
 ## En la app
 
 - `ApiError` con `status`, `code`, `message`, `requestId`.
-- Mapeo por `code`: `TOKEN_EXPIRED` → refresh; `PLAN_FULL` → refrescar detalle y mostrar mensaje; `RATE_LIMITED` → reintentar con espera; `INTERNAL` → mensaje genérico + `requestId` visible en desarrollo.
+- Códigos que genera **solo la app** (el back nunca los devuelve): `NETWORK_ERROR` (status 0, sin respuesta), `TIMEOUT` (status 0, timeout del cliente, 10 s), `REQUEST_CANCELED` (status 0, `AbortController`), `UNKNOWN_ERROR` (status sin código genérico y sin `code` en el cuerpo, o error de programación), `UPLOAD_FAILED` (S3 rechazó la subida de la foto, con el status de S3), `IMAGE_NOT_SUPPORTED` (la imagen elegida no es JPEG/PNG/WebP o está vacía) e `IMAGE_TOO_LARGE` (más de 5 MB). Si la respuesta no trae `code` se usa uno del catálogo por status: 400 `VALIDATION_ERROR`, 401 `UNAUTHENTICATED`, 403 `FORBIDDEN`, 404 `NOT_FOUND`, 429 `RATE_LIMITED`, ≥ 500 `INTERNAL`.
+- Mapeo por `code`: `TOKEN_EXPIRED` y `UNAUTHENTICATED` en una request con token → **un solo** refresh en vuelo y un reintento (si el refresh es rechazado con 401, se vuelve al login); `ACCOUNT_SUSPENDED` → vuelve al login sin refresh; `EMAIL_TAKEN` / `INVALID_CREDENTIALS` → mensaje junto al formulario; `PLAN_FULL` → refrescar detalle y mostrar mensaje; `RATE_LIMITED` → reintentar con espera; `INTERNAL` → mensaje genérico + `requestId` visible en desarrollo.
 - Nada de `console.log` con tokens o respuestas completas; en producción, los logs de la app se desactivan.

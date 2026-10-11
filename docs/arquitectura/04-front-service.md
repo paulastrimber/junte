@@ -24,7 +24,7 @@ front-service/
     00-realip.conf.template    # set_real_ip_from ${NGINX_TRUSTED_CIDR} / real_ip_header
     20-upstream.conf.template  # resolver ${NGINX_RESOLVER} + $backend = ${NGINX_BACKEND}
   conf.d/                  # igual en todos los entornos
-    10-ratelimit.conf      # limit_req_zone (api, auth) + status 429
+    10-ratelimit.conf      # limit_req_zone (api, auth) + status 429; `auth` solo la usan login y register
     30-server.conf         # server :8080, /health, /api/v1, /api/v1/socket.io, /admin, 404/429 JSON
   snippets/
     proxy.conf             # reescritura /api/v1 → /internal + headers de proxy
@@ -76,7 +76,9 @@ server {
 
   location = /health { access_log off; return 200 'ok'; }
 
-  location /api/v1/auth/ {
+  # Solo login y registro (fuerza bruta, altas masivas). refresh, logout y logout-all usan la zona api.
+  # Regex insensible a mayúsculas y con barra final opcional: una variante de la URL no cae en la zona general.
+  location ~* ^/api/v1/auth/(login|register)/?$ {
     limit_req zone=auth burst=5 nodelay;
     include /etc/nginx/snippets/proxy.conf;
   }
@@ -156,5 +158,6 @@ Estáticos servidos por Nginx; sus llamadas van a `/api/v1/admin/*` con un JWT d
   - `/api/v1/health` llega al back; una ruta inexistente `/api/v1/x` devuelve el 404 del back y el access log muestra `upstreamPath: /internal/x` sin query string; `/internal/*` da 404.
   - Body de más de 1 MB → 413.
   - Ráfaga sobre `/api/v1/auth/login` → 429 JSON `{ code: 'RATE_LIMITED', message, requestId }` con el mismo `requestId` que el header; un `X-Forwarded-For` inventado desde fuera de la red de confianza no evade el límite.
+  - La zona estricta es solo de `login` y `register`: con la IP ya bloqueada, `/auth/register` y las variantes de la URL de login (`/auth/Login`, `/auth/LOGIN`, `/auth/login/`) también dan 429, mientras que `/auth/refresh`, `/auth/logout` y `/auth/logout-all` (zona general) siguen respondiendo.
   - Rate limit por IP real: desde un contenedor efímero en la red de compose (red de confianza), una ráfaga con `X-Forwarded-For: A` llega a 429 y un request con `X-Forwarded-For: B` no; el access log registra B como `remoteAddr`.
   - Las verificaciones que leen el access log o usan la red de compose solo corren con `base_url` local (se pueden omitir con `SMOKE_SKIP_LOCAL=1`).

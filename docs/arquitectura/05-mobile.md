@@ -32,7 +32,10 @@ mobile/
     services/
       api/client.js        # axios: baseURL, token, refresh, mapeo de errores
       api/plans.js …       # una función por endpoint
-      auth.js              # login/logout, tokens en expo-secure-store
+      auth.js              # sesión: login, registro, restore, refresh, logout (usa tokenStorage)
+      tokenStorage.js      # access/refresh en expo-secure-store (+ copia en memoria)
+      photoUpload.js       # presign → PUT directo a S3 → confirmar
+      imagePicker.js       # expo-image-picker (solo imágenes, recorte cuadrado)
       socket.js            # socket.io-client
       push.js              # permisos + registro del token en POST /devices
       location.js          # expo-location
@@ -47,8 +50,9 @@ mobile/
 ## Cliente HTTP (`services/api/client.js`)
 
 - `baseURL` = `EXPO_PUBLIC_API_URL` del perfil de EAS.
-- Interceptor de request: agrega `Authorization: Bearer <access>`.
-- Interceptor de response ante 401: **un solo refresh en vuelo** (las demás requests esperan esa promesa), reintenta una vez; si el refresh falla → logout.
+- Interceptor de request: agrega `Authorization: Bearer <access>` (salvo en las requests con `skipAuth: true`: register, login y refresh).
+- Interceptor de response ante 401 `TOKEN_EXPIRED`/`UNAUTHENTICATED`: **un solo refresh en vuelo** (las demás requests esperan esa promesa), reintenta una vez cada request. Una request lenta que falla después de que otra ya renovó el token solo se reintenta (no hace otro refresh). Si el refresh es rechazado (401) → se avisa a `AuthContext` y se vuelve al login; si falla por red, la sesión se conserva. `ACCOUNT_SUSPENDED` cierra la sesión sin intentar el refresh.
+- La sesión (token en memoria, refresh, aviso de sesión terminada) se registra con `configureApiAuth(authService.apiAuth)` al arrancar `App`.
 - Todo error se convierte en `ApiError { status, code, message, requestId }`. Las pantallas muestran `message` y, en desarrollo, el `requestId` para rastrear en logs.
 
 ## Tokens y datos sensibles
