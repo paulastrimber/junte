@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import mongoose from 'mongoose'
-import { useTestDb } from '../helpers/db.js'
+import { removeTestCatalogRows, useTestDb } from '../helpers/db.js'
 import { MONTEVIDEO, makeParticipation, makePlan, makeUser } from '../helpers/factories.js'
 import { getConnection } from '../../src/adapters/db/index.js'
 import { findIndexProblems } from '../../src/adapters/db/expected-indexes.js'
@@ -94,6 +94,133 @@ describe('validadores $jsonSchema (sin pasar por Mongoose)', () => {
       distanceMeters: 10,
       location: { type: 'Point', coordinates: [...MONTEVIDEO] }
     })).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+})
+
+describe('sessions', () => {
+  const session = (overrides = {}) => ({
+    userId: new mongoose.Types.ObjectId(),
+    sid: `sid-${Math.random()}`,
+    refreshTokenHash: 'a'.repeat(64),
+    lastUsedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+    ...overrides
+  })
+
+  it('el índice TTL de expiresAt borra la sesión al vencer (expireAfterSeconds: 0)', async () => {
+    const indexes = await raw('sessions').indexes()
+
+    expect(indexes.find((index) => index.name === 'expiresAt_ttl')).toMatchObject({ key: { expiresAt: 1 }, expireAfterSeconds: 0 })
+  })
+
+  it('rechaza dos sesiones con el mismo sid', async () => {
+    await raw('sessions').insertOne(session({ sid: 'dup' }))
+
+    await expect(raw('sessions').insertOne(session({ sid: 'dup' }))).rejects.toMatchObject({ code: 11000 })
+  })
+
+  it('rechaza una sesión sin refreshTokenHash', async () => {
+    const { refreshTokenHash, ...incomplete } = session()
+
+    await expect(raw('sessions').insertOne(incomplete)).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+
+  it('rechaza un expiresAt que no es fecha', async () => {
+    await expect(raw('sessions').insertOne(session({ expiresAt: '2030-01-01' })))
+      .rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+})
+
+describe('validador de users: perfil', () => {
+  it('rechaza un birthDate que no es fecha', async () => {
+    const user = await makeUser()
+
+    await expect(raw('users').updateOne({ _id: user._id }, { $set: { birthDate: '2000-01-01' } }))
+      .rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+
+  it.each([
+    ['university', ''],
+    ['university', 'Universidad de Montevideo'],
+    ['career', 'x'.repeat(81)],
+    ['city', 'Montevideo'],
+    ['neighborhood', ''],
+    ['neighborhood', 'Pocitos']
+  ])('rechaza %s con un valor que no es una key (%j)', async (field, value) => {
+    const user = await makeUser()
+
+    await expect(raw('users').updateOne({ _id: user._id }, { $set: { [field]: value } }))
+      .rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+
+  it('rechaza más de 10 intereses y keys mal formadas', async () => {
+    const user = await makeUser()
+    const eleven = Array.from({ length: 11 }, (_, i) => `interes-${i}`)
+
+    await expect(raw('users').updateOne({ _id: user._id }, { $set: { interests: eleven } }))
+      .rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('users').updateOne({ _id: user._id }, { $set: { interests: ['Fútbol'] } }))
+      .rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+
+  it('acepta un perfil completo', async () => {
+    const user = await makeUser()
+
+    await expect(raw('users').updateOne({ _id: user._id }, {
+      $set: { birthDate: new Date('2001-03-09T00:00:00Z'), university: 'um', career: 'economia', city: 'montevideo', neighborhood: 'pocitos', onboardingCompletedAt: new Date() }
+    })).resolves.toBeDefined()
+  })
+})
+
+describe('catálogos', () => {
+  afterEach(removeTestCatalogRows)
+
+  const doc = (overrides = {}) => ({ key: 'algo', name: 'Algo', order: 1, active: true, ...overrides })
+
+  it('las colecciones quedan cargadas por la migración inicial', async () => {
+    for (const [name, minimum] of [['interestCategories', 8], ['interests', 50], ['universities', 7], ['careers', 200], ['cities', 1], ['neighborhoods', 62]]) {
+      expect(await raw(name).countDocuments(), name).toBeGreaterThanOrEqual(minimum)
+    }
+  })
+
+  it.each([
+    ['interestCategories', {}],
+    ['universities', { shortName: 'X' }],
+    ['cities', { department: 'X' }]
+  ])('%s: rechaza una key repetida', async (name, extra) => {
+    await raw(name).insertOne(doc({ key: 'test-repetida', ...extra }))
+
+    await expect(raw(name).insertOne(doc({ key: 'test-repetida', ...extra }))).rejects.toMatchObject({ code: 11000 })
+  })
+
+  it('careers: la key es única dentro de cada universidad, no global', async () => {
+    await raw('careers').insertOne(doc({ key: 'test-unica', universityKey: 'um' }))
+
+    await expect(raw('careers').insertOne(doc({ key: 'test-unica', universityKey: 'um' }))).rejects.toMatchObject({ code: 11000 })
+    await expect(raw('careers').insertOne(doc({ key: 'test-unica', universityKey: 'ort' }))).resolves.toBeDefined()
+  })
+
+  it('neighborhoods: la key es única dentro de cada ciudad', async () => {
+    await raw('neighborhoods').insertOne(doc({ key: 'test-unico', cityKey: 'montevideo' }))
+
+    await expect(raw('neighborhoods').insertOne(doc({ key: 'test-unico', cityKey: 'montevideo' }))).rejects.toMatchObject({ code: 11000 })
+  })
+
+  it.each([
+    ['key con mayúsculas', { key: 'Futbol' }],
+    ['key con espacios', { key: 'tocar la guitarra' }],
+    ['nombre vacío', { name: '' }],
+    ['sin active', { active: undefined }],
+    ['categoryKey inválida', { categoryKey: 'Deportes' }],
+    ['minAge menor de 16', { minAge: 15 }],
+    ['minAge decimal', { minAge: 18.5 }]
+  ])('interests: rechaza %s', async (_label, override) => {
+    await expect(raw('interests').insertOne(doc({ categoryKey: 'deportes', ...override }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+
+  it('interests: acepta minAge 18 y sin minAge', async () => {
+    await expect(raw('interests').insertOne(doc({ key: 'test-con-edad', categoryKey: 'deportes', minAge: 18 }))).resolves.toBeDefined()
+    await expect(raw('interests').insertOne(doc({ key: 'test-sin-edad', categoryKey: 'deportes' }))).resolves.toBeDefined()
   })
 })
 

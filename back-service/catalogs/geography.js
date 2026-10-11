@@ -1,0 +1,75 @@
+// Geografía del catálogo. Por ahora solo Montevideo: agregar una ciudad es un dato nuevo (sin cambios de código).
+// Barrios: "áreas aproximadas a barrios" del Instituto Nacional de Estadística, 62 áreas con su código INE
+// (https://www5.ine.gub.uy/documents/Codificadores/Barrios%20Montevideo/Codificador%20de%20barrios%20Montevideo.pdf).
+// Algunos nombres agrupan barrios vecinos ("Capurro, Bella Vista"); se respetan tal cual para poder cruzarlos con el INE.
+
+export const CITIES = Object.freeze([
+  { key: 'montevideo', name: 'Montevideo', department: 'Montevideo' }
+])
+
+export const NEIGHBORHOODS = Object.freeze({
+  montevideo: Object.freeze([
+    { key: 'aguada', name: 'Aguada', ineCode: 41 },
+    { key: 'aires-puros', name: 'Aires Puros', ineCode: 29 },
+    { key: 'atahualpa', name: 'Atahualpa', ineCode: 43 },
+    { key: 'banados-de-carrasco', name: 'Bañados de Carrasco', ineCode: 16 },
+    { key: 'barrio-sur', name: 'Barrio Sur', ineCode: 3 },
+    { key: 'belvedere', name: 'Belvedere', ineCode: 54 },
+    { key: 'brazo-oriental', name: 'Brazo Oriental', ineCode: 51 },
+    { key: 'buceo', name: 'Buceo', ineCode: 9 },
+    { key: 'capurro-bella-vista', name: 'Capurro, Bella Vista', ineCode: 40 },
+    { key: 'carrasco', name: 'Carrasco', ineCode: 14 },
+    { key: 'carrasco-norte', name: 'Carrasco Norte', ineCode: 15 },
+    { key: 'casabo-pajas-blancas', name: 'Casabó, Pajas Blancas', ineCode: 36 },
+    { key: 'casavalle', name: 'Casavalle', ineCode: 30 },
+    { key: 'castro-p-castellanos', name: 'Castro, P. Castellanos', ineCode: 26 },
+    { key: 'centro', name: 'Centro', ineCode: 2 },
+    { key: 'cerrito', name: 'Cerrito', ineCode: 27 },
+    { key: 'cerro', name: 'Cerro', ineCode: 35 },
+    { key: 'ciudad-vieja', name: 'Ciudad Vieja', ineCode: 1 },
+    { key: 'colon-centro-y-noroeste', name: 'Colón Centro y Noroeste', ineCode: 59 },
+    { key: 'colon-sureste-abayuba', name: 'Colón Sureste, Abayubá', ineCode: 58 },
+    { key: 'conciliacion', name: 'Conciliación', ineCode: 53 },
+    { key: 'cordon', name: 'Cordón', ineCode: 4 },
+    { key: 'flor-de-maronas', name: 'Flor de Maroñas', ineCode: 18 },
+    { key: 'ituzaingo', name: 'Ituzaingó', ineCode: 22 },
+    { key: 'jacinto-vera', name: 'Jacinto Vera', ineCode: 44 },
+    { key: 'jardines-del-hipodromo', name: 'Jardines del Hipódromo', ineCode: 21 },
+    { key: 'la-blanqueada', name: 'La Blanqueada', ineCode: 47 },
+    { key: 'la-comercial', name: 'La Comercial', ineCode: 49 },
+    { key: 'la-figurita', name: 'La Figurita', ineCode: 45 },
+    { key: 'la-paloma-tomkinson', name: 'La Paloma, Tomkinson', ineCode: 37 },
+    { key: 'la-teja', name: 'La Teja', ineCode: 38 },
+    { key: 'larranaga', name: 'Larrañaga', ineCode: 46 },
+    { key: 'las-acacias', name: 'Las Acacias', ineCode: 28 },
+    { key: 'las-canteras', name: 'Las Canteras', ineCode: 19 },
+    { key: 'lezica-melilla', name: 'Lezica, Melilla', ineCode: 60 },
+    { key: 'malvin', name: 'Malvín', ineCode: 11 },
+    { key: 'malvin-norte', name: 'Malvín Norte', ineCode: 12 },
+    { key: 'manga', name: 'Manga', ineCode: 62 },
+    { key: 'manga-toledo-chico', name: 'Manga, Toledo Chico', ineCode: 32 },
+    { key: 'maronas-parque-guarani', name: 'Maroñas, Parque Guaraní', ineCode: 17 },
+    { key: 'mercado-modelo-bolivar', name: 'Mercado Modelo, Bolívar', ineCode: 25 },
+    { key: 'nuevo-paris', name: 'Nuevo París', ineCode: 55 },
+    { key: 'palermo', name: 'Palermo', ineCode: 5 },
+    { key: 'parque-batlle-villa-dolores', name: 'Parque Batlle, Villa Dolores', ineCode: 10 },
+    { key: 'parque-rodo', name: 'Parque Rodó', ineCode: 6 },
+    { key: 'paso-de-la-arena', name: 'Paso de la Arena', ineCode: 57 },
+    { key: 'paso-de-las-duranas', name: 'Paso de las Duranas', ineCode: 33 },
+    { key: 'penarol-lavalleja', name: 'Peñarol, Lavalleja', ineCode: 34 },
+    { key: 'piedras-blancas', name: 'Piedras Blancas', ineCode: 31 },
+    { key: 'pocitos', name: 'Pocitos', ineCode: 8 },
+    { key: 'prado-nueva-savona', name: 'Prado, Nueva Savona', ineCode: 39 },
+    { key: 'punta-carretas', name: 'Punta Carretas', ineCode: 7 },
+    { key: 'punta-gorda', name: 'Punta Gorda', ineCode: 13 },
+    { key: 'punta-rieles-bella-italia', name: 'Punta Rieles, Bella Italia', ineCode: 20 },
+    { key: 'reducto', name: 'Reducto', ineCode: 42 },
+    { key: 'sayago', name: 'Sayago', ineCode: 52 },
+    { key: 'tres-cruces', name: 'Tres Cruces', ineCode: 50 },
+    { key: 'tres-ombues-victoria', name: 'Tres Ombúes, Victoria', ineCode: 56 },
+    { key: 'union', name: 'Unión', ineCode: 23 },
+    { key: 'villa-espanola', name: 'Villa Española', ineCode: 24 },
+    { key: 'villa-garcia-manga-rural', name: 'Villa García, Manga Rural', ineCode: 61 },
+    { key: 'villa-munoz-retiro', name: 'Villa Muñoz, Retiro', ineCode: 48 }
+  ])
+})

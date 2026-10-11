@@ -3,7 +3,7 @@
 // para que `migrate:check` y los tests detecten una migración que no la cumple.
 // Si cambia la tabla de 07, cambia esta lista y se agrega una migración, en el mismo PR.
 
-/** @type {ReadonlyArray<{ collection: string, name: string, key: Record<string, 1 | -1 | '2dsphere'>, unique?: boolean }>} */
+/** @type {ReadonlyArray<{ collection: string, name: string, key: Record<string, 1 | -1 | '2dsphere'>, unique?: boolean, expireAfterSeconds?: number }>} */
 export const EXPECTED_INDEXES = Object.freeze([
   { collection: 'users', name: 'email_unique', key: { email: 1 }, unique: true },
   { collection: 'users', name: 'role', key: { role: 1 } },
@@ -16,7 +16,17 @@ export const EXPECTED_INDEXES = Object.freeze([
   { collection: 'messages', name: 'planId_createdAt_id', key: { planId: 1, createdAt: -1, _id: -1 } },
   { collection: 'reports', name: 'status_createdAt', key: { status: 1, createdAt: 1 } },
   { collection: 'deviceTokens', name: 'token_unique', key: { token: 1 }, unique: true },
-  { collection: 'deviceTokens', name: 'userId', key: { userId: 1 } }
+  { collection: 'deviceTokens', name: 'userId', key: { userId: 1 } },
+  { collection: 'sessions', name: 'sid_unique', key: { sid: 1 }, unique: true },
+  { collection: 'sessions', name: 'userId', key: { userId: 1 } },
+  { collection: 'sessions', name: 'expiresAt_ttl', key: { expiresAt: 1 }, expireAfterSeconds: 0 },
+  { collection: 'interestCategories', name: 'key_unique', key: { key: 1 }, unique: true },
+  { collection: 'interests', name: 'key_unique', key: { key: 1 }, unique: true },
+  { collection: 'interests', name: 'categoryKey_order', key: { categoryKey: 1, order: 1 } },
+  { collection: 'universities', name: 'key_unique', key: { key: 1 }, unique: true },
+  { collection: 'careers', name: 'universityKey_key_unique', key: { universityKey: 1, key: 1 }, unique: true },
+  { collection: 'cities', name: 'key_unique', key: { key: 1 }, unique: true },
+  { collection: 'neighborhoods', name: 'cityKey_key_unique', key: { cityKey: 1, key: 1 }, unique: true }
 ])
 
 export const COLLECTIONS = Object.freeze([...new Set(EXPECTED_INDEXES.map((index) => index.collection))])
@@ -56,6 +66,9 @@ export async function findIndexProblems (db) {
     }
     if (Boolean(actual.unique) !== Boolean(expected.unique)) {
       problems.push(`${label}: unique=${Boolean(actual.unique)}, se esperaba ${Boolean(expected.unique)}`)
+    }
+    if (actual.expireAfterSeconds !== expected.expireAfterSeconds) {
+      problems.push(`${label}: expireAfterSeconds=${actual.expireAfterSeconds}, se esperaba ${expected.expireAfterSeconds}`)
     }
   }
   return problems

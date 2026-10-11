@@ -9,7 +9,7 @@ El back es una API, así que el patrón MVC se traduce así:
 | Rol MVC | Pieza en junte | Hace | Nunca hace |
 |---------|---------------|------|-----------|
 | **Model** | `*.model.js` (esquema Mongoose) + `*.repository.js` (consultas) | Define documentos, encapsula queries | Reglas de negocio, conocer `req`/`res` |
-| **View** | `*.serializer.js` | Convierte un documento en el JSON público (`_id` → `id`, oculta `passwordHash`, `refreshTokenHash`, `qrNonceHash`) | Consultar la DB |
+| **View** | `*.serializer.js` | Convierte un documento en el JSON público (`_id` → `id`, oculta `passwordHash`, `qrNonceHash` y todo lo de sesiones; calcula `age`; firma `photoUrl`) | Consultar la DB |
 | **Controller** | `*.controller.js` | Lee `req` ya validado, llama al servicio, elige status HTTP, pasa por el serializer | Lógica de negocio, importar modelos |
 | *(Service)* | `*.service.js` | **Todas** las reglas de negocio, permisos de dominio, transacciones | Importar Express, leer `req`, armar JSON de salida |
 
@@ -28,8 +28,9 @@ back-service/
     config/
       index.js             # carga y valida variables de entorno con Zod
     modules/
-      auth/                # register, login, refresh, logout
-      users/               # perfil, foto
+      auth/                # register, login, refresh, logout, sesiones (colección sessions), tokens
+      users/               # perfil, foto, isProfileComplete
+      catalogs/            # intereses, universidades, carreras, ciudades, barrios (GET /catalogs + reglas de validación)
       plans/               # CRUD de planes, QR, cierre
       participations/      # join / leave (transacción de cupo)
       checkins/            # check-in + reputación
@@ -41,9 +42,10 @@ back-service/
       admin/               # moderación (requiere role=admin)
     middlewares/           # requestId, authenticate, requireRole, validate, errorHandler, notFound
     sockets/               # setup de Socket.io, auth del handshake, handlers de chat
-    adapters/              # db (Mongo + withTransaction), redis, s3, fcm, secrets, clock, logger
-    shared/                # AppError + catálogo de errores, paginación por cursor, utils puros
+    adapters/              # db (Mongo + withTransaction), redis, storage (s3 + memoria), passwordHasher (Argon2id), fcm, secrets, clock, logger
+    shared/                # AppError + catálogo de errores, paginación por cursor, utils puros (interests: lista cerrada, age: fechas de calendario y edad, uploads, validation: Zod en español, router: enrutado estricto)
   migrations/              # migrate-mongo (ver practicas/migraciones.md)
+  catalogs/                # datos iniciales de los catálogos + syncCatalogs (solo inserta); los carga una migración
   seeds/                   # datos de desarrollo, nunca en producción
   tests/
     integration/           # repos + Mongo en memoria (replica set)

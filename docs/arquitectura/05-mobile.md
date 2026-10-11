@@ -25,14 +25,18 @@ mobile/
   app.config.js            # lee EXPO_PUBLIC_* por perfil de EAS
   eas.json                 # perfiles development / preview / production
   src/
-    screens/               # LoginScreen, RegisterScreen, HomeScreen (feed), PlanScreen,
+    screens/               # LoginScreen, RegisterScreen, OnboardingScreen (3 pasos), HomeScreen (feed), PlanScreen,
                            # CreatePlanScreen, CheckInScreen, ChatScreen, ProfileScreen
     components/            # PlanCard, Button, Avatar, EmptyState, ErrorBanner… (presentacionales)
     hooks/
     services/
       api/client.js        # axios: baseURL, token, refresh, mapeo de errores
       api/plans.js …       # una función por endpoint
-      auth.js              # login/logout, tokens en expo-secure-store
+      auth.js              # sesión: login, registro, restore, refresh, logout (usa tokenStorage)
+      tokenStorage.js      # access/refresh en expo-secure-store (+ copia en memoria)
+      photoUpload.js       # presign → PUT directo a S3 → confirmar
+      imagePicker.js       # expo-image-picker (solo imágenes, recorte cuadrado)
+      api/catalogs.js      # GET /catalogs (intereses por categoría, universidades con carreras, ciudades con barrios)
       socket.js            # socket.io-client
       push.js              # permisos + registro del token en POST /devices
       location.js          # expo-location
@@ -47,9 +51,16 @@ mobile/
 ## Cliente HTTP (`services/api/client.js`)
 
 - `baseURL` = `EXPO_PUBLIC_API_URL` del perfil de EAS.
-- Interceptor de request: agrega `Authorization: Bearer <access>`.
-- Interceptor de response ante 401: **un solo refresh en vuelo** (las demás requests esperan esa promesa), reintenta una vez; si el refresh falla → logout.
+- Interceptor de request: agrega `Authorization: Bearer <access>` (salvo en las requests con `skipAuth: true`: register, login y refresh).
+- Interceptor de response ante 401 `TOKEN_EXPIRED`/`UNAUTHENTICATED`: **un solo refresh en vuelo** (las demás requests esperan esa promesa), reintenta una vez cada request. Una request lenta que falla después de que otra ya renovó el token solo se reintenta (no hace otro refresh). Si el refresh es rechazado (401) → se avisa a `AuthContext` y se vuelve al login; si falla por red, la sesión se conserva. `ACCOUNT_SUSPENDED` cierra la sesión sin intentar el refresh.
+- La sesión (token en memoria, refresh, aviso de sesión terminada) se registra con `configureApiAuth(authService.apiAuth)` al arrancar `App`.
 - Todo error se convierte en `ApiError { status, code, message, requestId }`. Las pantallas muestran `message` y, en desarrollo, el `requestId` para rastrear en logs.
+
+## Onboarding y selectores
+
+- La navegación tiene tres stacks según la sesión: acceso (login/registro), **onboarding** (sesión iniciada con `onboardingCompleted: false`) y app.
+- Onboarding de 3 pasos, **todo salteable** ("Saltar este paso", "Más tarde"): 1 fecha de nacimiento y foto, 2 universidad, carrera, ciudad y barrio, 3 intereses por categoría. Cada "Siguiente" guarda ese paso (`PUT /users/me`); terminar o salir marca `onboardingCompleted` y no vuelve a aparecer.
+- `SelectField` (lista con buscador y "Otra" al final) e `InterestPicker` (chips por categoría) son presentacionales; `useCatalogs` pide `GET /catalogs` una vez por sesión de la app y `useProfileDraft` (compartido por el onboarding y el Perfil) calcula opciones y cambios. La carrera depende de la universidad y el barrio de la ciudad; las opciones con edad mínima no se muestran a menores ni sin fecha de nacimiento.
 
 ## Tokens y datos sensibles
 

@@ -56,6 +56,15 @@ describe('ruta inexistente', () => {
   })
 })
 
+describe('enrutado estricto', () => {
+  it.each(['/internal/HEALTH', '/internal/Health', '/internal/health/'])('%s no es /internal/health (404)', async (path) => {
+    const res = await request(buildApp()).get(path)
+
+    expect(res.status).toBe(404)
+    expectErrorShape(res.body, 'NOT_FOUND')
+  })
+})
+
 describe('X-Request-Id', () => {
   it('propaga el que manda Nginx al header de respuesta y al cuerpo del error', async () => {
     const res = await request(buildApp()).get('/internal/no-existe').set('X-Request-Id', 'abc123-nginx')

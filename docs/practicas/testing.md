@@ -30,16 +30,16 @@ Herramientas en [ADR-0007](../arquitectura/adr/0007-herramientas-de-testing.md).
 Estos casos salen del informe (7.5) y de las reglas de negocio. Cada uno tiene su test con el nombre indicado o equivalente:
 
 **Auth y permisos**
-- [ ] Registro con email existente → 409 `EMAIL_TAKEN` (también con mayúsculas/espacios distintos).
-- [ ] Token vencido → 401 `TOKEN_EXPIRED`; token con `typ: 'refresh'` usado como access → 401; firma con otro algoritmo → 401.
-- [ ] Usuario `suspended` → 401.
-- [ ] Refresh reutilizado tras rotación → 401 y sesión revocada.
+- [x] Registro con email existente → 409 `EMAIL_TAKEN` (también con mayúsculas/espacios distintos). *(tests/contract/auth.test.js, tests/integration/auth-service.test.js)*
+- [x] Token vencido → 401 `TOKEN_EXPIRED`; token con `typ: 'refresh'` usado como access → 401; firma con otro algoritmo → 401. *(también `alg: none`)*
+- [x] Usuario `suspended` → 401.
+- [x] Refresh reutilizado tras rotación → 401 y sesión revocada *(solo esa sesión; 10 refresh simultáneos → 1 éxito)*.
 - [ ] `PATCH /plans/:id` de un plan ajeno → 403.
-- [ ] `/admin/*` sin rol admin → 403.
+- [ ] `/admin/*` sin rol admin → 403. *(`requireRole` ya está probado con una ruta de prueba: falta repetirlo sobre las rutas reales de `/admin` en S6)*
 
 **Validación**
-- [ ] Campos solo-backend en el body (`creatorId`, `reputation`, `participantCount`, `role`…) → 400.
-- [ ] Operadores Mongo en el body (`{ "email": { "$ne": null } }`) → 400.
+- [ ] Campos solo-backend en el body (`creatorId`, `reputation`, `participantCount`, `role`…) → 400. *(hecho para `/auth` y `/users/me`: `role`, `status`, `reputation`, `age`, `photoKey`, `passwordHash`; faltan los de planes)*
+- [x] Operadores Mongo en el body (`{ "email": { "$ne": null } }`) → 400.
 - [ ] Coordenadas fuera de rango, `capacity` ≤ 0, fechas incoherentes → 400.
 
 **Cupos (concurrencia)**
@@ -64,6 +64,10 @@ Estos casos salen del informe (7.5) y de las reglas de negocio. Cada uno tiene s
 **Contrato general**
 - [ ] Todo error tiene `{ code, message, requestId }` y nunca stack ni detalles internos.
 - [ ] Paginación: `limit` > 100 → 400; último page con `nextCursor: null`; sin duplicados ni saltos entre páginas.
+
+**Catálogos y perfil**
+- [x] Universidad, carrera, ciudad, barrio e intereses inexistentes, desactivados, de otra universidad/ciudad o con edad mínima → 400 con `details` por campo. *(src/modules/catalogs/catalog.rules.test.js, tests/contract/users.test.js)*
+- [x] Los datos iniciales de los catálogos son consistentes (keys válidas y únicas, carreras de universidades que existen, sin tecnicaturas) y `syncCatalogs` solo inserta. *(tests/integration/catalogs.test.js)*
 
 ## Convenciones
 

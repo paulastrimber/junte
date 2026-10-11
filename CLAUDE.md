@@ -2,7 +2,7 @@
 
 Guía para trabajar en **junte**: app móvil de planes universitarios (crear planes, feed cercano recomendado, inscripción, asistencia por QR + ubicación, chat por plan, push, reportes, panel `/admin`).
 
-La fuente de verdad del diseño es el *Informe de arquitectura técnico* (entrega prevista: 23/09/2026); el detalle vive en [`docs/`](docs/README.md). Este archivo resume **lo que no se puede romper** y dónde buscar lo demás. Los contratos y reglas son una propuesta preliminar: si algo no está definido acá, en `docs/` o en el informe, **preguntar antes de inventarlo** y anotarlo en [`docs/pendientes.md`](docs/pendientes.md).
+La fuente de verdad del diseño es el *Informe de arquitectura técnico* (ya entregado; la etapa actual es construir la app); el detalle vive en [`docs/`](docs/README.md). Este archivo resume **lo que no se puede romper** y dónde buscar lo demás. Los contratos y reglas son una propuesta preliminar: si algo no está definido acá, en `docs/` o en el informe, **preguntar antes de inventarlo** y anotarlo en [`docs/pendientes.md`](docs/pendientes.md).
 
 ## Stack
 
@@ -68,7 +68,7 @@ Flujo: `ruta → middlewares → controlador → servicio → repositorio/modelo
 ## Reglas que no se rompen
 
 1. **Identidad desde el token, nunca desde el body** (`creatorId`, `senderId`, `userId`, `reporterId`).
-2. **Campos solo-backend** (`reputation`, `role`, `status` de usuario, `noShow`, `noShowAt`, `participantCount`, `university` del plan, `qrNonceHash`): Zod `.strict()` los rechaza.
+2. **Campos solo-backend** (`reputation`, `role`, `status` de usuario, `age` —se calcula desde `birthDate`—, `photoKey`, `noShow`, `noShowAt`, `participantCount`, `university` del plan, `qrNonceHash`): Zod `.strict()` los rechaza.
 3. **Cupos:** `participantCount` y `planParticipants` se modifican **en la misma transacción**, con actualización condicional. Nunca "consultar y después insertar".
    - Crear un plan no consume cupo; el creador debe inscribirse si quiere participar.
    - `PATCH /plans/:id` con `capacity` menor a los inscriptos → 409.
@@ -90,20 +90,24 @@ Flujo: `ruta → middlewares → controlador → servicio → repositorio/modelo
 - Paginación: `limit` (20, máx 100) + `cursor` opaco → `{ items, nextCursor }` (`null` al final).
 - Todas las rutas de negocio requieren `Authorization: Bearer <access_token>`. Públicas: `/auth/register`, `/auth/login`, `/auth/refresh` y `GET /health` (sin prefijo, 200/503).
 - Códigos: 400 validación, 401 token ausente/inválido/vencido, 403 sin permiso, 404 inexistente, 409 conflicto (cupo, duplicado, estado), 429 rate limit, 500 sin detalles sensibles.
-- Endpoints: `auth/*`, `users/me` (+ `/photo`), `plans` (GET/POST), `plans/:id` (GET/PATCH), `plans/:id/join` (POST/DELETE), `plans/:id/qr`, `plans/:id/check-in`, `plans/:id/messages` (GET/POST), `plans/:id/photo`, `reports`, `uploads/presign`. Parámetros y permisos en [06-api.md](docs/arquitectura/06-api.md).
+- Endpoints: `auth/*` (`register`, `login`, `refresh`, `logout`, `logout-all`), `users/me` (+ `/photo`), `catalogs`, `plans` (GET/POST), `plans/:id` (GET/PATCH), `plans/:id/join` (POST/DELETE), `plans/:id/qr`, `plans/:id/check-in`, `plans/:id/messages` (GET/POST), `plans/:id/photo`, `reports`, `uploads/presign`. Parámetros y permisos en [06-api.md](docs/arquitectura/06-api.md).
 
 ## Modelo de datos
 
-Colecciones: `users`, `plans`, `planParticipants`, `checkIns`, `messages`, `reports`, `deviceTokens`. Todas con `createdAt`/`updatedAt`, referencias por `ObjectId`. Detalle en [07-modelo-de-datos.md](docs/arquitectura/07-modelo-de-datos.md).
+Colecciones: `users`, `sessions`, `plans`, `planParticipants`, `checkIns`, `messages`, `reports`, `deviceTokens` y los catálogos editables por el admin (`interestCategories`, `interests`, `universities`, `careers`, `cities`, `neighborhoods`; ADR-0009). Todas con `createdAt`/`updatedAt`, referencias por `ObjectId`. Detalle en [07-modelo-de-datos.md](docs/arquitectura/07-modelo-de-datos.md).
 
 Índices obligatorios:
 - `users.email` único
+- `sessions`: `{ sid }` único, `{ userId }` y TTL sobre `expiresAt` (una sesión por dispositivo; máx. 5 activas por usuario)
+- catálogos: `key` único (`careers`: `{ universityKey, key }`; `neighborhoods`: `{ cityKey, key }`)
 - `plans`: `{ status, startsAt }` y `2dsphere` en `location`
 - `planParticipants` único en `{ planId, userId }` (un registro por par, reactivable)
 - `checkIns` único en `{ planId, userId }`
 - `messages`: `{ planId, createdAt, _id }`
 - `reports`: `{ status, createdAt }`
 - `deviceTokens.token` único
+
+**Perfil y catálogos:** universidad, carrera, ciudad, barrio e intereses son **keys** de los catálogos (`um`, `padel`…), nunca texto libre; "Otra" es la key reservada `other`, sin texto. La carrera cuelga de la universidad y el barrio de la ciudad; los intereses pueden llevar `minAge`. Se validan en el servicio contra la base (reglas en `catalogs/catalog.rules.js`) y los datos iniciales se cargan con `back-service/catalogs/` (ver ADR-0009). El registro pide solo nombre, email y contraseña; el resto se completa en el onboarding (todo salteable).
 
 ## Feed de recomendación
 
@@ -120,7 +124,7 @@ Los pesos deben ser configurables sin cambiar el contrato de la API.
 ## Seguridad
 
 - Zod en todo input: enteros positivos, fechas coherentes, IDs válidos, longitudes máximas, coordenadas en rango.
-- JWT: verificar firma, algoritmo esperado, vencimiento, tipo de token y usuario activo. Access token de vida corta; refresh token rotado y revocable (se guarda `refreshTokenHash`).
+- JWT: verificar firma, algoritmo esperado, vencimiento, tipo de token y usuario activo. Access token de vida corta; refresh token rotado por sesión y revocable (una sesión por dispositivo en `sessions`, que guarda solo el hash del refresh; ver ADR-0008).
 - Fotos: bucket S3 privado, URLs firmadas de corta duración; verificar tipo, tamaño, contenido y dueño antes de vincular `photoKey`. MongoDB guarda la clave, no la imagen.
 - Móvil: tokens en almacenamiento seguro del SO (`expo-secure-store`), nunca en logs.
 
@@ -137,7 +141,8 @@ Los pesos deben ser configurables sin cambiar el contrato de la API.
 task setup        # dependencias + .env
 task up           # entorno local (Nginx, back, Mongo RS, Redis)
 task db:migrate   # migraciones
-task db:seed      # datos de desarrollo
+task db:catalogs:sync # suma a la base entradas nuevas de back-service/catalogs/ (solo inserta)
+task db:seed      # datos de desarrollo (usa SEED_PASSWORD de back-service/.env; `task setup` la genera)
 task ci           # lint + tests + migraciones + nginx -t (antes de cada PR)
 task front:smoke  # smoke test de Nginx contra el entorno local
 task --list       # todo lo demás

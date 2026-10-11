@@ -16,7 +16,7 @@ export async function makeUser (overrides = {}) {
     email: `user${n}@test.junte`,
     passwordHash: '!test-no-login',
     name: `Usuario ${n}`,
-    university: 'UM',
+    university: 'um',
     interests: ['futbol'],
     ...overrides
   })
@@ -30,7 +30,7 @@ export async function makePlan (overrides = {}) {
     startsAt,
     location: { label: 'Montevideo', type: 'Point', coordinates: [...MONTEVIDEO] },
     interests: ['futbol'],
-    university: 'UM',
+    university: 'um',
     capacity: 5,
     ...overrides,
     creatorId

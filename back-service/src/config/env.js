@@ -13,7 +13,8 @@ const NODE_ENVS = ['development', 'test', 'production']
 // Producción los rechaza. Si un test o script agrega otro valor fijo, sumar su hash acá.
 const SECRETS_KNOWN_FROM_REPO = new Set([
   '0aa0b382413dd769d65f621ad30d63029202190501d57c36f6495a6095aa1692', // infra/back/dev-entrypoint.sh (historial)
-  'c62e4615bd39e222572f3a1bf7c2132ea1e65b17ec805047bd6b2842c593493f' // src/config/env.test.js
+  'c62e4615bd39e222572f3a1bf7c2132ea1e65b17ec805047bd6b2842c593493f', // src/config/env.test.js
+  'a974979f681cb1630334beb554f69a022adddc7785b9abf255bd2eb19152c479' // tests/helpers/modules.js y src/modules/auth/tokens.test.js (secreto de los tests de auth)
 ])
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex')
@@ -44,8 +45,21 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(LOG_LEVELS, { error: `debe ser uno de: ${LOG_LEVELS.join(', ')}` }).default('info'),
   // TODO(S3-BE): formato pendiente (docs/pendientes.md#pesos-del-feed). Por ahora solo se acepta
   // y se pasa tal cual; el módulo de feed lo validará cuando se defina el formato.
-  FEED_WEIGHTS: z.string().optional()
+  FEED_WEIGHTS: z.string().optional(),
+  // Fotos en S3 (S2-BE-09). Opcionales fuera de producción: sin ellas se usa el storage en memoria.
+  // Las credenciales NO son variables de la app: salen de la cadena por defecto del SDK / rol IAM.
+  S3_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/, { error: 'no es un nombre de bucket válido' }).optional(),
+  AWS_REGION: z.string().regex(/^[a-z]{2}(-[a-z]+)+-\d$/, { error: 'no es una región de AWS válida (ej: us-east-1)' }).optional()
 }).superRefine((vars, ctx) => {
+  const isProduction = vars.NODE_ENV === 'production'
+  for (const [name, other] of [['S3_BUCKET', 'AWS_REGION'], ['AWS_REGION', 'S3_BUCKET']]) {
+    if (vars[name] !== undefined) continue
+    if (isProduction) {
+      ctx.addIssue({ code: 'custom', path: [name], message: 'es obligatoria en producción' })
+    } else if (vars[other] !== undefined) {
+      ctx.addIssue({ code: 'custom', path: [name], message: `hay que definirla junto con ${other}` })
+    }
+  }
   if (vars.NODE_ENV === 'production' && SECRETS_KNOWN_FROM_REPO.has(sha256(vars.JWT_SECRET))) {
     ctx.addIssue({
       code: 'custom',
@@ -100,6 +114,7 @@ export function loadConfig (env) {
     mongo: { uri: vars.MONGO_URI, dbName: vars.MONGO_DB_NAME },
     redis: { url: vars.REDIS_URL },
     jwt: { secret: vars.JWT_SECRET },
+    storage: vars.S3_BUCKET && vars.AWS_REGION ? { bucket: vars.S3_BUCKET, region: vars.AWS_REGION } : null,
     feed: { weightsRaw: vars.FEED_WEIGHTS ?? null }
   })
 }
@@ -120,5 +135,6 @@ function deepFreeze (object) {
  * @property {{ uri: string, dbName: string }} mongo
  * @property {{ url: string }} redis
  * @property {{ secret: string }} jwt
+ * @property {{ bucket: string, region: string } | null} storage  null → storage en memoria (solo desarrollo/test).
  * @property {{ weightsRaw: string | null }} feed
  */

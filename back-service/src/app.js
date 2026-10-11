@@ -5,6 +5,7 @@ import { errorHandler } from './middlewares/errorHandler.js'
 import { createHttpLogger } from './middlewares/httpLogger.js'
 import { notFound } from './middlewares/notFound.js'
 import { createRequestId } from './middlewares/requestId.js'
+import { createRouter } from './shared/router.js'
 
 const JSON_BODY_LIMIT = '100kb'
 // Menor que el timeout del health check del ALB interno: un ping colgado cuenta como caído.
@@ -60,6 +61,9 @@ export function createApp ({ logger, health, routes = [] }) {
   app.disable('x-powered-by')
   // Regla 8: el query string nunca se convierte en objetos anidados (`?a[$gt]=` queda como string).
   app.set('query parser', 'simple')
+  // Enrutado estricto (ver shared/router.js): `/auth/LOGIN` y `/auth/login/` no son `/auth/login`.
+  app.set('case sensitive routing', true)
+  app.set('strict routing', true)
 
   // Orden según docs/arquitectura/03-back-service.md#middlewares-orden-en-appjs, salvo que el logger
   // va antes de express.json para que también quede registrada una request con JSON malformado.
@@ -68,7 +72,7 @@ export function createApp ({ logger, health, routes = [] }) {
   app.use(express.json({ limit: JSON_BODY_LIMIT }))
 
   const healthHandler = createHealthHandler(health)
-  const internal = express.Router()
+  const internal = createRouter()
   internal.get('/health', healthHandler)
   routes.forEach(({ path, router }) => internal.use(path, router))
   app.use('/internal', internal)

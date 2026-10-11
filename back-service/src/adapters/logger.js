@@ -3,7 +3,8 @@ import { pino } from 'pino'
 
 /**
  * Red de seguridad: además de no pasar estos datos al logger, se censuran si aparecen.
- * Nunca se loguean contraseñas, tokens, cookies, el QR ni coordenadas exactas.
+ * Nunca se loguean contraseñas, tokens, cookies, el QR, coordenadas exactas ni la fecha de nacimiento,
+ * el barrio o la localidad del perfil.
  */
 export const REDACT_PATHS = Object.freeze([
   'req.headers.authorization',
@@ -20,6 +21,14 @@ export const REDACT_PATHS = Object.freeze([
   'qrToken',
   'latitude',
   'longitude',
+  // Datos personales del perfil (docs/pendientes.md#fecha-de-nacimiento-y-ubicación-del-perfil).
+  'birthDate',
+  'neighborhood',
+  'city',
+  // Hashes y URLs firmadas de S3 (una URL firmada es una credencial temporal).
+  'passwordHash',
+  'refreshTokenHash',
+  'photoUrl',
   '*.password',
   '*.accessToken',
   '*.refreshToken',
@@ -27,7 +36,13 @@ export const REDACT_PATHS = Object.freeze([
   '*.qrToken',
   '*.latitude',
   '*.longitude',
-  '*.coordinates'
+  '*.coordinates',
+  '*.birthDate',
+  '*.neighborhood',
+  '*.city',
+  '*.passwordHash',
+  '*.refreshTokenHash',
+  '*.photoUrl'
 ])
 
 /**

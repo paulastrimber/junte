@@ -23,7 +23,7 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 
 ### Intereses del plan
 **Problema:** el feed usa Jaccard entre intereses del usuario y del plan, pero `plans` no tiene `interests`.
-**Propuesta:** agregar `interests: string[]` (máx. 5, de una lista cerrada compartida con el registro) a `plans` y a `POST /plans`.
+**Propuesta:** agregar `interests: string[]` (keys del catálogo `interests`, el mismo que usa el perfil; [ADR-0009](arquitectura/adr/0009-catalogos-en-la-base.md)) a `plans` y a `POST /plans`.
 **Bloquea:** S3 (feed).
 
 ### Compatibilidad horaria
@@ -53,15 +53,24 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 **Bloquea:** S4.
 
 ### Sesiones múltiples
-**Problema:** con un único `refreshTokenHash` por usuario, iniciar sesión en otro dispositivo cierra la sesión del primero.
-**Opciones:** aceptarlo (alcance académico) o una colección `sessions` (un hash por dispositivo).
-**Propuesta:** aceptarlo y documentarlo; `POST /auth/logout` para revocar explícitamente.
-**Bloquea:** S2.
+✅ **Decidido (2026-10-11, Phillip) e implementado en S2 ([ADR-0008](arquitectura/adr/0008-sesiones-multiples.md)):** un usuario puede tener sesión abierta en varios dispositivos a la vez. Se descarta el único `users.refreshTokenHash`.
+**Diseño:** colección `sessions` (una por dispositivo/login): `userId`, `sid`, `refreshTokenHash` (hash del refresh vigente de esa sesión), `deviceLabel?`, `lastUsedAt`, `expiresAt`, `revokedAt?`. Índices por migración: `{ sid: 1 }` único, `{ userId: 1 }` y TTL sobre `expiresAt`. Máximo 5 sesiones activas por usuario (al exceder, se revoca la más antigua).
+**Reglas:** el refresh token lleva `sid` y `jti`; la rotación es por sesión y con actualización condicional sobre el hash vigente. Reuso de un refresh viejo → se revoca **solo esa sesión** (401). `POST /auth/logout` cierra la sesión actual; `POST /auth/logout-all` cierra todas. Un usuario `suspended` pierde todas sus sesiones.
+**Impacto en docs:** 07 (colección nueva y `users` sin `refreshTokenHash`), 09 (tabla de autenticación), 06 (`logout`/`logout-all`), CLAUDE.md (lista de colecciones). Actualizados en el PR de S2.
+
+### Fecha de nacimiento y ubicación del perfil (nuevo)
+✅ **Decidido (2026-10-11, Phillip):** el perfil guarda `birthDate` (no `age`) y la zona donde vive el usuario.
+- **`birthDate`:** fecha sin hora (`YYYY-MM-DD`; en Mongo, `Date` a medianoche UTC). Zod: fecha válida, no futura, y edad calculada entre 16 y 100. La edad se **deriva** en el serializer (`age`, solo lectura); `age` en el body se rechaza (`.strict()`).
+- **`neighborhood`** (barrio) y **`city`** (localidad): strings opcionales, `trim`, 1–60 caracteres. Texto libre por ahora; una lista cerrada (barrios de Montevideo y localidades) queda para más adelante.
+- **Privacidad:** son datos del perfil, no ubicación en tiempo real. No se usan para el feed (el feed usa las coordenadas del plan y la posición que manda la app) y **no se exponen a otros usuarios** hasta definir su visibilidad. No se loguean. `GET /users/me` devuelve `birthDate`, `age`, `neighborhood` y `city` solo al dueño.
+- **Abierto:** si se muestran la edad, el barrio o la localidad en el perfil público de un creador o inscripto (S3–S4), y si `neighborhood`/`city` deberían ser obligatorios. Por ahora son opcionales: no cambian la definición de "perfil completo".
+**Bloquea:** nada. S2 lo implementa con estos valores.
 
 ### Perfil completo
-**Problema:** `POST /plans` devuelve 409 si "falta completar el perfil", sin definir "completo". Y `GET /users/me` responde 404 "si aún no existe", pero el registro ya crea el usuario.
-**Propuesta:** completo = `name`, `university` y ≥ 1 interés. Quitar el 404 de `GET /users/me` (o reservarlo para un usuario borrado).
-**Bloquea:** S2–S3.
+✅ **Decidido (2026-10-11, Phillip):** perfil completo = `name` + `birthDate` + al menos 1 interés. `university`, `neighborhood` y `city` son **opcionales** ("si corresponde": no todo usuario estudia en una universidad).
+- `POST /plans` sin perfil completo → 409 `PROFILE_INCOMPLETE`.
+- `GET /users/me` ya no documenta 404: el registro crea el usuario y `authenticate` responde 401 si el usuario no existe, así que ese 404 no se puede alcanzar.
+- Consecuencia: `plans.university` es "derivada del perfil del creador" y puede ser `null`. Revisar si el feed o el panel admin lo asumen siempre presente.
 
 ### Visibilidad de planes
 **Problema:** `GET /plans/:id` devuelve 404 "si no es visible", sin regla.
@@ -126,8 +135,8 @@ Lo que apareció al implementar el sprint 1 y queda para revisar con el equipo.
 - **Rutas de módulos:** `createApp({ logger, health, routes })` monta cada `{ path, router }` de `routes` bajo `/internal`; los módulos se registran en `src/container.js`.
 
 ### back-data (Agente B)
-- **Hash de contraseñas en seeds:** no hay bcrypt/argon2 instalado, así que los usuarios sembrados tienen `passwordHash: '!seed-no-login'` (no es un hash válido: no pueden iniciar sesión). Cuando auth (S2) elija la librería, el seed debería hashear una contraseña de desarrollo leída de una variable (`SEED_PASSWORD`), nunca fija en el código. Además el login debe tratar un hash con formato inválido como credenciales incorrectas (401), no como 500.
-- **Lista de intereses:** los seeds usan valores de ejemplo (`futbol`, `running`, `estudio`, `musica`, `cine`, `juegos-de-mesa`) hasta que se defina la lista cerrada ([Intereses del plan](#intereses-del-plan)).
+- ✅ **Resuelto en S2.** (Antes) **Hash de contraseñas en seeds:** no hay bcrypt/argon2 instalado, así que los usuarios sembrados tienen `passwordHash: '!seed-no-login'` (no es un hash válido: no pueden iniciar sesión). Cuando auth (S2) elija la librería, el seed debería hashear una contraseña de desarrollo leída de una variable (`SEED_PASSWORD`), nunca fija en el código. Además el login debe tratar un hash con formato inválido como credenciales incorrectas (401), no como 500.
+- **Lista de intereses:** los seeds usan valores de ejemplo (`futbol`, `running`, `estudio`, `musica`, `cine`, `juegos-de-mesa`) hasta que se defina la lista cerrada ([Intereses del plan](#intereses-del-plan)). Desde S2 esa es la lista inicial de `shared/interests.js` ([Lista de intereses](#lista-de-intereses)).
 - **Parámetros del check-in en seeds:** los planes sembrados no tienen `checkInOpensAt/ClosesAt/RadiusMeters` (dependen de [Parámetros del check-in](#parámetros-del-check-in)); agregarlos en S4.
 - **`down` conserva colecciones y datos:** las migraciones iniciales crean la colección con su validador; `down` quita índices y validador pero no borra la colección (borrar datos sería irreversible). `migrate:check` verifica que después de `down` no quede ningún índice salvo `_id_`.
 - **Validadores más estrictos que 07 (a confirmar):** `users.email` sin mayúsculas ni espacios (garantiza la normalización de la que depende el índice único) y `checkIns` con `additionalProperties: false` (impide guardar la ubicación del participante; el modelo usa `strict: 'throw'`). `participantCount ≤ capacity` se valida con `$expr` junto al `$jsonSchema`. Todos con `validationLevel: 'moderate'`.
@@ -145,7 +154,7 @@ Lo que apareció al implementar el sprint 1 y queda para revisar con el equipo.
 - **IP del cliente en el back:** Nginx manda `X-Real-IP` y `X-Forwarded-For`. Si el back usa `req.ip`, configurar `trust proxy` de Express acorde (Agente A).
 - **413 y 502/503/504 no son JSON:** Nginx devuelve sus páginas HTML (sin versión, `server_tokens off`) porque el catálogo no tiene códigos para eso. Propuesta: agregar `PAYLOAD_TOO_LARGE` (413) y `SERVICE_UNAVAILABLE` (502/503/504) al catálogo y responderlos con `error_page` en Nginx.
 - **Error log y query strings:** el access log no guarda query strings, pero el error log de Nginx (p. ej. un `connect() failed` al back) incluye la línea del request completa. Con `GET /plans?lat=…&lng=…` eso son coordenadas. Refuerza la propuesta de `POST /feed` (B · Compatibilidad horaria) o hay que bajar el nivel del error log en producción.
-- **Zona `auth` (10 r/min por IP) en todo `/api/v1/auth/`:** en una universidad muchos estudiantes salen por la misma IP pública (NAT), así que el login y el refresh podrían dar 429 en horas pico. Propuesta: zona estricta solo para `login`/`register`, `refresh` con la zona `api`, y calibrar con datos reales.
+- ✅ **Resuelto en S2 (S2-NG-01).** **Zona `auth` (10 r/min por IP) en todo `/api/v1/auth/`:** en una universidad muchos estudiantes salen por la misma IP pública (NAT), así que el login y el refresh podrían dar 429 en horas pico. Propuesta: zona estricta solo para `login`/`register`, `refresh` con la zona `api`, y calibrar con datos reales.
 - **Dockerfile `prod`:** `back-service/Dockerfile` tiene un target `prod` como propuesta. 10-despliegue no define cómo corre el back en EC2 (contenedor o proceso con systemd); decidirlo en S1-INF-09.
 - **WebSocket sin verificar de punta a punta:** el proxy de `/api/v1/socket.io/` está configurado (upgrade, 300 s), pero el back todavía no tiene Socket.io. Agregar la verificación a `smoke.sh` en S5.
 - **CI (`nginx -t`):** usar `docker compose -f infra/docker-compose.dev.yml run --rm --no-deps nginx nginx -t`, que renderiza los templates con las variables del compose. Con la imagen sola habría que replicar montajes y variables `NGINX_*`.
@@ -165,3 +174,77 @@ Lo que apareció al implementar el sprint 1 y queda para revisar con el equipo.
 - **`task mobile:start`** usa `--dev-client` (necesita el development build instalado). Para Expo Go: `npm run start:go`.
 - **`npm audit`:** 35 avisos (moderados/altos), todos transitivos del toolchain de Expo/Metro/Jest; `audit fix --force` rompe la SDK. Revisar al subir de SDK.
 - **Sin probar en emulador ni teléfono:** verificado con tests, lint, `expo-doctor` (21/21) y `expo export --platform android`.
+
+## D. Notas del sprint 2
+
+Lo que apareció al implementar auth y perfiles (S2) y queda para revisar con el equipo. Las decisiones ya tomadas ([sesiones múltiples](#sesiones-múltiples), [fecha de nacimiento](#fecha-de-nacimiento-y-ubicación-del-perfil), [perfil completo](#perfil-completo)) se implementaron tal cual; abajo, lo que **no** estaba definido y se resolvió con la opción más chica. Cada punto se puede cambiar sin tocar el resto.
+
+### Lista de intereses
+✅ **Resuelto en S2b:** los intereses ya no son una lista fija del código. Son el catálogo `interests` (8 categorías, 57 opciones) que edita el admin en S6 ([ADR-0009](arquitectura/adr/0009-catalogos-en-la-base.md)). La lista inicial es una propuesta del equipo de desarrollo: **falta revisarla con el equipo** (qué categorías y opciones, orden, y qué opciones llevan edad mínima).
+
+### Visibilidad del perfil público
+Solo existe una vista mínima para otros usuarios (`serializePublic`: `id`, `name`, `photoUrl`). Qué más se muestra del creador o de los inscriptos (edad, barrio, universidad, reputación) se decide en S3–S4. `birthDate`, `age`, `neighborhood` y `city` quedan solo para el dueño hasta entonces.
+
+### Decisiones de implementación a confirmar
+- **Logout sin body.** El informe/06 decía `POST /auth/logout` con `refreshToken` en el body (❓). Se resolvió con `sid` dentro del access token: `logout` y `logout-all` solo necesitan el `Authorization`. Consecuencia: si el access venció, la app lo refresca primero (lo hace el cliente HTTP solo).
+- **`login` devuelve también `user`** (además de los tokens, que era lo documentado) y los perfiles incluyen `profileComplete` (derivado). Cambios compatibles.
+- **"Sesión más antigua" = por `createdAt`.** Al abrir la sexta sesión se revoca la creada primero, aunque se use todos los días. Alternativa: la menos usada (`lastUsedAt`), que no expulsa al teléfono principal.
+- **Zona horaria de "hoy": `America/Montevideo`** para validar `birthDate` (no futura, 16–100 años) y calcular `age`. En UTC la edad subiría 3 horas antes del cumpleaños. Si la app sale de Uruguay, hay que parametrizarla. Quien nació un 29 de febrero cumple el 1 de marzo en los años no bisiestos.
+- **`PUT /users/me` es parcial** y exige al menos un campo. Largo máximo de `name`: 80 (no estaba definido).
+- **No se puede dejar vacío** un campo de universidad, carrera, ciudad o barrio ya elegido (solo cambiarlo por otro, incluida "Otra"); la carrera y el barrio sí se quitan solos cuando cambia la universidad o la ciudad. Propuesta: aceptar `null` para quitarlos.
+- ✅ **Resuelto en S2b:** el registro pide solo nombre, email y contraseña; el resto se completa en el onboarding o en el Perfil.
+- **`planId` en `POST /uploads/presign`** se rechaza (400) hasta que exista el módulo de planes (S3); ahí se agrega la comprobación de creador.
+- **Enrutado estricto** en toda la API (`case sensitive routing` + `strict routing`): `/internal/health/` y `/auth/LOGIN` dan 404. Es defensa en profundidad del límite de Nginx. **El equipo de AWS debe confirmar que el health check del ALB usa `/internal/health` sin barra final y con esa capitalización.**
+- **Zod con mensajes en español** (`z.config(z.locales.es())` en `shared/validation.js`) y los campos desconocidos se informan en `details` con el nombre del campo.
+- **`sanitizeFilter` de Mongoose** (mencionado en 09 como red adicional) **no se activó**: reescribe los operadores (`$gt`, `$in`) de nuestras propias queries salvo que se marquen como confiables. La barrera sigue siendo Zod `.strict()` + queries armadas en el repositorio. Decidir si se activa y se marcan las queries propias.
+- **Parámetros de Argon2id:** el mínimo de OWASP (19 MiB, 2 pasadas, 1 hilo). Subirlos no requiere migrar (cada hash guarda los suyos); medir en la instancia de AWS.
+
+### Límites conocidos
+- **Access token tras el logout:** sigue valiendo hasta 15 minutos (`authenticate` no mira la sesión). Alternativa: consultar la sesión en cada request (una lectura más).
+- **Refresh concurrente:** dos refresh simultáneos con el mismo token se tratan como reuso y cierran la sesión. La app hace un solo refresh en vuelo; el riesgo que queda es que la app se cierre entre que el servidor rota el token y que la app lo guarda en SecureStore (la próxima vez pedirá iniciar sesión).
+- **Sesiones:** `deviceLabel` es solo una etiqueta (`android`/`ios`); no hay endpoint para listar o cerrar una sesión puntual desde otro dispositivo.
+- **Suspender un usuario** (S6, `PATCH /admin/users/:id`) debe llamar a `authService.revokeAllSessions(userId)`; hoy login y refresh ya cierran sus sesiones, pero un access token vigente sigue valiendo hasta 15 minutos.
+
+### Fotos (S3) y lo que falta del lado de AWS
+- **Para el equipo de AWS (no se tocó `infra/`):** bucket privado con Block Public Access y variables `S3_BUCKET` y `AWS_REGION` en el entorno del back (obligatorias en producción). El rol IAM de la instancia necesita `s3:PutObject`, `s3:GetObject` y `s3:DeleteObject` sobre `users/*` y **`s3:ListBucket` sobre el bucket**: sin `ListBucket`, `HeadObject` de una clave inexistente devuelve 403 en lugar de 404 y el back lo trata como error 500. No hace falta CORS (la app es nativa).
+- **Sin bucket (desarrollo local) la subida de fotos no funciona de punta a punta:** el storage en memoria devuelve URLs `storage.memory.invalid`, que ningún teléfono puede alcanzar; el resto del flujo (presign, confirmación, `photoUrl`) se prueba solo con tests. Para probar la subida real hay que apuntar a un bucket de desarrollo o sumar MinIO/LocalStack al compose.
+- **Contenido de la imagen:** `HeadObject` solo ve el tipo y el tamaño declarados. Verificar los magic bytes (leer los primeros bytes con `GetObject`) queda pendiente.
+- **Compresión:** la app comprime al 80 % al elegir la foto; si igual pesa más de 5 MB se muestra un error (no hay `expo-image-manipulator`). iOS puede entregar HEIC: con la compresión el selector lo convierte a JPEG, pero no está probado en un iPhone.
+- **`photoUrl` cambia en cada respuesta** (URL firmada de 10 minutos): la caché de imágenes de la app no la reutiliza. Si molesta, cachear por `photoKey` (habría que exponerlo) o subir la vigencia.
+- **El `S3Client` usa `requestChecksumCalculation: 'WHEN_REQUIRED'`.** Con el valor por defecto del SDK actual la URL firmada lleva un checksum CRC32 del body vacío y S3 rechaza la subida real.
+
+### Sin probar
+- **La app no se probó en emulador ni en teléfono.** Verificado: tests (jest-expo), lint, `expo-doctor` y `expo export --platform android`. Sin probar: `expo-secure-store`, `expo-image-picker` y `@react-native-community/datetimepicker` nativos, los permisos que agregan sus plugins al manifiesto (`cameraPermission: false` en el plugin de imágenes), teclado y layout reales, y el flujo completo contra un bucket de S3 real.
+- La app contra el back real tampoco se probó de punta a punta; sí el back por HTTP (Supertest y `curl` a través de Nginx local) y el smoke test de Nginx.
+
+## E. Notas del sprint 2b: catálogos y onboarding
+
+Decididos con Phillip el 2026-10-11 (ver [ADR-0009](arquitectura/adr/0009-catalogos-en-la-base.md)): todo en la base, carreras ligadas a la universidad, "Otra" sin texto libre, solo Montevideo, edad mínima en algunas opciones, todo salteable en el onboarding, registro sin fecha de nacimiento, y el CRUD del admin en S6. Lo que quedó abierto o se resolvió con la opción más chica:
+
+### Datos de los catálogos
+- **Solo Montevideo.** Se interpretó "solo Montevideo" como una única ciudad en el catálogo (con sus 62 barrios) más "Otra". Agregar Canelones, Maldonado u otra ciudad es solo datos (`catalogs/geography.js` + `npm run catalogs:sync`, o el admin), sin cambios de código. Los barrios son las **62 áreas del INE** ([codificador](https://www5.ine.gub.uy/documents/Codificadores/Barrios%20Montevideo/Codificador%20de%20barrios%20Montevideo.pdf)): algunos nombres agrupan barrios vecinos ("Capurro, Bella Vista", "Castro, P. Castellanos"). Si se prefiere la lista de la Intendencia, hay que reemplazarla.
+- **Carreras relevadas el 2026-10-11 de los sitios oficiales**, solo de **grado** (sin tecnicaturas, tecnólogos, ciclos iniciales, cursos, diplomas, posgrados ni carreras de menos de 3 años): UM 26, ORT 30, UCU 53, Udelar 102, UDE 21, UCLAEH 6, UTEC 12 (250 en total). Fuentes en `back-service/catalogs/careers.js`. Para revisar con el equipo:
+  - ORT sale de la API pública de su propio sitio (nivel "Carrera universitaria"); Udelar, de su buscador de carreras (se descartaron las de menos de 36 meses y las tecnicaturas/tecnólogos); UCU, de `carreras.ucu.edu.uy` (se quitaron 6: 2 años o menos, tecnicaturas y la profesionalización de Enfermería).
+  - Las páginas de UDE y UCLAEH se leyeron con un navegador común; UDE puede tener carreras que solo figuran en su campus virtual.
+  - **Sedes:** UCU y Udelar dictan algunas carreras solo en el interior o en Punta del Este; el catálogo no distingue sede.
+  - **Agrupación:** en UM, ORT, UDE, UCLAEH y Udelar el `group` es la facultad del sitio; en UCU es un área propia (su sitio no agrupa).
+  - UM: se omitió "Negocios Digitales (Online)" (misma carrera, otra modalidad). UCLAEH: el sitio escribe "Fonaudiología"; se corrigió a "Fonoaudiología".
+  - Los institutos universitarios (IUACJ, Crandon, Francisco de Asís, Mariano Soler, BIOS…), el IPA, los CERP y UTU no están: los suma el admin o se piden.
+- **Intereses:** 8 categorías y 57 opciones propuestas por desarrollo ([lista en el ADR](arquitectura/adr/0009-catalogos-en-la-base.md)); incluyen opciones típicas de Uruguay (pádel, mate en la rambla, candombe). "Bares y cervecerías" y "Salir a bailar" tienen `minAge: 18`; si no se quiere esa distinción, se quita el `minAge` desde el admin.
+- **Máximo de intereses: 10** (antes 5), con 3 recomendados en la app. No es obligatorio llegar a 3.
+
+### Reglas que se resolvieron con la opción más chica
+- **Un menor o quien no cargó la fecha de nacimiento no ve las opciones con edad mínima.** Si más tarde cambia su fecha a una que lo deja por debajo de la edad mínima de una opción que ya eligió, el back lo rechaza (tiene que sacar esa opción primero).
+- **Desactivar una opción** (admin) la oculta para elecciones nuevas pero no se la quita a quien ya la tenía.
+- **Caché de 60 s por instancia** de los catálogos en el back: un cambio del admin tarda hasta un minuto en verse. Alternativa: invalidar por Redis.
+- **Los datos iniciales viven en `back-service/catalogs/`**, no dentro de la migración. La migración `seed-catalogs` toma los datos vigentes al correr; una base ya migrada recibe lo nuevo con `npm run catalogs:sync` (solo inserta, nunca pisa lo que el admin editó). Una corrección de un nombre ya cargado hay que hacerla desde el admin: `catalogs:sync` no la aplica.
+- **La migración de usuarios existentes** convierte el texto libre a keys si coincide con un nombre o sigla (sin tildes ni mayúsculas) y si no pasa a `other` (sin conservar el texto). `down` no revierte los datos.
+- **`GET /catalogs` pide sesión.** Está pensado para el onboarding (ya logueado); no hace falta en el registro.
+- **Los catálogos solo se piden una vez por sesión de la app** (caché en memoria). Si el admin cambia algo, la app lo ve al reabrirse. El caché offline entra en S6.
+
+### Onboarding
+- **Todo opcional**, con "Saltar este paso" en cada paso y "Más tarde" para salir en cualquier momento. Terminar, saltar el último paso o "Más tarde" marcan `onboardingCompleted` y **no vuelve a aparecer**; lo que falte se completa desde el Perfil (que avisa que el perfil está incompleto). Alternativa: mostrar un recordatorio cada tanto.
+- **Cada "Siguiente" guarda ese paso**, así que cerrar la app a mitad no pierde lo cargado; al reabrir empieza de nuevo en el paso 1 con lo ya guardado.
+- **"Saltar" no guarda lo elegido en ese paso** (se descarta).
+- Pasos: 1 (fecha de nacimiento y foto), 2 (universidad, carrera, ciudad y barrio), 3 (intereses por categoría).
+- **Sin probar en emulador ni teléfono**, igual que el resto de la app: el selector con buscador (`Modal` + `FlatList`) y el selector de fecha nativo.
