@@ -57,11 +57,16 @@ function setup ({ users = [completeUser(), completeUser({ id: OTHER_ID, name: 'B
     findById: vi.fn(async (id) => users.find((user) => user.id === id) ?? null),
     findByIds: vi.fn(async (ids) => users.filter((user) => ids.includes(user.id)))
   }
-  const participationRepo = { isActiveParticipant: vi.fn(async (_planId, userId) => participants.includes(userId)) }
+  const participationRepo = {
+    isActiveParticipant: vi.fn(async (_planId, userId) => participants.includes(userId)),
+    findByUserAndPlans: vi.fn(async () => []),
+    findActivePlanIds: vi.fn(async () => [])
+  }
+  const checkInRepo = { findByUserAndPlans: vi.fn(async () => []) }
   const catalogs = { checkInterests: vi.fn(async () => []) }
   const isProfileComplete = (user) => Boolean(user.name && user.birthDate && user.interests.length > 0)
-  const logger = { warn: vi.fn() }
-  const service = createPlanService({ planRepo, userRepo, participationRepo, catalogs, isProfileComplete, storage, clock, logger })
+  const logger = { warn: vi.fn(), info: vi.fn() }
+  const service = createPlanService({ planRepo, userRepo, participationRepo, checkInRepo, catalogs, isProfileComplete, storage, clock, logger })
   return { service, planRepo, userRepo, participationRepo, catalogs, storage, clock, logger, state }
 }
 

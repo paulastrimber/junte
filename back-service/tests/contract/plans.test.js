@@ -35,8 +35,13 @@ describe('POST /plans', () => {
       price: 150,
       status: 'open',
       photoUrl: null,
-      creator: { id: ana.id, name: 'Ana', photoUrl: null },
+      creator: { id: ana.id, name: 'Ana', photoUrl: null, reputation: 0 },
       isCreator: true,
+      // La ventana de check-in la calcula el back: 15 min antes y 60 min después del comienzo.
+      checkInOpensAt: new Date(hoursFromNow(48).getTime() - 15 * 60 * 1000).toISOString(),
+      checkInClosesAt: hoursFromNow(49).toISOString(),
+      checkInRadiusMeters: 150,
+      myParticipation: null,
       createdAt: expect.stringMatching(ISO_UTC)
     })
   })
@@ -316,7 +321,10 @@ describe('PATCH /plans/:id', () => {
     ['body vacío', {}],
     ['creatorId', { creatorId: UNKNOWN_ID }],
     ['participantCount', { participantCount: 0 }],
-    ['status', { status: 'cancelled' }],
+    ['status completed (lo pone solo el back)', { status: 'completed' }],
+    ['status junto con otros campos', { status: 'closed', title: 'Otro título' }],
+    ['checkInOpensAt (la ventana la calcula el back)', { checkInOpensAt: '2028-03-03T14:45:00Z' }],
+    ['radio de check-in fuera de rango', { checkInRadiusMeters: 20 }],
     ['university', { university: 'ort' }],
     ['capacity 0', { capacity: 0 }],
     ['interés inexistente', { interests: ['paracaidismo-extremo'] }]

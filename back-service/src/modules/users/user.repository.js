@@ -118,6 +118,18 @@ export function createUserRepository (UserModel) {
       return doc ? toEntity(doc) : null
     },
 
+    /**
+     * +1 de reputación (solo-backend). Va dentro de la transacción del check-in o del cierre de asistencia.
+     * @param {string} id
+     * @param {{ session?: import('mongoose').ClientSession }} [options]
+     * @returns {Promise<boolean>} false si el usuario no existe.
+     */
+    async incrementReputation (id, { session } = {}) {
+      if (!mongoose.isValidObjectId(id)) return false
+      const result = await UserModel.updateOne({ _id: id }, { $inc: { reputation: 1 } }, { session })
+      return result.matchedCount === 1
+    },
+
     /** @returns {Promise<UserEntity | null>} */
     async setPhotoKey (id, photoKey) {
       if (!mongoose.isValidObjectId(id)) return null

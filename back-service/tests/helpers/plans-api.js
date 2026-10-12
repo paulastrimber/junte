@@ -1,7 +1,7 @@
 // Ayudas compartidas por los tests de contrato de /plans y /feed.
 import request from 'supertest'
 import { MONTEVIDEO } from './factories.js'
-import { buildTestModules, registerViaHttp } from './modules.js'
+import { TEST_PASSWORD, buildTestModules, registerViaHttp } from './modules.js'
 
 // Posterior a la fecha real: los planes que crean las factories nacen "hoy" (reloj real) y el feed solo toma
 // los creados hasta el instante de la consulta (reloj fijo de los tests).
@@ -42,10 +42,12 @@ export function setupApi (options = {}) {
   const modules = buildTestModules({ start: NOW.toISOString(), ...options })
   const call = (method, token) => (path, body) => {
     const req = request(modules.app)[method](`/internal${path}`)
-    if (token) req.set('Authorization', `Bearer ${token}`)
+    // `token` puede ser una función: la sesión de un usuario cambia de token cuando los tests mueven el reloj.
+    const bearer = typeof token === 'function' ? token() : token
+    if (bearer) req.set('Authorization', `Bearer ${bearer}`)
     return body === undefined ? req : req.send(body)
   }
-  const as = (token) => ({ get: call('get', token), post: call('post', token), patch: call('patch', token), put: call('put', token) })
+  const as = (token) => ({ get: call('get', token), post: call('post', token), patch: call('patch', token), put: call('put', token), delete: call('delete', token) })
 
   /** Registra un usuario y, salvo `profile: null`, le completa el perfil (puede crear planes). */
   async function signUp ({ profile = PROFILE, ...overrides } = {}) {
@@ -54,10 +56,39 @@ export function setupApi (options = {}) {
       const res = await as(accessToken).put('/users/me', profile)
       if (res.status !== 200) throw new Error(`perfil de prueba falló: ${res.status} ${JSON.stringify(res.body)}`)
     }
-    return { token: accessToken, id: user.id, api: as(accessToken) }
+    const session = { token: accessToken, id: user.id, email: user.email }
+    session.api = as(() => session.token)
+    return session
   }
 
-  return { ...modules, as, anonymous: as(null), signUp }
+  /**
+   * Mueve el reloj y vuelve a iniciar la sesión de esos usuarios: el access token dura 15 minutos, así que después
+   * de un salto de horas el anterior ya venció.
+   * @param {Date} date
+   * @param {...{ token: string, email: string }} sessions  Lo que devolvió `signUp`.
+   */
+  async function travelTo (date, ...sessions) {
+    modules.clock.set(date)
+    for (const session of sessions) {
+      const res = await as(null).post('/auth/login', { email: session.email, password: TEST_PASSWORD })
+      if (res.status !== 200) throw new Error(`login de prueba falló: ${res.status} ${JSON.stringify(res.body)}`)
+      session.token = res.body.accessToken
+    }
+  }
+
+  return { ...modules, as, anonymous: as(null), signUp, travelTo }
+}
+
+/** Coordenadas del plan de `planBody` y un check-in válido hecho desde ese mismo punto. */
+export const PLAN_POINT = Object.freeze({ latitude: -34.9, longitude: -56.16 })
+export const checkInBody = (overrides = {}) => ({ ...PLAN_POINT, accuracyMeters: 10, ...overrides })
+
+/** `PLAN_POINT` corrido `meters` al norte. */
+export const pointNorthOf = (meters) => ({ latitude: PLAN_POINT.latitude + meters / METERS_PER_DEGREE_LAT, longitude: PLAN_POINT.longitude })
+
+export const expectError = (res, expect, status, code) => {
+  expect(res.status).toBe(status)
+  expect(res.body).toMatchObject({ code, message: expect.any(String), requestId: expect.any(String) })
 }
 
 export const expectValidationError = (res, expect) => {

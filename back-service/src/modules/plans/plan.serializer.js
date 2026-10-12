@@ -11,10 +11,19 @@ import { availableSpots, isFull } from './plan.rules.js'
  */
 export function createPlanSerializer ({ storage, serializeCreator }) {
   /**
-   * @param {{ plan: import('./plan.repository.js').PlanEntity, creator: object | null }} item
+   * @param {{ plan: import('./plan.repository.js').PlanEntity, creator: object | null, myParticipation?: object | null }} item
    * @param {string} viewerId  Usuario del token: decide `isCreator`.
    */
-  async function serialize ({ plan, creator }, viewerId) {
+  const serializeMyParticipation = (participation) => (participation
+    ? {
+        status: participation.status,
+        joinedAt: participation.joinedAt.toISOString(),
+        checkedInAt: participation.checkedInAt ? participation.checkedInAt.toISOString() : null,
+        noShow: participation.noShow
+      }
+    : null)
+
+  async function serialize ({ plan, creator, myParticipation }, viewerId) {
     return {
       id: plan.id,
       title: plan.title,
@@ -36,6 +45,12 @@ export function createPlanSerializer ({ storage, serializeCreator }) {
         : null,
       creator: creator ? await serializeCreator(creator) : null,
       isCreator: plan.creatorId === viewerId,
+      // Asistencia: la ventana la calcula el back; el radio lo puede elegir el creador.
+      checkInOpensAt: plan.checkInOpensAt.toISOString(),
+      checkInClosesAt: plan.checkInClosesAt.toISOString(),
+      checkInRadiusMeters: plan.checkInRadiusMeters,
+      // Estado del usuario del token en este plan (null = nunca se inscribió). No va en los listados del feed.
+      ...(myParticipation !== undefined ? { myParticipation: serializeMyParticipation(myParticipation) } : {}),
       // Solo en el feed por cercanía: distancia al punto consultado, redondeada (no revela la posición de nadie).
       ...(plan.distanceMeters !== undefined ? { distanceMeters: Math.round(plan.distanceMeters) } : {}),
       createdAt: plan.createdAt.toISOString()

@@ -46,6 +46,7 @@ describe('GET /users/me', () => {
       neighborhood: null,
       interests: [],
       reputation: 0,
+      noShowCount: 0,
       photoUrl: null,
       profileComplete: false,
       onboardingCompleted: false,
@@ -335,14 +336,14 @@ describe('privacidad de birthDate, barrio y localidad', () => {
     expect(logs).not.toMatch(/2001-03-09|punta-carretas|montevideo|birthDate/)
   })
 
-  it('el serializer público (otros usuarios) solo expone id, nombre y foto', async () => {
+  it('el serializer público (otros usuarios) solo expone id, nombre, foto y reputación', async () => {
     const { signUp, userSerializer, userRepo } = setup()
     const { user } = await signUp({ email: 'ana@um.edu.uy' })
     await userRepo.updateProfile(user.id, { birthDate: new Date('2001-03-09T00:00:00Z'), neighborhood: 'pocitos', city: 'montevideo', university: 'um', career: 'economia', interests: ['cine'] })
 
     const view = await userSerializer.serializePublic(await userRepo.findById(user.id))
 
-    expect(view).toEqual({ id: user.id, name: 'Ana', photoUrl: null })
+    expect(view).toEqual({ id: user.id, name: 'Ana', photoUrl: null, reputation: 0 })
   })
 })
 

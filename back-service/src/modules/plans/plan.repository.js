@@ -1,6 +1,7 @@
 // Acceso a la colección `plans`. Regla 8: las queries se arman acá a partir de filtros ya validados y predefinidos;
 // nunca llega a MongoDB un operador ni un campo elegido por el cliente.
 import mongoose from 'mongoose'
+import { ATTENDANCE, computeCheckInWindow } from '../../shared/attendance.js'
 import { AVAILABILITY, EDITABLE_STATUSES, PRICE_RANGES } from './plan.rules.js'
 
 /**
@@ -19,6 +20,12 @@ import { AVAILABILITY, EDITABLE_STATUSES, PRICE_RANGES } from './plan.rules.js'
  * @property {string} creatorId
  * @property {'open' | 'closed' | 'cancelled' | 'completed'} status
  * @property {string} [photoKey]
+ * @property {Date} checkInOpensAt
+ * @property {Date} checkInClosesAt
+ * @property {number} checkInRadiusMeters
+ * @property {string} [qrNonceHash]  Nunca sale en una respuesta (el serializer no lo incluye).
+ * @property {Date} [qrExpiresAt]
+ * @property {Date} [attendanceClosedAt]
  * @property {Date} createdAt
  * @property {number} [distanceMeters]  Solo en los resultados de `findNearby`.
  */
@@ -51,12 +58,33 @@ function toEntity (doc) {
     creatorId: String(doc.creatorId),
     status: doc.status,
     photoKey: doc.photoKey,
+    checkInOpensAt: doc.checkInOpensAt,
+    checkInClosesAt: doc.checkInClosesAt,
+    checkInRadiusMeters: doc.checkInRadiusMeters,
+    qrNonceHash: doc.qrNonceHash,
+    qrExpiresAt: doc.qrExpiresAt,
+    attendanceClosedAt: doc.attendanceClosedAt,
     createdAt: doc.createdAt,
     ...(doc.distanceMeters !== undefined ? { distanceMeters: doc.distanceMeters } : {})
   }
 }
 
-const EDITABLE_FIELDS = ['title', 'description', 'startsAt', 'endsAt', 'location', 'interests', 'capacity', 'price']
+const EDITABLE_FIELDS = ['title', 'description', 'startsAt', 'endsAt', 'location', 'interests', 'capacity', 'price', 'checkInRadiusMeters']
+
+// Estados en los que el plan sigue "vivo": admite bajas, QR, check-in y el cierre automático.
+const LIVE_STATUSES = ['open', 'closed']
+
+// Ventana de check-in calculada en la base a partir de las fechas RESULTANTES del documento (misma regla que
+// `computeCheckInWindow`): así un PATCH de startsAt/endsAt nunca deja una ventana vieja.
+const CHECK_IN_WINDOW_STAGE = {
+  $set: {
+    checkInOpensAt: { $subtract: ['$startsAt', ATTENDANCE.OPENS_BEFORE_START_MS] },
+    checkInClosesAt: { $min: [{ $add: ['$startsAt', ATTENDANCE.CLOSES_AFTER_START_MS] }, '$endsAt'] }
+  }
+}
+
+// Con cupo ilimitado (`capacity: null`) siempre hay lugar: `$lt` contra null sería false, por eso el `$or`.
+const HAS_ROOM = { $or: [{ $lte: ['$capacity', null] }, { $lt: ['$participantCount', '$capacity'] }] }
 
 const onlyStrings = (values) => (Array.isArray(values) ? values.filter((value) => typeof value === 'string') : [])
 
@@ -90,7 +118,7 @@ function listClauses (filters, { startsAfter, createdUntil }) {
   clauses.push({
     $expr: availability === AVAILABILITY.FULL
       ? { $and: [{ $gt: ['$capacity', null] }, { $gte: ['$participantCount', '$capacity'] }] }
-      : { $or: [{ $lte: ['$capacity', null] }, { $lt: ['$participantCount', '$capacity'] }] }
+      : HAS_ROOM
   })
   return clauses
 }
@@ -107,7 +135,7 @@ export function createPlanRepository (PlanModel) {
      * @returns {Promise<PlanEntity>}
      */
     async create (data) {
-      const doc = await PlanModel.create({ ...data, participantCount: 0, status: 'open' })
+      const doc = await PlanModel.create({ ...data, ...computeCheckInWindow(data), participantCount: 0, status: 'open' })
       return toEntity(doc)
     },
 
@@ -121,6 +149,7 @@ export function createPlanRepository (PlanModel) {
     /**
      * Edita un plan en UNA operación condicional: solo si es del creador, sigue editable y (si se fija un cupo) el cupo
      * nuevo no queda por debajo de los inscriptos. Pasar a cupo ilimitado (`capacity: null`) no tiene condición. Nunca "consultar y después escribir" (regla 3).
+     * Si cambian las fechas, la ventana de check-in se recalcula en la misma operación.
      * @param {string} id
      * @param {string} creatorId
      * @param {Partial<PlanEntity>} changes
@@ -131,8 +160,161 @@ export function createPlanRepository (PlanModel) {
       const $set = Object.fromEntries(Object.entries(changes).filter(([field]) => EDITABLE_FIELDS.includes(field)))
       const filter = { _id: id, creatorId, status: { $in: EDITABLE_STATUSES } }
       if (typeof $set.capacity === 'number') filter.$expr = { $lte: ['$participantCount', $set.capacity] }
-      const doc = await PlanModel.findOneAndUpdate(filter, { $set }, { returnDocument: 'after', runValidators: true }).lean()
+      // Pipeline: los valores van con `$literal` (un texto que empieza con "$" no se interpreta como campo) y la
+      // ventana de check-in se recalcula en la misma operación.
+      const literals = Object.fromEntries(Object.entries($set).map(([field, value]) => [field, { $literal: value }]))
+      const doc = await PlanModel
+        .findOneAndUpdate(filter, [{ $set: { ...literals, updatedAt: '$$NOW' } }, CHECK_IN_WINDOW_STAGE], { returnDocument: 'after', updatePipeline: true })
+        .lean()
       return doc ? toEntity(doc) : null
+    },
+
+    /**
+     * Cambia el estado en UNA operación condicional (solo el creador y solo desde los estados permitidos).
+     * @param {string} id
+     * @param {string} creatorId
+     * @param {{ from: string[], to: string, startsAfter?: Date, endsAfter?: Date }} transition
+     *   `startsAfter`: el plan no tiene que haber empezado; `endsAfter`: no tiene que haber terminado.
+     * @returns {Promise<PlanEntity | null>} null si no se cumplió alguna condición.
+     */
+    async transitionStatus (id, creatorId, { from, to, startsAfter, endsAfter }) {
+      if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(creatorId)) return null
+      const filter = { _id: id, creatorId, status: { $in: from } }
+      if (startsAfter instanceof Date) filter.startsAt = { $gt: startsAfter }
+      if (endsAfter instanceof Date) filter.endsAt = { $gt: endsAfter }
+      const doc = await PlanModel.findOneAndUpdate(filter, { $set: { status: to } }, { returnDocument: 'after', runValidators: true }).lean()
+      return doc ? toEntity(doc) : null
+    },
+
+    /**
+     * Inscripción: condición (abierto, sin empezar y con lugar) y `$inc` en una sola operación atómica (regla 3).
+     * @param {string} id
+     * @param {{ now: Date, session?: import('mongoose').ClientSession }} options
+     * @returns {Promise<PlanEntity | null>} null si no se pudo (el servicio averigua el motivo).
+     */
+    async incrementIfCapacity (id, { now, session }) {
+      if (!mongoose.isValidObjectId(id)) return null
+      const doc = await PlanModel.findOneAndUpdate(
+        { _id: id, status: 'open', startsAt: { $gt: now }, $expr: HAS_ROOM },
+        { $inc: { participantCount: 1 } },
+        { returnDocument: 'after', session }
+      ).lean()
+      return doc ? toEntity(doc) : null
+    },
+
+    /**
+     * Baja: libera un lugar si el plan sigue vivo y no empezó. Nunca deja el contador por debajo de 0.
+     * @param {string} id
+     * @param {{ now: Date, session?: import('mongoose').ClientSession }} options
+     * @returns {Promise<PlanEntity | null>} null si el plan ya no admite bajas.
+     */
+    async decrementCount (id, { now, session }) {
+      if (!mongoose.isValidObjectId(id)) return null
+      const doc = await PlanModel.findOneAndUpdate(
+        { _id: id, status: { $in: LIVE_STATUSES }, startsAt: { $gt: now }, participantCount: { $gt: 0 } },
+        { $inc: { participantCount: -1 } },
+        { returnDocument: 'after', session }
+      ).lean()
+      return doc ? toEntity(doc) : null
+    },
+
+    /**
+     * Guarda el desafío QR vigente (reemplaza al anterior): solo el creador, con el plan vivo y dentro de la ventana.
+     * @param {string} id
+     * @param {string} creatorId
+     * @param {{ qrNonceHash: string, qrExpiresAt: Date, now: Date }} qr
+     * @returns {Promise<PlanEntity | null>} null si no se cumplió alguna condición.
+     */
+    async setQr (id, creatorId, { qrNonceHash, qrExpiresAt, now }) {
+      if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(creatorId)) return null
+      const doc = await PlanModel.findOneAndUpdate(
+        { _id: id, creatorId, status: { $in: LIVE_STATUSES }, checkInOpensAt: { $lte: now }, checkInClosesAt: { $gte: now } },
+        { $set: { qrNonceHash, qrExpiresAt } },
+        { returnDocument: 'after', runValidators: true }
+      ).lean()
+      return doc ? toEntity(doc) : null
+    },
+
+    /**
+     * Marca la asistencia del plan como cerrada. La condición (`attendanceClosedAt` vacío) hace que solo una
+     * ejecución lo logre aunque dos instancias lleguen juntas. Los planes cancelados no se procesan.
+     * @param {string} id
+     * @param {{ now: Date, session?: import('mongoose').ClientSession }} options
+     * @returns {Promise<PlanEntity | null>} null si no correspondía (ya cerrada, ventana abierta, plan cancelado…).
+     */
+    async markAttendanceClosed (id, { now, session }) {
+      if (!mongoose.isValidObjectId(id)) return null
+      const doc = await PlanModel.findOneAndUpdate(
+        { _id: id, status: { $in: LIVE_STATUSES }, attendanceClosedAt: null, checkInClosesAt: { $lt: now } },
+        { $set: { attendanceClosedAt: now } },
+        { returnDocument: 'after', session }
+      ).lean()
+      return doc ? toEntity(doc) : null
+    },
+
+    /**
+     * Pasa a `completed` un plan vivo que ya terminó.
+     * @param {string} id
+     * @param {{ now: Date, session?: import('mongoose').ClientSession }} options
+     * @returns {Promise<PlanEntity | null>} null si no correspondía.
+     */
+    async complete (id, { now, session }) {
+      if (!mongoose.isValidObjectId(id)) return null
+      const doc = await PlanModel.findOneAndUpdate(
+        { _id: id, status: { $in: LIVE_STATUSES }, endsAt: { $lte: now } },
+        { $set: { status: 'completed' } },
+        { returnDocument: 'after', session }
+      ).lean()
+      return doc ? toEntity(doc) : null
+    },
+
+    /** @returns {Promise<string[]>} planes vivos con la ventana de check-in cerrada y la asistencia sin cerrar. */
+    async findIdsDueForAttendanceClose ({ now, limit }) {
+      const docs = await PlanModel
+        .find({ status: { $in: LIVE_STATUSES }, attendanceClosedAt: null, checkInClosesAt: { $lt: now } })
+        .select({ _id: 1 }).sort({ checkInClosesAt: 1 }).limit(limit).lean()
+      return docs.map((doc) => String(doc._id))
+    },
+
+    /** @returns {Promise<string[]>} planes vivos que ya terminaron (`endsAt` pasó). */
+    async findIdsDueForCompletion ({ now, limit }) {
+      const docs = await PlanModel
+        .find({ status: { $in: LIVE_STATUSES }, endsAt: { $lte: now } })
+        .select({ _id: 1 }).sort({ endsAt: 1 }).limit(limit).lean()
+      return docs.map((doc) => String(doc._id))
+    },
+
+    /**
+     * "Mis planes": los creados por el usuario o un conjunto de planes (aquellos en los que está inscripto), en
+     * cualquier estado. `upcoming` = todavía no terminó, del más próximo al más lejano; `past` = ya terminó, del más
+     * reciente al más viejo. Cursor sobre `startsAt` + `_id`.
+     * @param {object} params
+     * @param {{ creatorId: string } | { ids: string[] }} params.scope
+     * @param {'upcoming' | 'past'} params.when
+     * @param {Date} params.now
+     * @param {{ startsAt: Date, id: string } | null} params.after
+     * @param {number} params.limit
+     * @returns {Promise<PlanEntity[]>}
+     */
+    async listMine ({ scope, when, now, after, limit }) {
+      const clauses = []
+      if (typeof scope.creatorId === 'string') {
+        if (!mongoose.isValidObjectId(scope.creatorId)) return []
+        clauses.push({ creatorId: toObjectId(scope.creatorId) })
+      } else {
+        const ids = onlyStrings(scope.ids).filter((id) => mongoose.isValidObjectId(id))
+        if (ids.length === 0) return []
+        clauses.push({ _id: { $in: ids.map(toObjectId) } })
+      }
+      const isPast = when === 'past'
+      clauses.push({ endsAt: isPast ? { $lte: now } : { $gt: now } })
+      if (after && mongoose.isValidObjectId(after.id)) {
+        const beyond = isPast ? '$lt' : '$gt'
+        clauses.push({ $or: [{ startsAt: { [beyond]: after.startsAt } }, { startsAt: after.startsAt, _id: { [beyond]: toObjectId(after.id) } }] })
+      }
+      const direction = isPast ? -1 : 1
+      const docs = await PlanModel.find({ $and: clauses }).sort({ startsAt: direction, _id: direction }).limit(limit).lean()
+      return docs.map(toEntity)
     },
 
     /** @returns {Promise<PlanEntity | null>} null si el plan no existe o no es de ese creador. */
