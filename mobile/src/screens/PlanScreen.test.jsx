@@ -9,9 +9,11 @@ import { getPlan } from '../services/api/plans.js'
 import PlanScreen, { TEXTS } from './PlanScreen.jsx'
 
 jest.mock('../services/api/catalogs.js', () => ({ getCatalogs: jest.fn() }))
-jest.mock('../services/api/plans.js', () => ({ getPlan: jest.fn() }))
+jest.mock('../services/api/plans.js', () => ({ getPlan: jest.fn(), updatePlan: jest.fn() }))
+jest.mock('../services/api/participations.js', () => ({ joinPlan: jest.fn(), leavePlan: jest.fn(), listParticipants: jest.fn() }))
 
-const navigation = { navigate: jest.fn(), goBack: jest.fn() }
+// `addListener('focus', …)` devuelve la función para dejar de escuchar, como React Navigation.
+const navigation = { navigate: jest.fn(), goBack: jest.fn(), addListener: jest.fn(() => () => {}) }
 
 const PLAN = Object.freeze({
   id: 'p1',
@@ -29,8 +31,12 @@ const PLAN = Object.freeze({
   price: 150,
   status: 'open',
   photoUrl: null,
-  creator: { id: 'u2', name: 'Lucía Pérez', photoUrl: null },
-  isCreator: false
+  creator: { id: 'u2', name: 'Lucía Pérez', photoUrl: null, reputation: 3 },
+  isCreator: false,
+  checkInOpensAt: new Date(2026, 9, 25, 17, 45).toISOString(),
+  checkInClosesAt: new Date(2026, 9, 25, 19).toISOString(),
+  checkInRadiusMeters: 150,
+  myParticipation: null
 })
 
 async function renderPlan (params = { planId: 'p1' }) {

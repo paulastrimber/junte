@@ -19,11 +19,13 @@ const GENERIC = 'Ocurrió un error inesperado. Probá de nuevo.'
 
 /**
  * @param {unknown} error
+ * @param {Record<string, string>} [overrides]  Textos propios de una acción (inscribirse, check-in…): el mismo `code`
+ *   no significa lo mismo en todas las pantallas. Tienen prioridad sobre los generales.
  * @returns {string}
  */
-export function messageForError (error) {
+export function messageForError (error, overrides = {}) {
   if (!isApiError(error)) return GENERIC
-  return MESSAGES[error.code] ?? (error.message || GENERIC)
+  return overrides[error.code] ?? MESSAGES[error.code] ?? (error.message || GENERIC)
 }
 
 /**

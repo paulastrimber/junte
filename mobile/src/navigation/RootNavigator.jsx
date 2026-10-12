@@ -3,12 +3,15 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack'
 
 import { AUTH_STATUS } from '../contexts/AuthContext.jsx'
 import { useAuth } from '../hooks/useAuth.js'
+import CheckInScreen, { TEXTS as CHECK_IN_TEXTS } from '../screens/CheckInScreen.jsx'
 import CreatePlanScreen, { TEXTS as CREATE_TEXTS } from '../screens/CreatePlanScreen.jsx'
 import HealthScreen, { TEXTS as HEALTH_TEXTS } from '../screens/HealthScreen.jsx'
 import HomeScreen, { TEXTS as HOME_TEXTS } from '../screens/HomeScreen.jsx'
 import LoadingScreen from '../screens/LoadingScreen.jsx'
 import LoginScreen, { TEXTS as LOGIN_TEXTS } from '../screens/LoginScreen.jsx'
+import MyPlansScreen, { TEXTS as MY_PLANS_TEXTS } from '../screens/MyPlansScreen.jsx'
 import OnboardingScreen from '../screens/OnboardingScreen.jsx'
+import PlanQrScreen, { TEXTS as QR_TEXTS } from '../screens/PlanQrScreen.jsx'
 import PlanScreen, { TEXTS as PLAN_TEXTS } from '../screens/PlanScreen.jsx'
 import ProfileScreen from '../screens/ProfileScreen.jsx'
 import RegisterScreen, { TEXTS as REGISTER_TEXTS } from '../screens/RegisterScreen.jsx'
@@ -17,7 +20,7 @@ import { ROUTES } from './routes.js'
 
 export { ROUTES }
 
-export const TAB_TITLES = Object.freeze({ feed: 'Planes', create: 'Crear', profile: 'Perfil' })
+export const TAB_TITLES = Object.freeze({ feed: 'Planes', myPlans: 'Mis planes', create: 'Crear', profile: 'Perfil' })
 
 const Stack = createNativeStackNavigator()
 const Tabs = createBottomTabNavigator()
@@ -33,13 +36,35 @@ function AuthStack () {
   )
 }
 
-// Tab "Planes": el feed, el detalle de un plan y su edición (solo el creador llega a editar).
+// Pantallas a las que se llega desde el detalle de un plan: van en cada stack que muestra planes ("Planes" y
+// "Mis planes"), así "volver" regresa siempre al listado desde el que se entró.
+function planScreens () {
+  return (
+    <>
+      <Stack.Screen name={ROUTES.PLAN} component={PlanScreen} options={{ title: PLAN_TEXTS.title }} />
+      <Stack.Screen name={ROUTES.EDIT_PLAN} component={CreatePlanScreen} options={{ title: CREATE_TEXTS.editTitle }} />
+      <Stack.Screen name={ROUTES.PLAN_QR} component={PlanQrScreen} options={{ title: QR_TEXTS.title }} />
+      <Stack.Screen name={ROUTES.CHECK_IN} component={CheckInScreen} options={{ title: CHECK_IN_TEXTS.title }} />
+    </>
+  )
+}
+
+// Tab "Planes": el feed, el detalle de un plan, su edición (solo el creador) y la asistencia.
 function FeedStack () {
   return (
     <Stack.Navigator initialRouteName={ROUTES.HOME}>
       <Stack.Screen name={ROUTES.HOME} component={HomeScreen} options={{ title: HOME_TEXTS.title }} />
-      <Stack.Screen name={ROUTES.PLAN} component={PlanScreen} options={{ title: PLAN_TEXTS.title }} />
-      <Stack.Screen name={ROUTES.EDIT_PLAN} component={CreatePlanScreen} options={{ title: CREATE_TEXTS.editTitle }} />
+      {planScreens()}
+    </Stack.Navigator>
+  )
+}
+
+// Tab "Mis planes": los que creó y aquellos en los que está inscripto.
+function MyPlansStack () {
+  return (
+    <Stack.Navigator initialRouteName={ROUTES.MY_PLANS}>
+      <Stack.Screen name={ROUTES.MY_PLANS} component={MyPlansScreen} options={{ title: MY_PLANS_TEXTS.title }} />
+      {planScreens()}
     </Stack.Navigator>
   )
 }
@@ -65,15 +90,16 @@ function ProfileStack () {
 const TAB_OPTIONS = Object.freeze({
   headerShown: false,
   tabBarIconStyle: { display: 'none' },
-  tabBarLabelStyle: { fontSize: 15, fontWeight: '600' },
+  tabBarLabelStyle: { fontSize: 13, fontWeight: '600' },
   tabBarLabelPosition: 'beside-icon'
 })
 
-// La app con sesión: tres tabs, cada uno con su propio stack (su encabezado y su "volver").
+// La app con sesión: cuatro tabs, cada uno con su propio stack (su encabezado y su "volver").
 function AppTabs () {
   return (
     <Tabs.Navigator initialRouteName={ROUTES.FEED_TAB} screenOptions={TAB_OPTIONS}>
       <Tabs.Screen name={ROUTES.FEED_TAB} component={FeedStack} options={{ title: TAB_TITLES.feed }} />
+      <Tabs.Screen name={ROUTES.MY_PLANS_TAB} component={MyPlansStack} options={{ title: TAB_TITLES.myPlans }} />
       <Tabs.Screen name={ROUTES.CREATE_TAB} component={CreateStack} options={{ title: TAB_TITLES.create }} />
       <Tabs.Screen name={ROUTES.PROFILE_TAB} component={ProfileStack} options={{ title: TAB_TITLES.profile }} />
     </Tabs.Navigator>

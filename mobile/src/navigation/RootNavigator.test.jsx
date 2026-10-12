@@ -13,7 +13,7 @@ import { TEXTS as ONBOARDING } from '../screens/OnboardingScreen.jsx'
 import { TEXTS as PROFILE } from '../screens/ProfileScreen.jsx'
 import { TEXTS as RESTORE } from '../screens/RestoreErrorScreen.jsx'
 import { getCatalogs } from '../services/api/catalogs.js'
-import { getPlanFilters, listPlans } from '../services/api/plans.js'
+import { getPlanFilters, listMyPlans, listPlans } from '../services/api/plans.js'
 import * as usersApi from '../services/api/users.js'
 import { RootNavigator, TAB_TITLES } from './RootNavigator.jsx'
 
@@ -24,7 +24,7 @@ jest.mock('@react-native-community/datetimepicker', () => {
 jest.mock('../services/api/health.js', () => ({ ...jest.requireActual('../services/api/health.js'), getHealth: jest.fn() }))
 jest.mock('../services/api/catalogs.js', () => ({ getCatalogs: jest.fn() }))
 jest.mock('../services/api/users.js', () => ({ getMe: jest.fn(), updateMe: jest.fn(), setPhoto: jest.fn() }))
-jest.mock('../services/api/plans.js', () => ({ listPlans: jest.fn(), getPlan: jest.fn(), createPlan: jest.fn(), updatePlan: jest.fn(), getPlanFilters: jest.fn() }))
+jest.mock('../services/api/plans.js', () => ({ listPlans: jest.fn(), listMyPlans: jest.fn(), getPlan: jest.fn(), createPlan: jest.fn(), updatePlan: jest.fn(), getPlanFilters: jest.fn() }))
 jest.mock('../services/api/feed.js', () => ({ getFeed: jest.fn() }))
 
 const renderApp = (service) => renderWithAuth(<NavigationContainer><RootNavigator /></NavigationContainer>, { service })
@@ -41,6 +41,8 @@ const openProfile = async () => {
 describe('RootNavigator (navegación protegida)', () => {
   beforeEach(() => {
     getCatalogs.mockResolvedValue(CATALOG)
+    usersApi.getMe.mockResolvedValue({ reputation: 0, noShowCount: 0 })
+    listMyPlans.mockResolvedValue({ items: [], nextCursor: null })
     resetFilterOptionsCache()
     getPlanFilters.mockResolvedValue({ priceRanges: [], radiusKm: { min: 0.5, max: 50, default: 10 } })
     // Sin permiso de ubicación (el mock por defecto) el feed lista por fecha.
