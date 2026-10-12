@@ -1,6 +1,8 @@
 // Colección `plans` (docs/arquitectura/07-modelo-de-datos.md#plans).
-// Índices y validador $jsonSchema: migrations/20261007120100-create-plans.js (nunca por autoIndex).
+// Índices: migrations/20261007120100-create-plans.js; validador $jsonSchema vigente:
+// migrations/20261012120100-plans-validator-ends-at-and-limits.js (nunca por autoIndex).
 import mongoose from 'mongoose'
+import { PLAN_LIMITS } from './plan.rules.js'
 
 export const PLAN_STATUSES = Object.freeze(['open', 'closed', 'cancelled', 'completed'])
 
@@ -21,7 +23,7 @@ function isLngLat (coordinates) {
 // GeoJSON Point. Orden obligatorio: [lng, lat].
 const locationSchema = new mongoose.Schema(
   {
-    label: { type: String, trim: true },
+    label: { type: String, trim: true, required: true, minlength: 1, maxlength: PLAN_LIMITS.LABEL_MAX },
     type: { type: String, enum: ['Point'], default: 'Point', required: true },
     coordinates: {
       type: [Number],
@@ -34,18 +36,32 @@ const locationSchema = new mongoose.Schema(
 
 const planSchema = new mongoose.Schema(
   {
-    title: { type: String, required: true, trim: true },
-    description: { type: String, trim: true },
+    title: { type: String, required: true, trim: true, minlength: PLAN_LIMITS.TITLE_MIN, maxlength: PLAN_LIMITS.TITLE_MAX },
+    description: { type: String, trim: true, maxlength: PLAN_LIMITS.DESCRIPTION_MAX },
     startsAt: { type: Date, required: true },
+    // Posterior a startsAt y como máximo MAX_DURATION_MS después (lo valida el servicio y la migración).
+    endsAt: { type: Date, required: true },
     location: { type: locationSchema, required: true },
+    // Keys del catálogo `interests` (de 1 a 10): se usan en el Jaccard del feed.
     interests: { type: [String], default: [] },
     // Solo-backend: se deriva del perfil del creador.
     university: { type: String, trim: true },
+    // Entero de 1 a 500, o null = cupo ilimitado (un plan sin límite nunca está lleno).
     capacity: {
       type: Number,
-      required: true,
+      default: null,
       min: 1,
-      validate: { validator: Number.isInteger, message: 'capacity debe ser entero' }
+      max: PLAN_LIMITS.CAPACITY_MAX,
+      validate: { validator: (value) => value === null || Number.isInteger(value), message: 'capacity debe ser entero' }
+    },
+    // Costo en pesos uruguayos (entero). 0 = gratis.
+    price: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+      max: PLAN_LIMITS.PRICE_MAX,
+      validate: { validator: Number.isInteger, message: 'price debe ser entero' }
     },
     // Solo-backend: se modifica junto con planParticipants, en la misma transacción.
     participantCount: {

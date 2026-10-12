@@ -65,13 +65,16 @@ Reglas: máximo 5 sesiones activas (`revokedAt` vacío y `expiresAt` futuro) por
 
 | Campo | Tipo | Notas |
 |-------|------|-------|
-| `title`, `description` | string | Longitudes máximas en Zod |
-| `startsAt` | Date | |
-| `location` | `{ label, type: 'Point', coordinates: [lng, lat] }` | Índice `2dsphere` |
-| `interests` | string[] | **❓ falta en el informe.** Sin intereses del plan no se puede calcular el Jaccard del feed ([pendiente](../pendientes.md#intereses-del-plan)) |
-| `university` | string | Derivada del perfil del creador |
-| `capacity` | int ≥ 1 | |
-| `participantCount` | int ≥ 0, ≤ `capacity` | Solo el back, en transacción |
+| `title` | string | 3–100 |
+| `description` | string? | Hasta 2000 |
+| `startsAt` | Date | En el futuro al crear |
+| `endsAt` | Date | **➕ S3.** Obligatorio, lo ingresa el creador. Posterior a `startsAt` y como máximo 7 días después. Se usa en la compatibilidad horaria del feed, en la visibilidad y en el detalle |
+| `location` | `{ label, type: 'Point', coordinates: [lng, lat] }` | Índice `2dsphere`. `label` obligatorio (1–120) |
+| `interests` | string[] | **➕ S3.** De 1 a 10 **keys** del catálogo `interests` (el mismo del perfil). Se usa en el Jaccard y en el filtro del feed |
+| `university` | string? | Derivada del perfil del creador al crear el plan (puede faltar: la universidad del perfil es opcional) |
+| `capacity` | int 1–500 \| `null` | **`null` = cupo ilimitado** (un plan sin límite nunca está lleno). El campo siempre está presente |
+| `price` | int 0–100000 | **➕ S3.** Costo por persona en pesos uruguayos. 0 = gratis |
+| `participantCount` | int ≥ 0, ≤ `capacity` si hay cupo | Solo el back, en transacción |
 | `creatorId` | ObjectId → users | Del token |
 | `status` | `open` \| `closed` \| `cancelled` \| `completed` | Transiciones: ver abajo |
 | `photoKey` | string? | |
@@ -127,11 +130,13 @@ Un **único registro por par** plan–usuario; una baja lo pasa a `cancelled` y 
 
 Los índices que no figuran en el informe (`creatorId`, `userId+status`, `deviceTokens.userId`, los de `sessions`) se agregan porque las consultas de esas pantallas los necesitan; cualquier índice nuevo entra por migración con su justificación.
 
+**S3 no agregó índices.** El feed usa `location_2dsphere` (`$geoNear` filtra por distancia y después por estado, fecha y filtros) y el listado cronológico usa `status_startsAt`. Los filtros por `interests`, `price` o cupo se aplican sobre ese conjunto ya acotado; si el volumen crece, medir antes de sumar índices. Las migraciones de S3 son de datos y validador: `plans-backfill-ends-at` (planes anteriores: `endsAt = startsAt + 2 h`), `plans-backfill-price` (`price: 0`) y `plans-validator-ends-at-and-limits`.
+
 ## Invariantes (no se rompen nunca)
 
-1. `0 ≤ participantCount ≤ capacity` y `participantCount` = cantidad de `planParticipants` con `status: 'active'`.
+1. `0 ≤ participantCount ≤ capacity` (con cupo ilimitado, `capacity: null`, solo aplica el `≥ 0`) y `participantCount` = cantidad de `planParticipants` con `status: 'active'`. "Lleno" **se calcula** (`capacity !== null && participantCount >= capacity`): no es un `status` ni un campo guardado.
 2. Inscripción y baja modifican **contador y registro en la misma transacción**. Nunca "consultar y después insertar".
-3. `PATCH` de `capacity` por debajo de `participantCount` → 409.
+3. `PATCH` de `capacity` por debajo de `participantCount` → 409 (condición y escritura en una sola operación). Pasar a `null` (ilimitado) siempre es válido.
 4. Un check-in implica una inscripción activa y suma +1 a `reputation` del participante, **en la misma transacción**.
 5. Al pasar un plan a `closed` o `completed`, toda inscripción activa sin check-in queda con `noShow: true` y `noShowAt`, en la misma operación.
 6. Identidad (`creatorId`, `senderId`, `userId`, `reporterId`) siempre desde el token.
@@ -140,16 +145,23 @@ Los índices que no figuran en el informe (`creatorId`, `userId+status`, `device
 
 El replica set es obligatorio: sin él, MongoDB no admite transacciones multidocumento. En desarrollo y tests se usa un replica set de **un nodo** (docker-compose / `MongoMemoryReplSet`) para que el código sea el mismo.
 
-Patrón de inscripción:
+Patrón de inscripción (S4):
 
 ```js
-// planRepo.incrementIfCapacity — condición y escritura en una sola operación atómica
+// planRepo.incrementIfCapacity — condición y escritura en una sola operación atómica.
+// Con cupo ilimitado (capacity: null) siempre hay lugar: `$lt` contra null sería false, por eso el `$or`.
 Plan.findOneAndUpdate(
-  { _id: planId, status: 'open', $expr: { $lt: ['$participantCount', '$capacity'] } },
+  {
+    _id: planId,
+    status: 'open',
+    $expr: { $or: [{ $lte: ['$capacity', null] }, { $lt: ['$participantCount', '$capacity'] }] }
+  },
   { $inc: { participantCount: 1 } },
   { new: true, session }
 )
 ```
+
+Es la misma condición que usa el filtro `availability=available` de los listados (`plan.repository.js`).
 
 Si devuelve `null`, se averigua el motivo (no existe → 404, cerrado → `PLAN_CLOSED`, lleno → `PLAN_FULL`). Luego se activa la participación en la misma sesión; si ya estaba activa, el índice único dispara E11000 → `ALREADY_JOINED` y la transacción revierte el `$inc`.
 
@@ -165,4 +177,4 @@ Quién y cuándo dispara cada transición está en [pendientes](../pendientes.md
 
 ## Validadores `$jsonSchema` (defensa en profundidad)
 
-Además de Zod y Mongoose, las migraciones agregan validadores en MongoDB para los invariantes críticos (`capacity ≥ 1`, `participantCount ≥ 0`, enums de `status` y `role`, `users.birthDate` de tipo fecha, `university`/`career`/`city`/`neighborhood`/`interests` con forma de key, `interests` con máximo 10, campos obligatorios de `sessions` y de cada catálogo, `minAge` entero de 16 a 99) con `validationLevel: 'moderate'`. Así ni un script manual puede dejar datos inválidos.
+Además de Zod y Mongoose, las migraciones agregan validadores en MongoDB para los invariantes críticos (en `plans`: `capacity` de 1 a 500 o `null`, `participantCount ≥ 0` y `≤ capacity` cuando hay cupo, `endsAt` posterior a `startsAt` y hasta 7 días después, `price` entero de 0 a 100000, `interests` de 1 a 10 keys, `title` de 3 a 100 y `location.label` obligatorio; además, enums de `status` y `role`, `users.birthDate` de tipo fecha, `university`/`career`/`city`/`neighborhood`/`interests` con forma de key, `interests` con máximo 10, campos obligatorios de `sessions` y de cada catálogo, `minAge` entero de 16 a 99) con `validationLevel: 'moderate'`. Así ni un script manual puede dejar datos inválidos.

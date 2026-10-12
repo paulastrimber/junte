@@ -61,7 +61,7 @@ describe('seeds', () => {
     for (const plan of await Plan.find()) {
       const active = await Participation.countDocuments({ planId: plan._id, status: 'active' })
       expect(plan.participantCount).toBe(active)
-      expect(plan.participantCount).toBeLessThanOrEqual(plan.capacity)
+      if (plan.capacity !== null) expect(plan.participantCount).toBeLessThanOrEqual(plan.capacity)
     }
   })
 

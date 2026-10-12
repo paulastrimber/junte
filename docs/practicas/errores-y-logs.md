@@ -30,9 +30,9 @@ Toda respuesta de error, venga de donde venga (Express o Nginx), tiene esta form
 | `EMAIL_TAKEN` | 409 | Registro con email existente (también con otras mayúsculas o espacios) |
 | `PROFILE_INCOMPLETE` | 409 | Crear plan sin perfil completo |
 | `PLAN_FULL` | 409 | Sin cupos |
-| `PLAN_CLOSED` | 409 | El plan no admite inscripciones/bajas en su estado actual |
+| `PLAN_CLOSED` | 409 | El plan no admite inscripciones/bajas en su estado actual, ni ediciones si está cancelado o completado (`PATCH /plans/:id`) |
 | `ALREADY_JOINED` | 409 | Inscripción activa duplicada |
-| `CAPACITY_BELOW_PARTICIPANTS` | 409 | `PATCH capacity` menor a los inscriptos |
+| `CAPACITY_BELOW_PARTICIPANTS` | 409 | `PATCH capacity` menor a los inscriptos (pasar a `null`, cupo ilimitado, nunca lo dispara) |
 | `CHECKIN_WINDOW_CLOSED` | 409 | Fuera de `checkInOpensAt`–`checkInClosesAt` (también al generar QR) |
 | `ALREADY_CHECKED_IN` | 409 | Segundo check-in |
 | `RATE_LIMITED` | 429 | Lo genera Nginx |

@@ -37,12 +37,15 @@ mobile/
       photoUpload.js       # presign → PUT directo a S3 → confirmar
       imagePicker.js       # expo-image-picker (solo imágenes, recorte cuadrado)
       api/catalogs.js      # GET /catalogs (intereses por categoría, universidades con carreras, ciudades con barrios)
+      api/plans.js         # GET/POST /plans, GET/PATCH /plans/:id, GET /plans/filters
+      api/feed.js          # POST /feed (cercanía + recomendación)
+      calendar.js          # expo-calendar: franjas ocupadas (solo inicio y fin) para el feed
       socket.js            # socket.io-client
       push.js              # permisos + registro del token en POST /devices
-      location.js          # expo-location
+      location.js          # expo-location: permiso, posición actual [lng, lat] y búsqueda de direcciones (geocodificador del teléfono)
       offline/             # caché de lecturas y cola de pendientes
     contexts/              # AuthContext (sesión), estado mínimo compartido
-    navigation/            # stacks y tabs (React Navigation)
+    navigation/            # stacks y tabs (React Navigation); routes.js tiene los nombres de las rutas
     config/                # URLs por entorno (sin secretos)
     utils/                 # funciones puras (formatos de fecha, distancia…)
   tests/
@@ -62,6 +65,16 @@ mobile/
 - Onboarding de 3 pasos, **todo salteable** ("Saltar este paso", "Más tarde"): 1 fecha de nacimiento y foto, 2 universidad, carrera, ciudad y barrio, 3 intereses por categoría. Cada "Siguiente" guarda ese paso (`PUT /users/me`); terminar o salir marca `onboardingCompleted` y no vuelve a aparecer.
 - `SelectField` (lista con buscador y "Otra" al final) e `InterestPicker` (chips por categoría) son presentacionales; `useCatalogs` pide `GET /catalogs` una vez por sesión de la app y `useProfileDraft` (compartido por el onboarding y el Perfil) calcula opciones y cambios. La carrera depende de la universidad y el barrio de la ciudad; las opciones con edad mínima no se muestran a menores ni sin fecha de nacimiento.
 
+## Navegación y pantallas de planes (S3)
+
+- Con sesión y onboarding hecho, la app son **tres tabs inferiores**, cada uno con su stack: **Planes** (feed → detalle → editar), **Crear** y **Perfil** (perfil → estado del servidor).
+- **HomeScreen (feed)**: `FlatList` con scroll infinito por `nextCursor`, pull-to-refresh y los cuatro estados. `useFeed` pide la ubicación; si la hay, lee las franjas ocupadas del calendario (si hay permiso) y consulta `POST /feed`; sin ubicación degrada a `GET /plans` (por fecha) y lo explica. Las páginas siguientes repiten exactamente la misma consulta con el cursor.
+- **Secciones "Con cupo" / "Llenos"**: el feed principal trae planes con lugar; los llenos van aparte (`availability=full`), se pueden abrir pero no admiten inscripción.
+- **Filtros** (`FeedFilters` + `useFeedFilters`): distancia máxima (0.5, 1, 2, 5, 10, 25 o 50 km; por defecto 10), fecha (hoy, 7 días, 30 días), costo (uno o varios rangos, que la app lee de `GET /plans/filters`) y tipo de actividad (intereses del catálogo). Son predefinidos: nunca se escribe una consulta.
+- **PlanScreen**: detalle con horario de inicio y fin, lugar, costo, cupo ("Sin límite de cupo" si es ilimitado), inscriptos y quién organiza. El creador ve "Editar plan".
+- **CreatePlanScreen** (crear y editar): `LocationPicker` (buscador de dirección + "Usar mi ubicación" + mapa de `react-native-maps` con un pin arrastrable), nombre del lugar, fecha y hora de inicio y de fin (`DateTimeField`), interruptor "Cupo ilimitado", costo e intereses. Al editar manda solo lo que cambió. Con el perfil incompleto, en lugar del formulario explica qué falta.
+- El mapa en Android necesita la clave de Google Maps (`GOOGLE_MAPS_ANDROID_API_KEY`), la única excepción a "nada secreto en el binario": ver [09-seguridad.md](09-seguridad.md#secretos). Requiere un **development build** (no funciona en Expo Go).
+
 ## Tokens y datos sensibles
 
 - Access y refresh token en `expo-secure-store` (Keychain / Keystore). **Nunca** en `AsyncStorage` ni en logs.
@@ -80,9 +93,9 @@ Pedirlos **en el momento en que se usan**, explicando para qué, y degradar con 
 
 | Permiso | Cuándo | Si se niega |
 |---------|--------|-------------|
-| Ubicación | Feed cercano, check-in | Feed sin `near`; check-in imposible (se explica) |
+| Ubicación | Feed cercano, "usar mi ubicación" al crear un plan, check-in | Feed por fecha (sin `near`), con un aviso; al crear se busca una dirección o se toca el mapa; check-in imposible (se explica) |
 | Cámara | Escanear QR | No hay check-in |
-| Calendario | Compatibilidad horaria del feed | `H = 0.5` (neutral) |
+| Calendario | Compatibilidad horaria del feed (solo lectura: próximos 30 días, hasta 200 franjas, sin eventos de día completo) | No se manda nada: `H = 0.5` (neutral), salvo los planes en los que ya está inscripto, que el back conoce |
 | Notificaciones | Después del login | Sin push; todo sigue funcionando |
 | Micrófono / contactos | Notas de voz / invitar (sprint 5) | Funcionalidad oculta |
 

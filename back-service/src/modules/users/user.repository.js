@@ -82,6 +82,17 @@ export function createUserRepository (UserModel) {
     },
 
     /**
+     * Varios usuarios en una sola consulta (p. ej. los creadores de una página de planes). Ignora los IDs inválidos.
+     * @param {string[]} ids
+     * @returns {Promise<UserEntity[]>} sin orden garantizado.
+     */
+    async findByIds (ids) {
+      const valid = [...new Set(ids)].filter((id) => mongoose.isValidObjectId(id))
+      if (valid.length === 0) return []
+      return (await UserModel.find({ _id: { $in: valid } }).lean()).map(toEntity)
+    },
+
+    /**
      * Regla 8: solo se acepta un string; un objeto con operadores nunca llega a MongoDB.
      * @returns {Promise<UserEntity | null>}
      */

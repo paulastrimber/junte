@@ -25,7 +25,7 @@ export default [
     }
   },
   {
-    files: ['**/*.test.{js,jsx}', 'tests/**/*.{js,jsx}'],
+    files: ['**/*.test.{js,jsx}', 'tests/**/*.{js,jsx}', '__mocks__/**/*.js'],
     languageOptions: {
       globals: globals.jest
     }

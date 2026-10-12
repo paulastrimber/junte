@@ -41,12 +41,12 @@ export function createFeedService ({ planRepo, scorers }) {   // scorers = [{ fn
   }
 }
 
-// container.js — los pesos vienen de config (FEED_WEIGHTS=0.5,0.3,0.2)
+// container.js — los pesos vienen de config (FEED_WEIGHTS en JSON; ver feed/feed.scorers.js para el código real)
 const feedService = createFeedService({
   planRepo,
   scorers: [
     { fn: interestScorer, weight: config.feed.weights.interests },
-    { fn: proximityScorer, weight: config.feed.weights.proximity },
+    { fn: proximityScorer, weight: config.feed.weights.distance },
     { fn: scheduleScorer, weight: config.feed.weights.schedule }
   ]
 })

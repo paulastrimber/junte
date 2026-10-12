@@ -1,14 +1,11 @@
 // Reglas de negocio del perfil (S2-BE-08, S2-BE-09). No importa Express ni Mongoose: recibe el
 // repositorio y el storage por parámetro (DI).
 import { ageOn, calendarDateIn, fromUtcMidnight } from '../../shared/age.js'
-import { AppError, errors } from '../../shared/errors.js'
-import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, userObjectPrefix } from '../../shared/uploads.js'
-import { OBJECT_NAME } from './user.keys.js'
+import { errors } from '../../shared/errors.js'
+import { userObjectPrefix, verifyUploadedImage } from '../../shared/uploads.js'
 import { isProfileComplete } from './user.profile.js'
 
 export { isProfileComplete }
-
-const invalidPhoto = (message) => new AppError('VALIDATION_ERROR', message)
 
 /**
  * @param {object} deps
@@ -69,23 +66,7 @@ export function createUserService ({ userRepo, storage, catalogs, clock, logger 
      * @param {{ userId: string, objectKey: string }} params
      */
     async setPhoto ({ userId, objectKey }) {
-      const prefix = userObjectPrefix(userId)
-      if (!objectKey.startsWith(prefix)) throw errors.forbidden('Ese archivo no te pertenece')
-      const name = objectKey.slice(prefix.length)
-      if (!OBJECT_NAME.test(name)) throw invalidPhoto('La clave del archivo no es válida')
-
-      const head = await storage.headObject(objectKey)
-      if (!head) throw errors.notFound('No encontramos el archivo subido')
-
-      const extension = name.slice(name.lastIndexOf('.') + 1)
-      if (ALLOWED_IMAGE_TYPES[head.contentType] !== extension) {
-        await storage.deleteObject(objectKey)
-        throw invalidPhoto('El archivo no es una imagen JPEG, PNG o WebP')
-      }
-      if (head.sizeBytes < 1 || head.sizeBytes > MAX_IMAGE_BYTES) {
-        await storage.deleteObject(objectKey)
-        throw invalidPhoto(`La imagen debe pesar entre 1 byte y ${MAX_IMAGE_BYTES / (1024 * 1024)} MB`)
-      }
+      await verifyUploadedImage({ storage, objectKey, prefix: userObjectPrefix(userId) })
 
       const current = await requireUser(() => userRepo.findById(userId))
       const updated = await requireUser(() => userRepo.setPhotoKey(userId, objectKey))

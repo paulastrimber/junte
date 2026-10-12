@@ -47,9 +47,9 @@ Las comprobaciones de **propiedad** van en el servicio (no en el controlador), a
 
 ## Fotos (S3)
 
-1. `POST /uploads/presign` valida `contentType` (lista blanca: `image/jpeg`, `image/png`, `image/webp`) y `sizeBytes` (1 byte a 5 MB); **genera el back** una `objectKey` con prefijo del dueño (`users/<userId>/<uuid>.<ext>`; `plans/<planId>/…` cuando exista el módulo de planes) y una URL `PUT` de 5 minutos con tipo y tamaño firmados. El cliente nunca elige la clave.
+1. `POST /uploads/presign` valida `contentType` (lista blanca: `image/jpeg`, `image/png`, `image/webp`) y `sizeBytes` (1 byte a 5 MB); **genera el back** una `objectKey` con prefijo del dueño (`users/<userId>/<uuid>.<ext>`, o `plans/<planId>/<uuid>.<ext>` si se manda `planId`, que solo acepta al creador de ese plan) y una URL `PUT` de 5 minutos con tipo y tamaño firmados. El cliente nunca elige la clave.
 2. La app sube directo a S3 con exactamente ese `Content-Type` y ese tamaño, y **sin** `Authorization` (la firma va en la URL).
-3. `PUT /users/me/photo` (o `/plans/:id/photo`) verifica, en este orden, que la clave cuelga del prefijo del usuario (403 si no), que el objeto existe (`HeadObject`, 404 si no), y su tipo y tamaño **reales** (400 y se borra el objeto si no cumple); recién ahí guarda `photoKey` y borra la foto anterior.
+3. `PUT /users/me/photo` (o `/plans/:id/photo`) verifica, en este orden, que la clave cuelga del prefijo del usuario —o del plan, después de comprobar que quien llama es su creador— (403 si no), que el objeto existe (`HeadObject`, 404 si no), y su tipo y tamaño **reales** (400 y se borra el objeto si no cumple); recién ahí guarda `photoKey` y borra la foto anterior.
 4. Lectura con URL `GET` firmada de 10 minutos en cada respuesta del perfil (`photoUrl`). El bucket bloquea todo acceso público.
 5. Credenciales: cadena por defecto del SDK / rol IAM de la instancia, nunca en el código ni en variables de la app. `S3_BUCKET` y `AWS_REGION` son obligatorias con `NODE_ENV=production`; sin ellas (desarrollo/test) se usa un storage en memoria.
 6. Límite: `HeadObject` solo ve metadatos. La verificación del contenido (magic bytes) queda pendiente ([pendientes](../pendientes.md#d-notas-del-sprint-2)).
@@ -58,8 +58,19 @@ Las comprobaciones de **propiedad** van en el servicio (no en el controlador), a
 
 - MongoDB, firma JWT y credenciales FCM en **Secrets Manager**, leídos con el rol IAM de la instancia (permiso solo sobre esos secretos).
 - Nada de secretos en el código, Git, logs ni en el binario móvil (`EXPO_PUBLIC_*` es público por definición).
+- **Única excepción: la clave de Google Maps para Android** (`GOOGLE_MAPS_ANDROID_API_KEY`), que usa el mapa de "crear plan" (`react-native-maps`). El SDK de Google la lee del manifiesto de la app, así que **queda dentro del APK** y cualquiera puede extraerla: no se la trata como secreto sino como identificador restringido. Condiciones para aceptarla:
+  - Restringida en Google Cloud a **esta app** (nombre de paquete de Android + huella SHA-1 del certificado de firma) y a la API **"Maps SDK for Android"** únicamente. Sin Places, Geocoding ni Directions: la búsqueda de direcciones usa el geocodificador del teléfono (`expo-location`).
+  - Con cuota y alerta de facturación en el proyecto de Google Cloud.
+  - No se commitea: va en `mobile/.env` en local y como variable de entorno del proyecto en EAS (no en `eas.json`). `app.config.js` la pasa al plugin de `react-native-maps` y corta el build de EAS si falta.
+  - Una clave por entorno (development / preview / production), cada una con la huella de su certificado. En iOS el mapa usa Apple Maps y no necesita clave.
 - `.env.example` con nombres sin valores; `.env` en `.gitignore`.
 - El usuario de MongoDB de la app solo tiene permisos `readWrite` sobre su base. Las migraciones pueden usar un usuario con permisos de índices.
+
+## Ubicación y calendario del usuario
+
+- **Posición**: la app la manda solo en el feed (`POST /feed`, `GET /plans?near=`) y, más adelante, en el check-in. El back la usa para la consulta y **no la guarda ni la loguea** (el log de requests no incluye query string ni body). `distanceMeters` de cada plan va redondeada al metro.
+- **Calendario**: la app lee el calendario del teléfono solo si la persona da permiso y manda únicamente **franjas ocupadas** (inicio y fin), nunca títulos, lugares ni invitados; el esquema de `POST /feed` rechaza cualquier campo extra. Va por body, no por query, para que no quede en los logs de acceso de Nginx ni del ALB. No se persiste. Sin permiso no se manda nada.
+- Los filtros del feed son predefinidos (regla 8): el cliente elige valores de una lista cerrada (rangos de precio, cupo, intereses del catálogo, fechas) y el repositorio arma la consulta. El cursor de paginación es opaco, se valida con Zod al decodificarlo y uno manipulado es 400.
 
 ## Borde (Nginx)
 

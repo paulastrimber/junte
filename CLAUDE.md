@@ -72,6 +72,7 @@ Flujo: `ruta → middlewares → controlador → servicio → repositorio/modelo
 3. **Cupos:** `participantCount` y `planParticipants` se modifican **en la misma transacción**, con actualización condicional. Nunca "consultar y después insertar".
    - Crear un plan no consume cupo; el creador debe inscribirse si quiere participar.
    - `PATCH /plans/:id` con `capacity` menor a los inscriptos → 409.
+   - `capacity: null` es **cupo ilimitado**: el plan nunca está lleno y la condición de inscripción tiene que dejarlo pasar. "Lleno" se calcula (`participantCount >= capacity`), no es un `status`.
 4. **Check-in:** inscripción activa + ventana (`checkInOpensAt`/`checkInClosesAt`) + QR + distancia ≤ `checkInRadiusMeters`. El QR es un desafío aleatorio con vencimiento (se guarda `qrNonceHash`), no el ID del plan. **No persistir la ubicación** del participante: solo `distanceMeters` y `accuracyMeters`. Check-in y `reputation +1` en una transacción.
 5. **Reputación:** +1 por check-in válido. Al cerrar/completar un plan, `noShow=true` en inscripciones activas sin check-in.
 6. **Chat:** solo participante activo o creador. Socket.io autentica la conexión y verifica pertenencia al plan; REST de mensajes para historial y fallback por polling. Texto de 1 a 2000 caracteres.
@@ -80,7 +81,7 @@ Flujo: `ruta → middlewares → controlador → servicio → repositorio/modelo
 9. **Índices y cambios de datos solo por migración** (`up` + `down`; una migración mergeada no se edita). Mongoose con `autoIndex: false`.
 10. **Efectos secundarios (push, avisos) después del commit**, nunca dentro de la transacción.
 11. **Back sin estado local**: hay 2+ instancias. Jobs con lock en Redis.
-12. **Secretos** solo en Secrets Manager / `.env` local (mantener `.env.example` con nombres, sin valores). Nada en Git, logs, binario móvil ni `EXPO_PUBLIC_*`.
+12. **Secretos** solo en Secrets Manager / `.env` local (mantener `.env.example` con nombres, sin valores). Nada en Git, logs, binario móvil ni `EXPO_PUBLIC_*`. Única excepción: la clave de Google Maps para Android, que queda en el APK y por eso va restringida a la app ([09-seguridad.md](docs/arquitectura/09-seguridad.md#secretos)).
 13. **Logs** con `requestId`, estado y duración; sin contraseñas, tokens, coordenadas exactas ni bodies completos.
 14. Errores siempre `{ code, message, requestId }` con `code` del catálogo.
 
@@ -90,7 +91,7 @@ Flujo: `ruta → middlewares → controlador → servicio → repositorio/modelo
 - Paginación: `limit` (20, máx 100) + `cursor` opaco → `{ items, nextCursor }` (`null` al final).
 - Todas las rutas de negocio requieren `Authorization: Bearer <access_token>`. Públicas: `/auth/register`, `/auth/login`, `/auth/refresh` y `GET /health` (sin prefijo, 200/503).
 - Códigos: 400 validación, 401 token ausente/inválido/vencido, 403 sin permiso, 404 inexistente, 409 conflicto (cupo, duplicado, estado), 429 rate limit, 500 sin detalles sensibles.
-- Endpoints: `auth/*` (`register`, `login`, `refresh`, `logout`, `logout-all`), `users/me` (+ `/photo`), `catalogs`, `plans` (GET/POST), `plans/:id` (GET/PATCH), `plans/:id/join` (POST/DELETE), `plans/:id/qr`, `plans/:id/check-in`, `plans/:id/messages` (GET/POST), `plans/:id/photo`, `reports`, `uploads/presign`. Parámetros y permisos en [06-api.md](docs/arquitectura/06-api.md).
+- Endpoints: `auth/*` (`register`, `login`, `refresh`, `logout`, `logout-all`), `users/me` (+ `/photo`), `catalogs`, `plans` (GET/POST), `plans/filters`, `feed` (POST), `plans/:id` (GET/PATCH), `plans/:id/join` (POST/DELETE), `plans/:id/qr`, `plans/:id/check-in`, `plans/:id/messages` (GET/POST), `plans/:id/photo`, `reports`, `uploads/presign`. Parámetros y permisos en [06-api.md](docs/arquitectura/06-api.md).
 
 ## Modelo de datos
 
@@ -111,7 +112,7 @@ Colecciones: `users`, `sessions`, `plans`, `planParticipants`, `checkIns`, `mess
 
 ## Feed de recomendación
 
-Candidatos con `$near` dentro de `radiusKm`, luego:
+Candidatos con `$geoNear` dentro de `radiusKm` (0.5 a 50, por defecto 10; hasta 200), luego:
 
 ```
 score = 0.5 * Jaccard(intereses usuario, intereses plan)
@@ -119,7 +120,12 @@ score = 0.5 * Jaccard(intereses usuario, intereses plan)
       + 0.2 * H(u, p)   // 1 sin superposición de calendario, 0 con superposición, 0.5 sin permiso
 ```
 
-Los pesos deben ser configurables sin cambiar el contrato de la API.
+Los pesos deben ser configurables sin cambiar el contrato de la API (`FEED_WEIGHTS`, JSON).
+
+- `POST /feed` recibe la posición y, si hay permiso, las franjas ocupadas del calendario **por body** (nunca por query; no se persisten ni se loguean). `GET /plans?near=` usa el mismo ranking sin calendario. Los planes en los que el usuario ya está inscripto cuentan como ocupados. Ver ADR-0010.
+- Paginación por posición en el ranking (cursor opaco con el instante de la primera página). Sin `near`, `GET /plans` va por fecha.
+- **Filtros predefinidos** (regla 8): fecha, intereses, rangos de precio (definidos solo en `plans/plan.rules.js`, la app los lee de `GET /plans/filters`) y cupo (`availability=available|full`; los llenos van en una sección aparte).
+- Plan: `endsAt` obligatorio (posterior a `startsAt`, hasta 7 días), `location.label` obligatorio, `price` en pesos (0 = gratis), `interests` de 1 a 10 keys del catálogo.
 
 ## Seguridad
 
@@ -158,9 +164,9 @@ Tests primero para reglas de negocio. Prioridad: validaciones, propiedad del pla
 
 1. Base técnica: estructura, modelos e índices, infraestructura AWS, `/health` por HTTPS.
 2. Auth y perfiles: registro/login/refresh, middleware JWT, pantallas, fotos en S3.
-3. Planes y feed por cercanía: CRUD, `$near`, paginación, recomendación, calendario.
-4. Inscripciones, asistencia y reputación: transacciones de cupo, QR, check-in, `noShow`.
-5. Chat y notificaciones: Socket.io, fallback REST, notas de voz, FCM y `deviceTokens`.
+3. Planes y feed por cercanía: CRUD, `$near`, paginación, recomendación, calendario, filtros, costo y cupo ilimitado.
+4. Inscripciones, asistencia y reputación: transacciones de cupo (también con cupo ilimitado), QR, check-in, `noShow`, pedido de aviso de cupo liberado (`spotAlerts`).
+5. Chat y notificaciones: Socket.io, fallback REST, notas de voz, FCM y `deviceTokens`, envío del aviso de cupo liberado.
 6. Admin y comportamiento móvil: `/admin`, offline + sincronización, CloudWatch, backups.
 7. Validación y entrega: e2e, seguridad, concurrencia, restauración, APK.
 

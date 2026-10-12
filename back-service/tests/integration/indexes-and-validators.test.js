@@ -227,8 +227,8 @@ describe('catálogos', () => {
 describe('índice 2dsphere', () => {
   it('ordena por cercanía con coordenadas [lng, lat]', async () => {
     const creator = await makeUser()
-    const far = await makePlan({ creatorId: creator._id, location: { type: 'Point', coordinates: [-56.05, -34.88] } })
-    const near = await makePlan({ creatorId: creator._id, location: { type: 'Point', coordinates: [-56.165, -34.902] } })
+    const far = await makePlan({ creatorId: creator._id, location: { label: 'Lejos', type: 'Point', coordinates: [-56.05, -34.88] } })
+    const near = await makePlan({ creatorId: creator._id, location: { label: 'Cerca', type: 'Point', coordinates: [-56.165, -34.902] } })
 
     const found = await Plan.find({
       location: { $near: { $geometry: { type: 'Point', coordinates: [...MONTEVIDEO] }, $maxDistance: 20_000 } }

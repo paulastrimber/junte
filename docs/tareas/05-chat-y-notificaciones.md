@@ -4,7 +4,7 @@
 
 **Entregable:** chat con Socket.io + Redis entre instancias y fallback REST, historial tras desconexión, push FCM probado en dispositivo.
 
-**Decidir antes:** [cupo liberado](../pendientes.md#aviso-de-cupo-liberado), [notas de voz y contactos](../pendientes.md#notas-de-voz-y-contactos).
+**Decidir antes:** [notas de voz y contactos](../pendientes.md#notas-de-voz-y-contactos). El [aviso de cupo liberado](../pendientes.md#aviso-de-cupo-liberado) ya está decidido (2026-10-12).
 
 ## Back service
 
@@ -16,7 +16,7 @@
   *Acepta:* test con dos instancias del back en docker-compose: un mensaje enviado a la instancia A llega a un cliente conectado a la B.
 - [ ] **S5-BE-06 · `POST /devices` y `DELETE /devices/:token`** (upsert por token, reasignación de usuario).
 - [ ] **S5-BE-07 · Adapter FCM + `notifier`**: envío después del commit, sin bloquear la respuesta; borra tokens inválidos.
-- [ ] **S5-BE-08 · Avisos**: nuevo inscripto (al creador), recordatorio (job con lock + `reminderSentAt`), cupo liberado (según decisión).
+- [ ] **S5-BE-08 · Avisos**: nuevo inscripto (al creador), recordatorio (job con lock + `reminderSentAt`) y **cupo liberado**: push a **todos** los que pidieron aviso en ese plan (`spotAlerts`, S4-BE-09); el primero que se inscribe se queda con el lugar. Definir qué pasa con los pedidos después de avisar (propuesta: se conservan hasta que el usuario se inscribe, cancela el aviso o el plan empieza).
 - [ ] **S5-BE-09 · Notas de voz** (según decisión): `type: 'voice'` + `audioKey` vía presign.
 
 ## Front service
