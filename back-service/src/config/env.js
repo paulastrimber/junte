@@ -19,6 +19,36 @@ const SECRETS_KNOWN_FROM_REPO = new Set([
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex')
 
+/** Pesos del score del feed según el informe (docs/pendientes.md#pesos-del-feed). */
+export const DEFAULT_FEED_WEIGHTS = Object.freeze({ interests: 0.5, distance: 0.3, schedule: 0.2 })
+const WEIGHTS_SUM_TOLERANCE = 1e-6
+
+const weightsShape = z.strictObject({
+  interests: z.number().min(0).max(1),
+  distance: z.number().min(0).max(1),
+  schedule: z.number().min(0).max(1)
+})
+
+// JSON `{"interests":0.5,"distance":0.3,"schedule":0.2}`: los tres pesos, entre 0 y 1, que sumen 1.
+// Un solo problema por variable: el mensaje nombra FEED_WEIGHTS, no cada peso.
+const feedWeightsField = z.string().transform((text, ctx) => {
+  const fail = (message) => {
+    ctx.addIssue({ code: 'custom', message })
+    return z.NEVER
+  }
+  let json
+  try {
+    json = JSON.parse(text)
+  } catch {
+    return fail('debe ser JSON, por ejemplo {"interests":0.5,"distance":0.3,"schedule":0.2}')
+  }
+  const parsed = weightsShape.safeParse(json)
+  if (!parsed.success) return fail('debe tener exactamente interests, distance y schedule (números entre 0 y 1)')
+  const { interests, distance, schedule } = parsed.data
+  if (Math.abs(interests + distance + schedule - 1) > WEIGHTS_SUM_TOLERANCE) return fail('los pesos deben sumar 1')
+  return parsed.data
+})
+
 const required = (hint) => ({
   error: (issue) => (issue.input === undefined ? 'es obligatoria' : hint)
 })
@@ -43,9 +73,8 @@ const envSchema = z.object({
   })
     .min(JWT_SECRET_MIN_LENGTH, { error: `debe tener al menos ${JWT_SECRET_MIN_LENGTH} caracteres` }),
   LOG_LEVEL: z.enum(LOG_LEVELS, { error: `debe ser uno de: ${LOG_LEVELS.join(', ')}` }).default('info'),
-  // TODO(S3-BE): formato pendiente (docs/pendientes.md#pesos-del-feed). Por ahora solo se acepta
-  // y se pasa tal cual; el módulo de feed lo validará cuando se defina el formato.
-  FEED_WEIGHTS: z.string().optional(),
+  // Pesos del score del feed (S3-BE-06). Opcional: sin ella se usan los del informe.
+  FEED_WEIGHTS: feedWeightsField.optional(),
   // Fotos en S3 (S2-BE-09). Opcionales fuera de producción: sin ellas se usa el storage en memoria.
   // Las credenciales NO son variables de la app: salen de la cadena por defecto del SDK / rol IAM.
   S3_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/, { error: 'no es un nombre de bucket válido' }).optional(),
@@ -115,7 +144,7 @@ export function loadConfig (env) {
     redis: { url: vars.REDIS_URL },
     jwt: { secret: vars.JWT_SECRET },
     storage: vars.S3_BUCKET && vars.AWS_REGION ? { bucket: vars.S3_BUCKET, region: vars.AWS_REGION } : null,
-    feed: { weightsRaw: vars.FEED_WEIGHTS ?? null }
+    feed: { weights: { ...(vars.FEED_WEIGHTS ?? DEFAULT_FEED_WEIGHTS) } }
   })
 }
 
@@ -136,5 +165,5 @@ function deepFreeze (object) {
  * @property {{ url: string }} redis
  * @property {{ secret: string }} jwt
  * @property {{ bucket: string, region: string } | null} storage  null → storage en memoria (solo desarrollo/test).
- * @property {{ weightsRaw: string | null }} feed
+ * @property {{ weights: { interests: number, distance: number, schedule: number } }} feed  Pesos del score del feed (suman 1).
  */

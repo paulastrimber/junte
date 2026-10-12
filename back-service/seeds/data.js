@@ -17,7 +17,8 @@ export const USERS = Object.freeze([
 ])
 
 // `daysFromNow` + `hour` (hora de Montevideo, UTC−3) se convierten a fecha al sembrar, así los planes
-// quedan siempre en el futuro aunque se vuelva a correr el seed otro día.
+// quedan siempre en el futuro aunque se vuelva a correr el seed otro día. `durationHours` (2 por defecto) define
+// `endsAt`; `price` es el costo en pesos uruguayos (0 por defecto = gratis); `capacity: null` es cupo ilimitado.
 export const PLANS = Object.freeze([
   {
     key: 'futbol-parque-rodo',
@@ -28,6 +29,8 @@ export const PLANS = Object.freeze([
     hour: 19,
     location: { label: 'Parque Rodó', coordinates: [-56.1660, -34.9130] },
     interests: ['futbol'],
+    durationHours: 1,
+    price: 150,
     capacity: 10,
     participants: ['lucia', 'mateo']
   },
@@ -64,6 +67,8 @@ export const PLANS = Object.freeze([
     hour: 20,
     location: { label: 'Ciudad Vieja', coordinates: [-56.2005, -34.9065] },
     interests: ['juegos-de-mesa'],
+    durationHours: 3,
+    price: 350,
     capacity: 2,
     participants: ['mateo', 'sofia']
   },
@@ -76,7 +81,7 @@ export const PLANS = Object.freeze([
     hour: 21,
     location: { label: 'Parque Batlle', coordinates: [-56.1580, -34.8960] },
     interests: ['cine'],
-    capacity: 20,
+    capacity: null, // cupo ilimitado
     participants: []
   }
 ])

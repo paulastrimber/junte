@@ -14,16 +14,22 @@ import {
 import {
   Session, createAuthController, createAuthRoutes, createAuthService, createSessionRepository, createTokenService
 } from './modules/auth/index.js'
+import { buildScorers, createFeedController, createFeedRoutes, createFeedService } from './modules/feed/index.js'
+import { Participation, createParticipationRepository } from './modules/participations/index.js'
+import {
+  Plan, createPlanController, createPlanRepository, createPlanRoutes, createPlanSerializer, createPlanService, pickFilters
+} from './modules/plans/index.js'
 import { createUploadController, createUploadRoutes, createUploadService } from './modules/uploads/index.js'
 import {
-  User, createUserController, createUserRepository, createUserRoutes, createUserSerializer, createUserService, createUserValidators
+  User, createUserController, createUserRepository, createUserRoutes, createUserSerializer, createUserService, createUserValidators,
+  isProfileComplete
 } from './modules/users/index.js'
 
 /**
  * Cablea los módulos de dominio (repos → servicios → controladores → routers). No abre conexiones:
  * los tests lo usan con un reloj fijo, un hasher rápido y el storage en memoria.
  * @param {object} deps
- * @param {{ jwt: { secret: string } }} deps.config
+ * @param {{ jwt: { secret: string }, feed: { weights: { interests: number, distance: number, schedule: number } } }} deps.config
  * @param {import('pino').Logger} deps.logger
  * @param {import('./adapters/clock.js').Clock} deps.clock
  * @param {import('./adapters/passwordHasher.js').PasswordHasher} deps.passwordHasher
@@ -39,8 +45,19 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const catalogRepo = createCatalogRepository({ InterestCategory, Interest, University, Career, City, Neighborhood })
   const catalogService = createCatalogService({ catalogRepo, clock })
   const userService = createUserService({ userRepo, storage, catalogs: catalogService, clock, logger })
-  const uploadService = createUploadService({ storage })
   const userSerializer = createUserSerializer({ storage, clock })
+
+  const planRepo = createPlanRepository(Plan)
+  const participationRepo = createParticipationRepository(Participation)
+  const planService = createPlanService({
+    planRepo, userRepo, participationRepo, catalogs: catalogService, isProfileComplete, storage, clock, logger
+  })
+  const planSerializer = createPlanSerializer({ storage, serializeCreator: userSerializer.serializePublic })
+  // Los pesos del score vienen de la configuración (FEED_WEIGHTS): cambiarlos no toca código ni contrato.
+  const feedService = createFeedService({
+    planRepo, userRepo, participationRepo, attachCreators: planService.attachCreators, scorers: buildScorers(config.feed.weights), clock
+  })
+  const uploadService = createUploadService({ storage, plans: planService })
 
   const authenticate = createAuthenticate({ authService })
 
@@ -48,15 +65,21 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const userController = createUserController({ userService, userSerializer })
   const uploadController = createUploadController({ uploadService })
   const catalogController = createCatalogController({ catalogService })
+  const planController = createPlanController({ planService, planSerializer, feedService })
+  const feedController = createFeedController({ feedService, planSerializer, pickFilters })
 
   const routes = [
     { path: '/auth', router: createAuthRoutes({ authController, authenticate }) },
     { path: '/users', router: createUserRoutes({ userController, validators: createUserValidators({ clock }), authenticate }) },
     { path: '/uploads', router: createUploadRoutes({ uploadController, authenticate }) },
-    { path: '/catalogs', router: createCatalogRoutes({ catalogController, authenticate }) }
+    { path: '/catalogs', router: createCatalogRoutes({ catalogController, authenticate }) },
+    { path: '/plans', router: createPlanRoutes({ planController, authenticate }) },
+    { path: '/feed', router: createFeedRoutes({ feedController, authenticate }) }
   ]
 
-  return { routes, authenticate, authService, userService, uploadService, catalogService, userSerializer, userRepo, sessionRepo }
+  return {
+    routes, authenticate, authService, userService, uploadService, catalogService, planService, feedService, userSerializer, userRepo, sessionRepo
+  }
 }
 
 /**

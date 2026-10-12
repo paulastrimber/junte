@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPublicCatalog, checkProfileReferences } from './catalog.rules.js'
+import { buildPublicCatalog, checkInterestReferences, checkProfileReferences } from './catalog.rules.js'
 
 const snapshot = {
   interestCategories: [
@@ -131,6 +131,25 @@ describe('checkProfileReferences', () => {
     const details = check({ university: 'harvard', city: 'atlantida', interests: ['paracaidismo'] })
 
     expect(paths(details).sort()).toEqual(['city', 'interests', 'university'])
+  })
+})
+
+describe('checkInterestReferences (intereses de un plan)', () => {
+  it('acepta intereses existentes y activos', () => {
+    expect(checkInterestReferences(snapshot, { keys: ['futbol'], age: 20 })).toEqual([])
+  })
+
+  it('rechaza inexistentes y desactivados (un plan nuevo no "conserva" nada)', () => {
+    expect(paths(checkInterestReferences(snapshot, { keys: ['paracaidismo', 'rugby'], age: 20 }))).toEqual(['interests', 'interests'])
+  })
+
+  it('al editar un plan conserva un interés que ya tenía aunque se haya desactivado', () => {
+    expect(checkInterestReferences(snapshot, { keys: ['rugby'], kept: ['rugby'], age: 20 })).toEqual([])
+  })
+
+  it('respeta la edad mínima con la edad del creador', () => {
+    expect(paths(checkInterestReferences(snapshot, { keys: ['bares'], age: 17 }))).toEqual(['interests'])
+    expect(checkInterestReferences(snapshot, { keys: ['bares'], age: 18 })).toEqual([])
   })
 })
 

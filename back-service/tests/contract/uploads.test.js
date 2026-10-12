@@ -68,7 +68,7 @@ describe('POST /uploads/presign', () => {
     ['tamaño como texto', { contentType: 'image/jpeg', sizeBytes: '1000' }],
     ['más de 5 MB', { contentType: 'image/jpeg', sizeBytes: 5 * 1024 * 1024 + 1 }],
     ['el cliente intenta elegir la clave', { contentType: 'image/jpeg', sizeBytes: 1000, objectKey: 'users/otro/x.jpg' }],
-    ['planId (todavía no existe el módulo de planes)', { contentType: 'image/jpeg', sizeBytes: 1000, planId: '665f1c2a9b1e8a0012345678' }],
+    ['planId que no es un id (el flujo con planId está en plans.test.js)', { contentType: 'image/jpeg', sizeBytes: 1000, planId: '../users' }],
     ['operador de Mongo', { contentType: { $ne: null }, sizeBytes: 1000 }]
   ])('400 VALIDATION_ERROR: %s', async (_label, body) => {
     const { presign, signUp } = setup()

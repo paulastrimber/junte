@@ -19,6 +19,7 @@ Cuando la decisión es difícil de revertir o afecta a más de un módulo: elegi
 | [0007](0007-herramientas-de-testing.md) | Vitest en el back, jest-expo en la app | Aceptada |
 | [0008](0008-sesiones-multiples.md) | Una sesión por dispositivo (colección `sessions`) | Aceptada |
 | [0009](0009-catalogos-en-la-base.md) | Catálogos (intereses, universidades, carreras, ciudades, barrios) en la base | Aceptada |
+| [0010](0010-feed-por-ranking.md) | Feed por ranking: `POST /feed`, candidatos por cercanía y cursor por posición | Aceptada |
 
 ## Reglas
 

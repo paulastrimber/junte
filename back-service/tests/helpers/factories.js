@@ -28,6 +28,7 @@ export async function makePlan (overrides = {}) {
   return Plan.create({
     title: `Plan ${next()}`,
     startsAt,
+    endsAt: overrides.endsAt ?? new Date(startsAt.getTime() + 2 * 60 * 60 * 1000),
     location: { label: 'Montevideo', type: 'Point', coordinates: [...MONTEVIDEO] },
     interests: ['futbol'],
     university: 'um',

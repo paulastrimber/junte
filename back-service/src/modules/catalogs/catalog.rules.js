@@ -53,21 +53,35 @@ export function checkProfileReferences (snapshot, { current, next, age }) {
     }
   }
 
-  for (const key of next.interests ?? []) {
+  details.push(...checkInterestReferences(snapshot, { keys: next.interests ?? [], kept: current?.interests ?? [], age }))
+
+  return details
+}
+
+/**
+ * Valida una lista de intereses (de un perfil o de un plan) contra el catálogo: que existan, que estén disponibles
+ * (salvo los que ya se tenían) y que la edad alcance para los que tienen edad mínima.
+ * @param {object} snapshot
+ * @param {{ keys: string[], kept?: string[], age: number | null }} params
+ *   `kept`: intereses que ya estaban guardados (uno desactivado se conserva). `age`: años cumplidos, o null si no se sabe.
+ * @returns {Array<{ path: 'interests', message: string }>}
+ */
+export function checkInterestReferences (snapshot, { keys, kept = [], age }) {
+  const details = []
+  for (const key of keys) {
     const interest = byKey(snapshot.interests, key)
     const category = interest && byKey(snapshot.interestCategories, interest.categoryKey)
     if (!interest || !category) {
       details.push(problem('interests', `El interés "${key}" no existe`))
       continue
     }
-    if ((!interest.active || !category.active) && !(current?.interests ?? []).includes(key)) {
+    if ((!interest.active || !category.active) && !kept.includes(key)) {
       details.push(problem('interests', `El interés "${interest.name}" ya no está disponible`))
     }
     if (interest.minAge && (age === null || age < interest.minAge)) {
       details.push(problem('interests', `"${interest.name}" requiere tener ${interest.minAge} años o más${age === null ? ' (cargá tu fecha de nacimiento primero)' : ''}`))
     }
   }
-
   return details
 }
 

@@ -39,7 +39,7 @@ describe('loadConfig', () => {
       redis: { url: 'redis://localhost:6379' },
       jwt: { secret: SECRET },
       storage: null,
-      feed: { weightsRaw: null }
+      feed: { weights: { interests: 0.5, distance: 0.3, schedule: 0.2 } }
     })
     expect(Object.isFrozen(config)).toBe(true)
     expect(Object.isFrozen(config.mongo)).toBe(true)
@@ -129,9 +129,27 @@ describe('loadConfig', () => {
     expect(err.variables.sort()).toEqual(['LOG_LEVEL', 'NODE_ENV'])
   })
 
-  it('FEED_WEIGHTS es opcional y se pasa sin interpretar (formato pendiente)', () => {
-    const raw = '{"interests":0.5,"distance":0.3,"schedule":0.2}'
-    expect(loadConfig({ ...validEnv, FEED_WEIGHTS: raw }).feed.weightsRaw).toBe(raw)
+  it('FEED_WEIGHTS es opcional: sin ella se usan los pesos del informe', () => {
+    const { FEED_WEIGHTS, ...env } = validEnv
+    expect(loadConfig(env).feed.weights).toEqual({ interests: 0.5, distance: 0.3, schedule: 0.2 })
+  })
+
+  it('FEED_WEIGHTS en JSON cambia los pesos', () => {
+    const raw = '{"interests":0.2,"distance":0.7,"schedule":0.1}'
+    expect(loadConfig({ ...validEnv, FEED_WEIGHTS: raw }).feed.weights).toEqual({ interests: 0.2, distance: 0.7, schedule: 0.1 })
+  })
+
+  it.each([
+    ['no es JSON', '0.5,0.3,0.2'],
+    ['no suman 1', '{"interests":0.5,"distance":0.5,"schedule":0.5}'],
+    ['falta uno', '{"interests":0.5,"distance":0.5}'],
+    ['sobra uno', '{"interests":0.5,"distance":0.3,"schedule":0.2,"reputation":0}'],
+    ['peso negativo', '{"interests":1.2,"distance":-0.2,"schedule":0}'],
+    ['peso que no es número', '{"interests":"0.5","distance":0.3,"schedule":0.2}']
+  ])('FEED_WEIGHTS inválida (%s) → ConfigError que la nombra', (_label, raw) => {
+    const err = errorOf({ ...validEnv, FEED_WEIGHTS: raw })
+    expect(err).toBeInstanceOf(ConfigError)
+    expect(err.variables).toEqual(['FEED_WEIGHTS'])
   })
 
   it('acepta mongodb+srv y rediss (TLS)', () => {

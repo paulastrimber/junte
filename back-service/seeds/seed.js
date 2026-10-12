@@ -10,6 +10,8 @@ import { PLANS, USERS } from './data.js'
 
 const MONTEVIDEO_UTC_OFFSET_HOURS = -3
 const DAY_MS = 24 * 60 * 60 * 1000
+const HOUR_MS = 60 * 60 * 1000
+const DEFAULT_DURATION_HOURS = 2
 const UPSERT = { upsert: true, returnDocument: 'after', runValidators: true, setDefaultsOnInsert: true }
 
 function startsAtFor ({ daysFromNow, hour }, now) {
@@ -48,13 +50,16 @@ async function seedUsers ({ passwordHasher, password, now }) {
 
 async function seedPlan (spec, users, now) {
   const creator = users.get(spec.creator)
+  const startsAt = startsAtFor(spec, now)
   return withTransaction(async (session) => {
     const plan = await Plan.findOneAndUpdate(
       { creatorId: creator._id, title: spec.title },
       {
         $set: {
           description: spec.description,
-          startsAt: startsAtFor(spec, now),
+          startsAt,
+          endsAt: new Date(startsAt.getTime() + (spec.durationHours ?? DEFAULT_DURATION_HOURS) * HOUR_MS),
+          price: spec.price ?? 0,
           location: { type: 'Point', ...spec.location },
           interests: spec.interests,
           university: creator.university,
@@ -79,7 +84,7 @@ async function seedPlan (spec, users, now) {
     }
 
     const participantCount = await Participation.countDocuments({ planId: plan._id, status: 'active' }).session(session)
-    if (participantCount > spec.capacity) {
+    if (spec.capacity !== null && participantCount > spec.capacity) {
       throw new Error(`seed: el plan "${spec.title}" tiene más inscriptos (${participantCount}) que cupo (${spec.capacity})`)
     }
     await Plan.updateOne({ _id: plan._id }, { $set: { participantCount } }, { session })

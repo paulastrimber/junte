@@ -16,7 +16,7 @@ Siete sprints de una semana, tal como el informe (sección 8). Cada sprint tiene
 |--------|---------|-----------|--------|
 | 1 | [01-base-tecnica.md](01-base-tecnica.md) | Estructura, entorno local, modelos + migraciones, topología AWS, `/health` por HTTPS | 🔄 (local ✅, AWS ⬜ a cargo del equipo de AWS) |
 | 2 | [02-auth-y-perfiles.md](02-auth-y-perfiles.md) | Registro, login, refresh, perfil y foto desde el teléfono | ✅ + 2b catálogos y onboarding (app sin probar en emulador/teléfono; el bucket S3 lo crea el equipo de AWS) |
-| 3 | [03-planes-y-feed.md](03-planes-y-feed.md) | CRUD de planes y feed geográfico recomendado | ⬜ |
+| 3 | [03-planes-y-feed.md](03-planes-y-feed.md) | CRUD de planes y feed geográfico recomendado, con filtros, costo y cupo ilimitado | ✅ (app probada en teléfono con Expo Go; falta la clave de Google Maps, los permisos de S3 sobre `plans/*` y subir la foto del plan desde la app) |
 | 4 | [04-inscripciones-asistencia.md](04-inscripciones-asistencia.md) | Inscripción transaccional, QR, check-in, reputación, `noShow` | ⬜ |
 | 5 | [05-chat-y-notificaciones.md](05-chat-y-notificaciones.md) | Chat por plan con Socket.io + fallback, push FCM | ⬜ |
 | 6 | [06-admin-y-movil.md](06-admin-y-movil.md) | Panel `/admin`, offline, observabilidad, backups | ⬜ |
@@ -44,7 +44,7 @@ El chat (S5) depende de las inscripciones (S4) porque el permiso es "participant
 |--------|--------------------------|
 | 1 | Redis (ElastiCache vs EC2) |
 | 2 | ✅ Sesiones múltiples, perfil completo, fecha de nacimiento (decididos) |
-| 3 | Intereses del plan, compatibilidad horaria, paginación del feed, visibilidad |
-| 4 | Parámetros del check-in, estados del plan, reactivación, jobs |
-| 5 | Cupo liberado, notas de voz y contactos |
+| 3 | ✅ Intereses del plan, compatibilidad horaria, paginación del feed, visibilidad, filtros, costo y cupo ilimitado (decididos) |
+| 4 | Parámetros del check-in, estados del plan, reactivación, jobs. Aviso de cupo liberado: ✅ decidido, se implementa en S4–S5 |
+| 5 | Notas de voz y contactos (cupo liberado: ✅ decidido) |
 | 6 | Endpoints y métricas de admin |

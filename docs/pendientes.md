@@ -22,20 +22,28 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 ## B. Decisiones abiertas
 
 ### Intereses del plan
-**Problema:** el feed usa Jaccard entre intereses del usuario y del plan, pero `plans` no tiene `interests`.
-**Propuesta:** agregar `interests: string[]` (keys del catálogo `interests`, el mismo que usa el perfil; [ADR-0009](arquitectura/adr/0009-catalogos-en-la-base.md)) a `plans` y a `POST /plans`.
-**Bloquea:** S3 (feed).
+✅ **Decidido (2026-10-12, Paula) e implementado en S3:** `plans.interests` son de 1 a 10 keys del catálogo `interests` (el mismo del perfil), obligatorios en `POST /plans`. Se validan contra el catálogo (existen, están activos, edad mínima contra la edad **del creador**); al editar, el plan conserva los que ya tenía aunque se hayan desactivado. Se usan en el Jaccard y en el filtro "tipo de actividad" del feed.
 
 ### Compatibilidad horaria
-**Problema:** `H(u, p)` necesita el calendario del usuario, que vive en el teléfono. El back no puede leerlo y `GET /plans` no recibe nada al respecto.
-**Opciones:** (a) la app manda franjas ocupadas anonimizadas (`busy=inicio/fin,…`) en el query o en un `POST /feed`; (b) el back calcula con `H = 0.5` y la app reordena localmente; (c) la app sube sus franjas ocupadas al perfil.
-**Propuesta:** (a) con `POST /feed` (body, no query, para no dejar franjas en logs de acceso), sin persistir. Mantiene el score en el back.
-**Bloquea:** S3.
+✅ **Decidido (2026-10-12, Paula) e implementado en S3 ([ADR-0010](arquitectura/adr/0010-feed-por-ranking.md)):** opción (a), `POST /feed` con las franjas ocupadas en el body, sin persistir.
+- La app lee los **próximos 30 días** del calendario (solo si hay permiso), descarta los eventos de día completo y manda hasta **200 franjas** con solo inicio y fin, más el período leído (`calendar.from`/`to`).
+- Los planes tienen **`endsAt` obligatorio** (lo ingresa el creador; posterior a `startsAt`, hasta 7 días para permitir campamentos): la superposición se calcula contra `startsAt`–`endsAt`.
+- Además de las franjas del calendario, el back cuenta como ocupados **los planes en los que el usuario ya está inscripto**, así funciona aunque no haya permiso de calendario.
+- `H = 0` con superposición; `1` sin superposición y con el horario del plan dentro del período leído; `0.5` si no se sabe (sin calendario, o plan fuera del período).
+- `GET /plans?near=` sigue existiendo, sin calendario.
 
 ### Paginación del feed
-**Problema:** con `near` el orden es por score, no por un campo indexado; un cursor tipo `{ createdAt, _id }` no sirve.
-**Propuesta:** `$geoNear` trae hasta 200 candidatos dentro de `radiusKm` (devuelve la distancia, necesaria para `P(d)`), se rankean, y el cursor opaco codifica la posición en ese ranking. Límite aceptado: si aparece un plan nuevo entre páginas, puede no verse hasta refrescar.
-**Bloquea:** S3.
+✅ **Decidido (2026-10-12, Paula) e implementado en S3 ([ADR-0010](arquitectura/adr/0010-feed-por-ranking.md)):** `$geoNear` trae hasta 200 candidatos dentro de `radiusKm`, se rankean y el cursor opaco guarda la posición en ese ranking, el instante de la primera página y una huella de la consulta. Límite aceptado: un plan nuevo entre páginas no se ve hasta refrescar.
+
+### Radio del feed
+✅ **Decidido (2026-10-12, Paula):** `radiusKm` de 0.5 a 50, por defecto 10. En la app, un selector de valores fijos (0.5, 1, 2, 5, 10, 25, 50 km) dentro del panel de filtros.
+
+### Filtros del feed, costo y planes llenos
+✅ **Decidido (2026-10-12, Paula) e implementado en S3:**
+- **Filtros predefinidos** (la consulta se arma en el back, regla 8): fecha (`from`/`to`), intereses (el plan tiene al menos uno), costo (rangos) y cupo (`availability`). En la app la fecha se elige entre opciones fijas (hoy, 7 días, 30 días).
+- **Costo:** campo `price` en el plan (pesos uruguayos, entero, 0 = gratis, hasta 100000). Filtro por **rangos combinables**: gratis ($0), $1–500, $501–1000 y más de $1000. Los límites están en un solo lugar del back (`PRICE_RANGES`, `plans/plan.rules.js`) y la app los recibe por `GET /plans/filters`.
+- **Planes llenos:** "lleno" se calcula (`participantCount >= capacity`), no es un `status`. El feed principal muestra los planes con cupo; los llenos van en una sección aparte (`availability=full`), donde se ve el detalle completo pero no hay inscripción.
+- **Cupo ilimitado:** `capacity: null`. Nunca está lleno (`isFull: false`, `availableSpots: null`), no aparece entre los llenos. Por `PATCH` se pasa de ilimitado a un número (no menor a los inscriptos → 409) o al revés.
 
 ### Parámetros del check-in
 **Problema:** radio, precisión GPS aceptable, ventana horaria y vida del QR están "pendientes de acordar". Tampoco se define si `checkInOpensAt/ClosesAt/RadiusMeters` los carga el creador.
@@ -73,9 +81,7 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 - Consecuencia: `plans.university` es "derivada del perfil del creador" y puede ser `null`. Revisar si el feed o el panel admin lo asumen siempre presente.
 
 ### Visibilidad de planes
-**Problema:** `GET /plans/:id` devuelve 404 "si no es visible", sin regla.
-**Propuesta:** visibles = `open`/`closed` futuros + los del propio usuario (creados o inscripto) en cualquier estado. `cancelled` solo para creador e inscriptos.
-**Bloquea:** S3.
+✅ **Decidido (2026-10-12, Paula) e implementado en S3:** visibles para cualquiera los planes `open`/`closed` que todavía no terminaron; los propios (creados o con inscripción activa) en cualquier estado. `cancelled`, `completed` o ya terminados solo los ven su creador y sus inscriptos; para el resto, 404. Los listados (`GET /plans`, `POST /feed`) solo traen planes `open` que todavía no empezaron.
 
 ### Jobs programados
 **Problema:** recordatorios y cierre automático requieren tareas periódicas, y con dos instancias correrían duplicadas.
@@ -83,9 +89,12 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 **Bloquea:** S4–S5.
 
 ### Aviso de cupo liberado
-**Problema:** ¿a quién se avisa? No hay lista de espera.
-**Propuesta:** al creador (información) o posponer hasta tener lista de espera. No inventar una lista de espera sin acordarlo.
-**Bloquea:** S5.
+✅ **Decidido (2026-10-12, Paula):** no hay lista de espera con orden. En un plan **lleno** (`participantCount >= capacity`; "lleno" se calcula, no es un `status`) el usuario puede pedir que le avisen cuando se libere un lugar. Al liberarse un cupo se avisa **a todos** los que lo pidieron y el primero que se inscribe se queda con el lugar (lo garantiza la transacción de cupos de S4).
+**Diseño propuesto (a confirmar antes de implementar):** colección `spotAlerts` (`planId`, `userId`, `createdAt`; índice único `{ planId, userId }`), `PUT /plans/:id/spot-alert` y `DELETE /plans/:id/spot-alert` (idempotentes, identidad desde el token) y `spotAlertRequested` en el detalle del plan.
+**Queda para más adelante:**
+- **S4:** al darse de baja un inscripto (después del commit, regla 10) se dispara el aviso; al inscribirse, se borra el pedido de aviso de ese usuario.
+- **S5:** el envío real por push (FCM) a quienes pidieron aviso, y qué pasa con los pedidos después de avisar (propuesta: se conservan hasta que el usuario se inscribe, cancela el aviso o el plan empieza).
+**Bloquea:** S5 (envío). El pedido/cancelación del aviso no depende de push.
 
 ### Notas de voz y contactos
 **Problema:** el sprint 5 los menciona, pero no hay modelo (`messages` solo tiene `text`) ni endpoints.
@@ -108,9 +117,7 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 **Bloquea:** nada (deuda aceptada).
 
 ### Pesos del feed
-**Problema:** los pesos del score (0.5 / 0.3 / 0.2) tienen que ser configurables, pero no está definido cómo.
-**Propuesta:** variable opcional `FEED_WEIGHTS` en JSON (`{"interests":0.5,"distance":0.3,"schedule":0.2}`), validada con Zod (suma 1); si falta, se usan los valores del informe.
-**Bloquea:** S3 (feed). En S1 la variable existe en `.env.example` pero es opcional.
+✅ **Decidido (2026-10-12, Paula) e implementado en S3:** variable opcional `FEED_WEIGHTS` en JSON (`{"interests":0.5,"distance":0.3,"schedule":0.2}`), validada al arrancar (los tres pesos, entre 0 y 1, que sumen 1; si es inválida el back no arranca). Sin ella se usan los valores del informe.
 
 ## C. Notas del sprint 1
 
@@ -193,7 +200,7 @@ Solo existe una vista mínima para otros usuarios (`serializePublic`: `id`, `nam
 - **`PUT /users/me` es parcial** y exige al menos un campo. Largo máximo de `name`: 80 (no estaba definido).
 - **No se puede dejar vacío** un campo de universidad, carrera, ciudad o barrio ya elegido (solo cambiarlo por otro, incluida "Otra"); la carrera y el barrio sí se quitan solos cuando cambia la universidad o la ciudad. Propuesta: aceptar `null` para quitarlos.
 - ✅ **Resuelto en S2b:** el registro pide solo nombre, email y contraseña; el resto se completa en el onboarding o en el Perfil.
-- **`planId` en `POST /uploads/presign`** se rechaza (400) hasta que exista el módulo de planes (S3); ahí se agrega la comprobación de creador.
+- ✅ **Resuelto en S3:** `planId` en `POST /uploads/presign` genera una clave `plans/<planId>/…` solo para el creador del plan.
 - **Enrutado estricto** en toda la API (`case sensitive routing` + `strict routing`): `/internal/health/` y `/auth/LOGIN` dan 404. Es defensa en profundidad del límite de Nginx. **El equipo de AWS debe confirmar que el health check del ALB usa `/internal/health` sin barra final y con esa capitalización.**
 - **Zod con mensajes en español** (`z.config(z.locales.es())` en `shared/validation.js`) y los campos desconocidos se informan en `details` con el nombre del campo.
 - **`sanitizeFilter` de Mongoose** (mencionado en 09 como red adicional) **no se activó**: reescribe los operadores (`$gt`, `$in`) de nuestras propias queries salvo que se marquen como confiables. La barrera sigue siendo Zod `.strict()` + queries armadas en el repositorio. Decidir si se activa y se marcan las queries propias.
@@ -248,3 +255,55 @@ Decididos con Phillip el 2026-10-11 (ver [ADR-0009](arquitectura/adr/0009-catalo
 - **"Saltar" no guarda lo elegido en ese paso** (se descarta).
 - Pasos: 1 (fecha de nacimiento y foto), 2 (universidad, carrera, ciudad y barrio), 3 (intereses por categoría).
 - **Sin probar en emulador ni teléfono**, igual que el resto de la app: el selector con buscador (`Modal` + `FlatList`) y el selector de fecha nativo.
+
+## F. Notas del sprint 3: planes y feed
+
+Decidido con Paula el 2026-10-12 (ver arriba: [intereses](#intereses-del-plan), [compatibilidad horaria](#compatibilidad-horaria), [paginación](#paginación-del-feed), [radio](#radio-del-feed), [filtros, costo, llenos y cupo ilimitado](#filtros-del-feed-costo-y-planes-llenos), [visibilidad](#visibilidad-de-planes), [pesos](#pesos-del-feed), [aviso de cupo](#aviso-de-cupo-liberado)). Lo que quedó abierto o se resolvió con la opción más chica:
+
+### Impacto en S4 (inscripciones)
+- **Cupo ilimitado y la transacción de cupo.** El patrón `incrementIfCapacity` documentado usaba `$lt: ['$participantCount', '$capacity']`, que con `capacity: null` da siempre falso: un plan sin límite rechazaría todas las inscripciones con `PLAN_FULL`. La condición correcta ya está en [07](arquitectura/07-modelo-de-datos.md#transacciones) (`$or` con `capacity` nulo) y es la misma del filtro `availability=available`. El test de concurrencia de S4 tiene que cubrir también un plan ilimitado (N inscripciones simultáneas → N exitosas). El resto no cambia: el contador y el registro siguen en la misma transacción.
+- **Bajar el cupo mientras hay inscripciones en curso** ya es seguro: `PATCH capacity` es una actualización condicional sobre `participantCount`, y el validador de MongoDB rechaza un `participantCount` mayor al cupo.
+- **Planes llenos:** el botón de inscribirse (S4-MOB-01) se deshabilita con `isFull`; el back responde `PLAN_FULL` igual.
+- **`status` no se edita por `PATCH`** en S3 (cerrar, cancelar y completar siguen en [estados del plan](#estados-del-plan)). Mientras tanto un plan solo puede estar `open`, salvo por seeds o scripts.
+- **Feed:** hoy incluye los planes creados por el propio usuario y los que ya tiene inscriptos. Decidir en S4 si se excluyen o se marcan ("Vas a ir").
+- **Aviso de cupo liberado:** diseñado, sin implementar. Tareas S4-BE-09, S4-MOB-05 y S5-BE-08.
+
+### Reglas que se resolvieron con la opción más chica
+- **`startsAt` tiene que ser futuro** al crear, y al editar solo si se cambia (un plan en curso se puede editar sin tocar el inicio). No hay un máximo de anticipación.
+- **Un plan `cancelled` o `completed` no se edita** (409 `PLAN_CLOSED`); uno `open` o `closed`, sí.
+- **Visible "hasta que termina"** (`endsAt`), no hasta que empieza: un plan en curso se sigue viendo. Los listados, en cambio, solo traen planes que todavía no empezaron.
+- **"Inscripto" = inscripción activa.** Quien se dio de baja deja de ver un plan cancelado o terminado.
+- **`plans.university`** es la del creador al momento de crear; no se actualiza si el creador cambia de universidad. Puede ser `null`.
+- **Intereses del filtro: "al menos uno"** (no "todos"). El catálogo de intereses del filtro es el del perfil.
+- **Los planes anteriores a S3** (datos de desarrollo) quedaron con `endsAt = startsAt + 2 h` y `price = 0` por migración. Las tres migraciones de planes de S3 salen juntas: como todavía no hay una versión desplegada, no se hizo en dos pasos (expand/contract).
+- **`description` se puede vaciar** con `PATCH description: ""`; sale `null`.
+- **`GET /plans/filters`** es un endpoint nuevo (no estaba en el informe): existe para que los rangos de precio vivan solo en el back.
+- **Moneda:** pesos uruguayos, sin campo de moneda. Si la app sale de Uruguay hay que agregarlo.
+- **El score no se expone** en la respuesta (solo el orden y `distanceMeters`).
+- **Cursor del feed:** si el usuario cambia de filtros, radio o posición, el cursor viejo es 400 y la app vuelve a pedir la primera página (lo hace sola: cada cambio recarga el feed). La ubicación se toma una vez por recorrido; al refrescar se vuelve a leer.
+
+### Límites conocidos
+- **Tope de 200 candidatos:** con más de 200 planes dentro del radio se rankean los 200 más cercanos; un plan muy afín pero más lejano queda afuera hasta que el usuario achica el radio o filtra.
+- **Entre páginas del feed** un plan puede llenarse o cambiar: la página siguiente se calcula de nuevo, así que en ese caso puede saltearse o repetirse un plan (la app descarta los repetidos). Planes nuevos aparecen al refrescar.
+- **`photoUrl` del plan cambia en cada respuesta** (URL firmada de 10 minutos), igual que la del perfil.
+- **La app no sube todavía la foto del plan**: ver la [tarea pendiente](#tarea-pendiente-foto-del-plan-desde-la-app).
+- **Compatibilidad horaria:** los eventos de día completo no cuentan como ocupado; el calendario se lee al cargar o refrescar el feed, no en cada página.
+- **Sin caché offline** del feed ni del detalle (S6).
+
+### Tarea pendiente: foto del plan desde la app
+**Para un próximo sprint (sin asignar).** El back ya está listo desde S3: `POST /uploads/presign` con `planId` (clave `plans/<planId>/…`, solo el creador) y `PUT /plans/:id/photo` (verifica creador, prefijo, existencia, tipo y tamaño reales), y el plan devuelve `photoUrl`. Falta la parte de la app:
+- En crear/editar plan (o en el detalle, para el creador): elegir la imagen, `presign` con `planId` → `PUT` directo a S3 → `PUT /plans/:id/photo`. Reutilizar `services/photoUpload.js` e `imagePicker.js` de la foto de perfil (hoy `uploadProfilePhoto` no acepta `planId` y el selector recorta cuadrado: definir la proporción de la foto del plan).
+- Al crear, el plan tiene que existir antes de subir la foto (primero `POST /plans`, después la foto).
+- Mostrar `photoUrl` en `PlanScreen` y en `PlanCard`.
+- Depende de que el rol IAM del back tenga permisos sobre `plans/*` (ver abajo).
+
+### Para el equipo de AWS / configuración (no se tocó `infra/`)
+- **S3:** el rol IAM del back necesita los mismos permisos que para `users/*` también sobre **`plans/*`** (`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`).
+- **Google Maps:** crear en Google Cloud una clave de "Maps SDK for Android" por entorno, restringida al paquete de la app y a la huella SHA-1 de su certificado, y cargarla en EAS como `GOOGLE_MAPS_ANDROID_API_KEY` ([09](arquitectura/09-seguridad.md#secretos)). El paquete de la app es **`com.junte.app`** (`android.package` e `ios.bundleIdentifier` en `mobile/app.config.js`, decidido el 2026-10-12): la clave se restringe a ese paquete.
+- **`FEED_WEIGHTS`** es opcional; si se define tiene que ser JSON válido o el back no arranca.
+
+### Sin probar
+- **Probada por Paula en un teléfono con Expo Go (2026-10-12): funciona.** Además: tests (jest-expo), lint y `expo export --platform android`. Sigue sin probarse en un **development build / APK** (el mapa ahí usa la clave de Google Maps propia, que todavía no existe) ni de forma sistemática caso por caso: el mapa (`react-native-maps`, necesita la clave y un development build), arrastrar el pin, el geocodificador del teléfono (`expo-location`; la calidad de las búsquedas depende del dispositivo), los permisos de ubicación y calendario, los dos diálogos de fecha y hora de Android, los tabs y el scroll infinito con datos reales.
+- **`expo-calendar` declara también el permiso de escritura** del calendario en Android (lo agrega su plugin); la app solo lee. Si se quiere quitar hay que probar en un teléfono que el pedido de permiso siga funcionando.
+- La app contra el back real no se probó de punta a punta; el back sí, por HTTP (Supertest) y contra MongoDB en memoria.
+- `expo-doctor` avisa de tres parches menores disponibles (`expo`, `expo-dev-client`, `jest-expo`), anteriores a este sprint: no se actualizaron.

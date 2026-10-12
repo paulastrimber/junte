@@ -34,19 +34,19 @@ Estos casos salen del informe (7.5) y de las reglas de negocio. Cada uno tiene s
 - [x] Token vencido → 401 `TOKEN_EXPIRED`; token con `typ: 'refresh'` usado como access → 401; firma con otro algoritmo → 401. *(también `alg: none`)*
 - [x] Usuario `suspended` → 401.
 - [x] Refresh reutilizado tras rotación → 401 y sesión revocada *(solo esa sesión; 10 refresh simultáneos → 1 éxito)*.
-- [ ] `PATCH /plans/:id` de un plan ajeno → 403.
+- [x] `PATCH /plans/:id` de un plan ajeno → 403. *(tests/contract/plans.test.js, src/modules/plans/plan.service.test.js; también `PUT …/photo` y `presign` con `planId`)*
 - [ ] `/admin/*` sin rol admin → 403. *(`requireRole` ya está probado con una ruta de prueba: falta repetirlo sobre las rutas reales de `/admin` en S6)*
 
 **Validación**
-- [ ] Campos solo-backend en el body (`creatorId`, `reputation`, `participantCount`, `role`…) → 400. *(hecho para `/auth` y `/users/me`: `role`, `status`, `reputation`, `age`, `photoKey`, `passwordHash`; faltan los de planes)*
+- [x] Campos solo-backend en el body (`creatorId`, `reputation`, `participantCount`, `role`…) → 400. *(`/auth` y `/users/me`: `role`, `status`, `reputation`, `age`, `photoKey`, `passwordHash`; `/plans`: `creatorId`, `participantCount`, `university`, `status`, `photoKey`, `qrNonceHash`)*
 - [x] Operadores Mongo en el body (`{ "email": { "$ne": null } }`) → 400.
-- [ ] Coordenadas fuera de rango, `capacity` ≤ 0, fechas incoherentes → 400.
+- [x] Coordenadas fuera de rango, `capacity` ≤ 0, fechas incoherentes → 400. *(plan.validators.test.js, tests/contract/plans.test.js; filtros inválidos del feed en tests/contract/feed.test.js)*
 
 **Cupos (concurrencia)**
 - [ ] N inscripciones simultáneas a un plan con cupo K < N → exactamente K exitosas, el resto 409 `PLAN_FULL`, `participantCount === K`.
 - [ ] El mismo usuario inscribiéndose en paralelo dos veces → 1 éxito, 1 `ALREADY_JOINED`, contador +1.
 - [ ] Baja → contador −1 y registro `cancelled`, en la misma transacción.
-- [ ] `PATCH capacity` por debajo de los inscriptos → 409.
+- [x] `PATCH capacity` por debajo de los inscriptos → 409; a `null` (ilimitado) y de vuelta a un número. *(tests/contract/plans.test.js, tests/integration/plan-repository.test.js)*
 
 **Check-in**
 - [ ] QR vencido → rechazado. QR de otro plan → rechazado.
@@ -63,7 +63,15 @@ Estos casos salen del informe (7.5) y de las reglas de negocio. Cada uno tiene s
 
 **Contrato general**
 - [ ] Todo error tiene `{ code, message, requestId }` y nunca stack ni detalles internos.
-- [ ] Paginación: `limit` > 100 → 400; último page con `nextCursor: null`; sin duplicados ni saltos entre páginas.
+- [x] Paginación: `limit` > 100 → 400; último page con `nextCursor: null`; sin duplicados ni saltos entre páginas. *(listado cronológico y feed por ranking: tests/contract/plans.test.js y feed.test.js; falta repetirlo en el chat, S5)*
+
+**Planes y feed (S3)**
+- [x] Ranking: el plan con los mismos intereses y cerca queda primero; cambiar los pesos en la configuración cambia el orden. *(src/modules/feed/feed.scorers.test.js, feed.service.test.js, tests/contract/feed.test.js)*
+- [x] `$geoNear` con planes a distancias conocidas en Montevideo: radio, orden y distancia en metros. *(tests/integration/plan-repository.test.js)*
+- [x] Visibilidad: plan cancelado, completado o terminado → 404 para un tercero, visible para su creador e inscriptos.
+- [x] Filtros predefinidos (fecha, intereses, varios rangos de precio, con cupo / llenos) y cupo ilimitado (nunca lleno).
+- [x] Compatibilidad horaria: 0.5 sin calendario, 0 con superposición (calendario o planes inscriptos), 1 sin superposición.
+- [x] App: sin permiso de calendario no se envía nada; sin ubicación el feed lista por fecha. *(mobile/src/hooks/useFeed.test.js, services/calendar.test.js)*
 
 **Catálogos y perfil**
 - [x] Universidad, carrera, ciudad, barrio e intereses inexistentes, desactivados, de otra universidad/ciudad o con edad mínima → 400 con `details` por campo. *(src/modules/catalogs/catalog.rules.test.js, tests/contract/users.test.js)*

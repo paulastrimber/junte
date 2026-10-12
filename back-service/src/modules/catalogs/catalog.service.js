@@ -1,7 +1,7 @@
 // Catálogos: lectura con caché corta y reglas. El back no tiene estado local que importe: la caché es solo una copia
 // de lectura de datos de referencia; cada instancia la renueva sola cada `ttlMs`, así que un cambio del admin se ve
 // en todas en menos de ese tiempo (sin Redis ni invalidación entre instancias).
-import { buildPublicCatalog, checkProfileReferences } from './catalog.rules.js'
+import { buildPublicCatalog, checkInterestReferences, checkProfileReferences } from './catalog.rules.js'
 
 export const CATALOG_TTL_MS = 60_000
 
@@ -37,6 +37,15 @@ export function createCatalogService ({ catalogRepo, clock, ttlMs = CATALOG_TTL_
     /** @returns {Promise<Array<{ path: string, message: string }>>} problemas del perfil resultante (vacío si es válido). */
     async checkProfileReferences (params) {
       return checkProfileReferences(await getSnapshot(), params)
+    },
+
+    /**
+     * Intereses de un plan (los elige su creador): existen, están disponibles y la edad del creador alcanza.
+     * @param {{ keys: string[], kept?: string[], age: number | null }} params
+     * @returns {Promise<Array<{ path: string, message: string }>>}
+     */
+    async checkInterests (params) {
+      return checkInterestReferences(await getSnapshot(), params)
     },
 
     /** Descarta la caché (lo usa el admin al editar, en la misma instancia). */

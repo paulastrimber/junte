@@ -31,10 +31,10 @@ back-service/
       auth/                # register, login, refresh, logout, sesiones (colección sessions), tokens
       users/               # perfil, foto, isProfileComplete
       catalogs/            # intereses, universidades, carreras, ciudades, barrios (GET /catalogs + reglas de validación)
-      plans/               # CRUD de planes, QR, cierre
-      participations/      # join / leave (transacción de cupo)
+      plans/               # CRUD de planes, listados con filtros predefinidos, foto (QR y cierre: S4)
+      participations/      # inscripciones: lecturas en S3; join / leave con transacción de cupo en S4
       checkins/            # check-in + reputación
-      feed/                # recomendación (scorers)
+      feed/                # recomendación: scorers puros, ranking y paginación por posición (POST /feed)
       messages/            # chat REST
       reports/
       devices/             # deviceTokens para FCM
@@ -43,7 +43,7 @@ back-service/
     middlewares/           # requestId, authenticate, requireRole, validate, errorHandler, notFound
     sockets/               # setup de Socket.io, auth del handshake, handlers de chat
     adapters/              # db (Mongo + withTransaction), redis, storage (s3 + memoria), passwordHasher (Argon2id), fcm, secrets, clock, logger
-    shared/                # AppError + catálogo de errores, paginación por cursor, utils puros (interests: lista cerrada, age: fechas de calendario y edad, uploads, validation: Zod en español, router: enrutado estricto)
+    shared/                # AppError + catálogo de errores, pagination (cursor opaco y limit), geo (coordenadas [lng, lat] y radio), utils puros (catalog-keys, age: fechas de calendario y edad, uploads: reglas y verificación de imágenes, validation: Zod en español, router: enrutado estricto)
   migrations/              # migrate-mongo (ver practicas/migraciones.md)
   catalogs/                # datos iniciales de los catálogos + syncCatalogs (solo inserta); los carga una migración
   seeds/                   # datos de desarrollo, nunca en producción
