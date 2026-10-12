@@ -74,7 +74,8 @@ Flujo: `ruta → middlewares → controlador → servicio → repositorio/modelo
    - `PATCH /plans/:id` con `capacity` menor a los inscriptos → 409.
    - `capacity: null` es **cupo ilimitado**: el plan nunca está lleno y la condición de inscripción tiene que dejarlo pasar. "Lleno" se calcula (`participantCount >= capacity`), no es un `status`.
 4. **Check-in:** inscripción activa + ventana (`checkInOpensAt`/`checkInClosesAt`) + QR + distancia ≤ `checkInRadiusMeters`. El QR es un desafío aleatorio con vencimiento (se guarda `qrNonceHash`), no el ID del plan. **No persistir la ubicación** del participante: solo `distanceMeters` y `accuracyMeters`. Check-in y `reputation +1` en una transacción.
-5. **Reputación:** +1 por check-in válido. Al cerrar/completar un plan, `noShow=true` en inscripciones activas sin check-in.
+   - Excepción: el creador inscripto hace check-in sin QR (solo ubicación) y no suma en ese momento; recibe el +1 al cerrar la asistencia, solo si al menos 2 participantes más hicieron check-in.
+5. **Reputación:** +1 por check-in válido; `noShow` no resta. El job de cierre de asistencia marca `noShow=true` en las inscripciones activas sin check-in cuando cierra la ventana de check-in, una sola vez por plan. Pasar un plan a `closed` no marca `noShow`; los planes `cancelled` no se procesan.
 6. **Chat:** solo participante activo o creador. Socket.io autentica la conexión y verifica pertenencia al plan; REST de mensajes para historial y fallback por polling. Texto de 1 a 2000 caracteres.
 7. **Permisos en el servicio:** perfil e inscripciones propias; solo el creador edita el plan y genera QR; reportes nunca visibles a otros; `/admin/*` requiere `role: 'admin'`.
 8. **Nunca** pasar filtros u operadores del cliente a MongoDB; las queries se construyen en el backend.
