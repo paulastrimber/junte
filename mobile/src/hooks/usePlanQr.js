@@ -26,7 +26,7 @@ const LOADING_STATE = Object.freeze({ status: QR_STATUS.LOADING, qrToken: null, 
 
 /**
  * QR de asistencia para la pantalla del creador. Pide uno al entrar y lo renueva solo un poco antes de que venza
- * (cada QR dura alrededor de un minuto y medio y uno nuevo invalida el anterior). Al salir de la pantalla deja de pedir.
+ * (cada QR dura alrededor de un minuto y medio; al renovarlo, el anterior sigue valiendo unos segundos). Al salir de la pantalla deja de pedir.
  * @param {string} planId
  */
 export function usePlanQr (planId) {

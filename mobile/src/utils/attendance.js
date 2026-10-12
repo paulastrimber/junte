@@ -46,6 +46,21 @@ export function planActions (plan, now = new Date()) {
 }
 
 /**
+ * Próximo momento en que cambia lo que se puede hacer con el plan: abre o cierra el horario de asistencia, empieza
+ * o termina. La pantalla del detalle se refresca sola en ese momento.
+ * @param {{ status: string, checkInOpensAt: string, startsAt: string, checkInClosesAt: string, endsAt: string }} plan
+ * @param {Date} [now]
+ * @returns {Date | null} null si ya no queda ninguno (o el plan está cancelado o completado).
+ */
+export function nextPlanMilestone (plan, now = new Date()) {
+  if (!LIVE_STATUSES.includes(plan.status)) return null
+  const upcoming = [plan.checkInOpensAt, plan.startsAt, plan.checkInClosesAt, plan.endsAt]
+    .map(time)
+    .filter((moment) => Number.isFinite(moment) && moment > now.getTime())
+  return upcoming.length > 0 ? new Date(Math.min(...upcoming)) : null
+}
+
+/**
  * Cuándo conviene pedir el próximo QR: un poco antes de que venza el actual.
  * @param {string} expiresAt ISO 8601
  * @param {Date} [now]

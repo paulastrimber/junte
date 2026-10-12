@@ -10,6 +10,7 @@ import { LIST_STATUS } from '../hooks/usePagedList.js'
 import { useParticipants } from '../hooks/useParticipants.js'
 import { PLAN_STATUS, usePlan } from '../hooks/usePlan.js'
 import { PLAN_ACTION, usePlanActions } from '../hooks/usePlanActions.js'
+import { usePlanAutoRefresh } from '../hooks/usePlanAutoRefresh.js'
 import { ROUTES } from '../navigation/routes.js'
 import { formatReputation, planActions } from '../utils/attendance.js'
 import { messageForError } from '../utils/errorMessages.js'
@@ -117,6 +118,8 @@ export default function PlanScreen ({ navigation, route }) {
 
   // Al volver del QR o del check-in el plan pudo cambiar (asistencia registrada).
   useEffect(() => navigation.addListener('focus', onChanged), [navigation, onChanged])
+  // Y sin salir de la pantalla: cuando abre el horario de asistencia (aparece el botón) o la app vuelve a primer plano.
+  usePlanAutoRefresh(plan, refresh)
 
   if (status === PLAN_STATUS.LOADING) {
     return (

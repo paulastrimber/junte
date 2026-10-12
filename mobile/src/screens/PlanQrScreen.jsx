@@ -1,3 +1,4 @@
+import { useKeepAwake } from 'expo-keep-awake'
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
 import QRCode from 'react-native-qrcode-svg'
 
@@ -9,7 +10,7 @@ import { QR_STATUS, usePlanQr } from '../hooks/usePlanQr.js'
 export const TEXTS = Object.freeze({
   title: 'QR de asistencia',
   loading: 'Generando el QR…',
-  hint: 'Mostrales este QR a quienes llegan para que registren su asistencia. Se renueva solo cada poco más de un minuto: no sirve una foto.',
+  hint: 'Mostrales este QR a quienes llegan para que registren su asistencia. Se renueva solo cada poco más de un minuto: no sirve una foto. La pantalla queda encendida mientras lo mostrás.',
   retry: 'Reintentar',
   back: 'Volver al plan',
   myCheckIn: 'Registrar mi asistencia',
@@ -25,6 +26,8 @@ const QR_SIZE = 260
 export default function PlanQrScreen ({ navigation, route }) {
   // `canCheckIn`: el creador está inscripto y todavía no registró su asistencia (lo decide el detalle del plan).
   const { planId, canCheckIn = false } = route.params
+  // La pantalla no se apaga mientras se muestra el QR (los que llegan lo van escaneando de a uno).
+  useKeepAwake()
   const qr = usePlanQr(planId)
   const checkIn = useCheckIn(planId)
   const { retry } = qr
