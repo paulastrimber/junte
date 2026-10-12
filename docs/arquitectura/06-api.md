@@ -8,7 +8,7 @@ Contrato público publicado por Nginx bajo `/api/v1`. El back lo atiende bajo `/
 
 - Todas las rutas requieren `Authorization: Bearer <access_token>` salvo `POST /auth/register`, `/auth/login`, `/auth/refresh` y `GET /health`. Las URLs son sensibles a mayúsculas y a la barra final: `/auth/Login` y `/auth/login/` no existen (404).
 - Cuerpos `application/json`; fechas ISO 8601 con zona horaria; IDs como strings; campos en inglés; coordenadas `[lng, lat]`.
-- **Campos solo-backend** (se ignoran o se rechazan con 400 si vienen en un body): `id`, `creatorId`, `senderId`, `userId`, `reporterId`, `reputation`, `role`, `status` de usuario, `age` (se calcula desde `birthDate`), `photoKey`, `noShow`, `noShowAt`, `participantCount`, `availableSpots`, `isFull`, `university` y `status` del plan, `qrNonceHash`.
+- **Campos solo-backend** (se ignoran o se rechazan con 400 si vienen en un body): `id`, `creatorId`, `senderId`, `userId`, `reporterId`, `reputation`, `role`, `status` de usuario, `age` (se calcula desde `birthDate`), `photoKey`, `noShow`, `noShowAt`, `noShowCount`, `participantCount`, `availableSpots`, `isFull`, `university` del plan, `qrNonceHash`, `checkInOpensAt`, `checkInClosesAt` y `attendanceClosedAt`. El `status` del plan solo acepta los valores que puede pedir el creador ([estado del plan](#estado-del-plan)).
 - Los esquemas Zod son **estrictos** (`.strict()`): un campo desconocido es 400, no se descarta en silencio.
 
 ### Paginación
@@ -55,7 +55,8 @@ Catálogo completo y reglas en [errores-y-logs.md](../practicas/errores-y-logs.m
 
 | Método y ruta | Body | OK | Errores | Permiso | Estado |
 |---|---|---|---|---|---|
-| `GET /users/me` | — | 200 perfil propio | 401 | Usuario | ✔ |
+| `GET /users/me` | — | 200 perfil propio (+ `noShowCount`) | 401 | Usuario | ✔ |
+| `GET /users/me/plans` | `role` (`created`\|`joined`), `when` (`upcoming`\|`past`), `limit, cursor` | 200 paginado de planes, con `myParticipation` | 400, 401 | Usuario | ➕ |
 | `PUT /users/me` | cualquiera de `name, birthDate, university, career, city, neighborhood, interests, onboardingCompleted` (cambio parcial, al menos uno) | 200 perfil actualizado | 400 | Usuario sobre su perfil | ✔ |
 | `PUT /users/me/photo` | `objectKey` | 200 perfil actualizado | 400, 403 objeto ajeno, 404 no existe en S3 | Usuario | ✔ |
 | `POST /devices` | `token, platform` (`android`\|`ios`) | 201 creado / 200 actualizado | 400 | Usuario | ➕ |
@@ -82,6 +83,7 @@ Respuesta de `GET`/`PUT /users/me`, `register` y `login` (solo la ve su dueño):
   "neighborhood": "pocitos",
   "interests": ["futbol", "cine"],
   "reputation": 0,
+  "noShowCount": 0,
   "photoUrl": "https://…/users/665f…/0b7d….jpg?X-Amz-…",
   "profileComplete": true,
   "onboardingCompleted": true,
@@ -102,7 +104,8 @@ Respuesta de `GET`/`PUT /users/me`, `register` y `login` (solo la ve su dueño):
 - `profileComplete`: `name` + `birthDate` + al menos 1 interés. Sin perfil completo, `POST /plans` responde 409 `PROFILE_INCOMPLETE`. Universidad, carrera, ciudad y barrio son opcionales y no cuentan.
 - `onboardingCompleted`: la persona terminó **o dejó para después** el onboarding. Se marca mandando `onboardingCompleted: true` (solo `true`: no se puede deshacer) y, mientras sea `false`, la app muestra el onboarding. Es independiente de `profileComplete`: se puede saltar todo y el perfil sigue incompleto.
 - `photoUrl`: URL `GET` firmada de 10 minutos; cambia en cada respuesta.
-- `birthDate`, `age`, `city` y `neighborhood` **no se exponen a otros usuarios** (la vista pública solo lleva `id`, `name` y `photoUrl`) y no se loguean.
+- `birthDate`, `age`, `city` y `neighborhood` **no se exponen a otros usuarios** y no se loguean. La **vista pública** de un usuario (creador de un plan, anotados) lleva solo `id`, `name`, `photoUrl` y `reputation`.
+- `reputation`: +1 por cada check-in válido; solo la escribe el back y es pública. `noShowCount`: cantidad de ausencias propias (inscripciones marcadas `noShow`). **Solo sale en `GET /users/me`** (no en `PUT`, registro ni login) y nunca se muestra a otros usuarios.
 - `PUT /users/me` es un cambio parcial: lo que no se manda no cambia. No hay forma de dejar vacío un campo ya elegido (solo cambiarlo por otro, incluida "Otra").
 
 ### Catálogos
@@ -141,17 +144,18 @@ Respuesta de `GET`/`PUT /users/me`, `register` y `login` (solo la ve su dueño):
 | `GET /plans/filters` | — | 200 opciones de los filtros (rangos de precio, radio) | 401 | Usuario | ➕ |
 | `POST /feed` | Filtros + `near: [lng, lat], radiusKm, calendar, limit, cursor` | 200 paginado por score de recomendación | 400 | Usuario | ➕ |
 | `GET /plans/:id` | — | 200 detalle + cupos disponibles | 400, 404 | Usuario (si el plan le es visible) | ✔ |
-| `POST /plans` | `title, startsAt, endsAt, location, interests` + opcionales `description, capacity, price` | 201 plan | 400, 409 `PROFILE_INCOMPLETE` | Usuario con perfil completo | ✔ |
-| `PATCH /plans/:id` | Cualquiera de los campos de `POST` (cambio parcial, al menos uno) | 200 plan | 400, 403, 404, 409 `CAPACITY_BELOW_PARTICIPANTS` / `PLAN_CLOSED` | Creador | ✔ |
+| `POST /plans` | `title, startsAt, endsAt, location, interests` + opcionales `description, capacity, price, checkInRadiusMeters` | 201 plan | 400, 409 `PROFILE_INCOMPLETE` | Usuario con perfil completo | ✔ |
+| `PATCH /plans/:id` | Cualquiera de los campos de `POST` (cambio parcial, al menos uno), **o** solo `status` | 200 plan | 400, 403, 404, 409 `CAPACITY_BELOW_PARTICIPANTS` / `PLAN_CLOSED` | Creador | ✔ |
 | `PUT /plans/:id/photo` | `objectKey` | 200 plan | 400, 403, 404 | Creador | ✔ |
-| `POST /plans/:id/join` | — | 201 inscripción | 404, 409 `PLAN_FULL` / `ALREADY_JOINED` / `PLAN_CLOSED` | Usuario | ✔ |
-| `DELETE /plans/:id/join` | — | 204 (también si no estaba) | 404, 409 si ya no admite bajas | Usuario sobre su inscripción | ✔ |
-| `POST /plans/:id/qr` | — | 201 `{ qrToken, expiresAt }` | 403, 404, 409 fuera de horario | Creador | ✔ |
-| `POST /plans/:id/check-in` | `qrToken, latitude, longitude, accuracyMeters` | 201 asistencia | 400, 403 `QR_INVALID`/`OUT_OF_RANGE`, 404, 409 `ALREADY_CHECKED_IN`/`CHECKIN_WINDOW_CLOSED` | Participante activo | ✔ |
+| `POST /plans/:id/join` | — (cualquier campo es 400) | 201 `{ planId, status, joinedAt }` | 404, 409 `PLAN_FULL` / `ALREADY_JOINED` / `PLAN_CLOSED` | Usuario | ✔ |
+| `DELETE /plans/:id/join` | — | 204 (también si no estaba) | 404, 409 `PLAN_CLOSED` si ya no admite bajas | Usuario sobre su inscripción | ✔ |
+| `GET /plans/:id/participants` | `limit, cursor` | 200 paginado de anotados (`id, name, photoUrl, reputation`) | 400, 403, 404 | Participante activo o creador | ➕ |
+| `POST /plans/:id/qr` | — | 201 `{ qrToken, expiresAt }` | 403, 404, 409 `CHECKIN_WINDOW_CLOSED` / `PLAN_CLOSED` | Creador | ✔ |
+| `POST /plans/:id/check-in` | `qrToken, latitude, longitude, accuracyMeters` | 201 `{ planId, checkedInAt, method, distanceMeters }` | 400, 403 `FORBIDDEN`/`QR_INVALID`/`OUT_OF_RANGE`, 404, 409 `PLAN_CLOSED`/`ALREADY_CHECKED_IN`/`CHECKIN_WINDOW_CLOSED` | Participante activo | ✔ |
 
 > El check-in recibe `latitude`/`longitude` sueltas (no GeoJSON) tal como define el informe; el back las convierte. Es la única excepción al orden `[lng, lat]`.
 
-Implementados en S3: `GET /plans`, `GET /plans/filters`, `POST /feed`, `GET /plans/:id`, `POST /plans`, `PATCH /plans/:id` y `PUT /plans/:id/photo`. El resto de la tabla llega en S4.
+Implementados en S3: `GET /plans`, `GET /plans/filters`, `POST /feed`, `GET /plans/:id`, `POST /plans`, `PATCH /plans/:id` y `PUT /plans/:id/photo`. En S4: inscripciones, anotados, QR, check-in, el cambio de `status` y `GET /users/me/plans` (reglas en [Inscripciones y asistencia](#inscripciones-y-asistencia)).
 
 #### Plan
 
@@ -174,8 +178,12 @@ Respuesta de `POST`, `GET /plans/:id`, `PATCH`, `PUT …/photo` y de cada elemen
   "price": 150,
   "status": "open",
   "photoUrl": null,
-  "creator": { "id": "665f1c2a9b1e8a0012345678", "name": "Ana Pérez", "photoUrl": null },
+  "creator": { "id": "665f1c2a9b1e8a0012345678", "name": "Ana Pérez", "photoUrl": null, "reputation": 4 },
   "isCreator": true,
+  "checkInOpensAt": "2026-10-25T20:45:00.000Z",
+  "checkInClosesAt": "2026-10-25T22:00:00.000Z",
+  "checkInRadiusMeters": 150,
+  "myParticipation": { "status": "active", "joinedAt": "2026-10-20T14:00:00.000Z", "checkedInAt": null, "noShow": false },
   "distanceMeters": 812,
   "createdAt": "2026-10-12T15:00:00.000Z"
 }
@@ -192,25 +200,76 @@ Campos que se mandan (`POST` / `PATCH`; cualquier otro campo es 400):
 | `interests` | De 1 a 10 keys del catálogo `interests` (el mismo del perfil), sin repetir. Tienen que existir y estar activas; las que tienen edad mínima exigen que **el creador** la tenga. Al editar se conservan las que el plan ya tenía aunque se hayan desactivado |
 | `capacity` | Entero de 1 a 500, o `null` = **cupo ilimitado**. Opcional en `POST` (por defecto `null`) |
 | `price` | Costo por persona en pesos uruguayos, entero de 0 (gratis) a 100000. Opcional en `POST` (por defecto 0) |
+| `checkInRadiusMeters` | Radio del check-in en metros, entero de 50 a 1000. Opcional en `POST` (por defecto 150). Es lo único de la asistencia que elige el creador |
+| `status` | **Solo en `PATCH` y solo**: `closed` (cerrar inscripciones), `open` (reabrirlas) o `cancelled`. Con otros campos en el mismo body es 400. Ver [transiciones](#estado-del-plan) |
 
 Campos que solo devuelve el back:
 
-- `university`: la del perfil del creador al crear el plan (`null` si no tiene). `status`: `open` al crear; las transiciones llegan en S4.
+- `university`: la del perfil del creador al crear el plan (`null` si no tiene). `status`: `open` al crear; `completed` lo pone solo el back.
+- `checkInOpensAt` y `checkInClosesAt`: la **ventana de asistencia la calcula siempre el back** (`startsAt − 15 min` a `startsAt + 60 min`, y nunca después de `endsAt`); se recalcula sola cuando cambian las fechas. Mandarlas en un body es 400.
+- `myParticipation`: el estado del usuario del token en ese plan, o `null` si nunca se inscribió. `status` (`active` \| `cancelled`), `joinedAt`, `checkedInAt` (`null` si no registró su asistencia) y `noShow`. Va en el detalle (`POST`, `GET /plans/:id`, `PATCH`, `PUT …/photo`) y en `GET /users/me/plans`; **no** en los listados del feed.
 - `participantCount`, `availableSpots` e `isFull`: **"lleno" se calcula** (`participantCount >= capacity`), no es un `status`. Con cupo ilimitado (`capacity: null`) `availableSpots` es `null` e `isFull` siempre `false`. Crear un plan no consume cupo: el creador se inscribe aparte.
-- `creator`: vista pública del creador (`id`, `name`, `photoUrl`). `isCreator`: si el usuario del token es quien lo creó (la app lo usa para ofrecer "Editar").
+- `creator`: vista pública del creador (`id`, `name`, `photoUrl`, `reputation`). `isCreator`: si el usuario del token es quien lo creó (la app lo usa para ofrecer "Editar").
 - `photoUrl`: URL `GET` firmada de 10 minutos, o `null`. `distanceMeters`: solo en resultados por cercanía (`POST /feed`, `GET /plans?near=`), redondeada al metro.
-- Nunca salen `photoKey`, `qrNonceHash` ni `creatorId` suelto.
+- Nunca salen `photoKey`, `qrNonceHash`, `qrExpiresAt`, el desafío anterior (`qrPreviousNonceHash`, `qrPreviousExpiresAt`), `attendanceClosedAt` ni `creatorId` suelto.
 
 Reglas:
 
 - **Visibilidad** (`GET /plans/:id`, y antes de cualquier 403): un plan `open` o `closed` que todavía no terminó lo ve cualquier usuario. Uno `cancelled`, `completed` o ya terminado solo lo ven su creador y quienes tienen inscripción activa; para el resto es 404 (no se revela que existe).
-- **`PATCH`**: solo el creador (403 `FORBIDDEN`) y solo mientras el plan está `open` o `closed` (si no, 409 `PLAN_CLOSED`). `status` no se edita por acá.
+- **`PATCH`**: solo el creador (403 `FORBIDDEN`) y solo mientras el plan está `open` o `closed` (si no, 409 `PLAN_CLOSED`).
 - **Cupo en `PATCH`**: fijar un `capacity` menor a los inscriptos → 409 `CAPACITY_BELOW_PARTICIPANTS` (se comprueba en la misma operación que escribe). Se puede pasar de un número a `null` (ilimitado) siempre, y de `null` a un número que no sea menor a `participantCount`.
-- Un plan lleno se puede ver completo, pero no admite inscripciones (S4: `PLAN_FULL`).
+- Un plan lleno se puede ver completo, pero no admite inscripciones (`PLAN_FULL`).
+
+#### Estado del plan
+
+```
+open ◀──▶ closed ──▶ completed      (el back, al llegar endsAt; también desde open)
+  │          │
+  └────┬─────┘
+       ▼
+   cancelled                        (el creador, hasta endsAt)
+```
+
+- El creador cambia el estado con `PATCH /plans/:id { "status": … }`: `closed` cierra las inscripciones y `open` las reabre (solo **antes de `startsAt`**); `cancelled` cancela el plan (en cualquier momento **hasta `endsAt`**). Pedir el estado que ya tiene responde 200 sin cambios.
+- Una transición que no corresponde (reabrir un plan que ya empezó, tocar uno cancelado o completado) → 409 `PLAN_CLOSED`. `cancelled` y `completed` son finales.
+- `closed` **solo impide inscripciones nuevas**: las bajas, el QR y el check-in siguen funcionando, y no marca ausencias.
+- En un plan cancelado no hay altas, bajas, QR ni check-in. Las inscripciones quedan como estaban; los check-ins, la reputación y las ausencias ya registradas se conservan.
+- `completed` lo pone un job del back cuando llega `endsAt`.
+
+#### Inscripciones y asistencia
+
+**Inscribirse (`POST /plans/:id/join`).** El plan tiene que estar `open`, no haber empezado y tener lugar. Vale igual para quien se había dado de baja (se reactiva su misma inscripción). El creador no ocupa cupo al crear: se inscribe como cualquiera. Motivo del rechazo, en orden: plan inexistente o no visible → 404; no está `open` o ya empezó → 409 `PLAN_CLOSED`; sin lugar → 409 `PLAN_FULL` (nunca con cupo ilimitado); ya inscripto → 409 `ALREADY_JOINED`.
+
+**Darse de baja (`DELETE /plans/:id/join`).** Con el plan `open` o `closed` y antes de `startsAt`. Idempotente: sin inscripción activa responde 204. Responde 409 `PLAN_CLOSED` si el plan ya empezó, está cancelado o completado, o si la persona **ya registró su asistencia**.
+
+**Anotados (`GET /plans/:id/participants`).** Inscripciones activas, por orden de inscripción: `{ items: [{ id, name, photoUrl, reputation }], nextCursor }`. Solo para participantes activos y el creador (403 `FORBIDDEN` para el resto; 404 si el plan no le es visible). Nunca incluye ausencias.
+
+**QR (`POST /plans/:id/qr`).** Solo el creador, con el plan `open` o `closed` y dentro de la ventana de asistencia. Devuelve un desafío aleatorio (`qrToken`) que vence a los **90 segundos** (o al cerrar la ventana, lo que pase primero). Pedir otro lo reemplaza: **el anterior sigue valiendo 10 segundos más** (nunca más allá de su propio vencimiento), para que quien lo escaneó justo en el cambio no tenga que repetir. Solo se conserva uno: el anterior al anterior deja de valer. El back guarda solo el hash. `Cache-Control: no-store`.
+
+**Check-in (`POST /plans/:id/check-in`).** Validaciones, en orden:
+
+| # | Regla | Si falla |
+|---|-------|----------|
+| 1 | Formato del body (estricto) | 400 `VALIDATION_ERROR` |
+| 2 | El plan existe y le es visible | 404 `NOT_FOUND` |
+| 3 | Inscripción activa | 403 `FORBIDDEN` |
+| 4 | Plan `open` o `closed` | 409 `PLAN_CLOSED` |
+| 5 | Todavía no registró su asistencia | 409 `ALREADY_CHECKED_IN` |
+| 6 | Dentro de la ventana (`checkInOpensAt` a `checkInClosesAt`, bordes incluidos) | 409 `CHECKIN_WINDOW_CLOSED` |
+| 7 | `qrToken` es el desafío vigente de **ese** plan y no venció, o el anterior dentro de sus 10 segundos de margen | 403 `QR_INVALID` |
+| 8 | `accuracyMeters` ≤ 100 y distancia al lugar ≤ `checkInRadiusMeters` | 403 `OUT_OF_RANGE` |
+
+- Si todo pasa, se registra la asistencia y se suma **+1 de reputación**, en la misma transacción. Respuesta: `{ planId, checkedInAt, method, distanceMeters }` (`distanceMeters` redondeada).
+- **La ubicación no se guarda**: solo la distancia al lugar y la precisión.
+- **El creador inscripto** no puede escanear su propio QR: registra su asistencia con el mismo endpoint **sin `qrToken`** (`method: "location"`), con las mismas reglas de horario, distancia y precisión. No suma reputación en ese momento: la recibe al cerrar la asistencia, solo si **al menos 2 participantes más** registraron la suya.
+
+**Cierre de asistencia.** Cuando cierra la ventana de check-in, un job del back marca `noShow` en las inscripciones activas sin check-in (incluida la del creador, si estaba inscripto) y le da su +1 al creador si corresponde. Corre una sola vez por plan. `noShow` no resta reputación. Los planes cancelados no se procesan.
+
+**Mis planes (`GET /users/me/plans`).** `role=created` (los que creó) o `role=joined` (inscripción activa); `when=upcoming` (todavía no terminó, del más próximo al más lejano; es el valor por defecto) o `when=past` (ya terminó, del más reciente al más viejo). Incluye planes en cualquier estado, también cancelados y completados. Cada elemento es un [plan](#plan) con `myParticipation`.
 
 #### Listados y filtros
 
-`GET /plans` y `POST /feed` devuelven `{ items: [plan…], nextCursor }` con planes **abiertos que todavía no empezaron**. Los filtros son **predefinidos**: el cliente elige valores y el back arma la consulta (un filtro desconocido es 400).
+`GET /plans` y `POST /feed` devuelven `{ items: [plan…], nextCursor }` con planes **abiertos que todavía no empezaron**. Son para descubrir planes: **no traen los que creó el usuario ni aquellos en los que tiene inscripción activa** (esos están en `GET /users/me/plans`); quien se da de baja vuelve a verlo. Los filtros son **predefinidos**: el cliente elige valores y el back arma la consulta (un filtro desconocido es 400).
 
 | Filtro | `GET /plans` (query) | `POST /feed` (body) | Qué hace |
 |--------|----------------------|---------------------|----------|

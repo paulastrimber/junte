@@ -37,6 +37,23 @@ export async function getCurrentCoordinates () {
 }
 
 /**
+ * Posición para registrar la asistencia: con la mejor precisión disponible y su margen de error en metros.
+ * Va como `latitude`/`longitude` sueltas porque así las recibe el check-in (única excepción al orden `[lng, lat]`).
+ * @returns {Promise<{ status: 'granted', latitude: number, longitude: number, accuracyMeters: number } | { status: 'denied' | 'unavailable' }>}
+ */
+export async function getPreciseLocation () {
+  if (!await requestLocationPermission()) return { status: LOCATION_STATUS.DENIED }
+  try {
+    const { coords } = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })
+    // Sin margen de error conocido no se puede confiar en la posición.
+    if (typeof coords.accuracy !== 'number') return { status: LOCATION_STATUS.UNAVAILABLE }
+    return { status: LOCATION_STATUS.GRANTED, latitude: coords.latitude, longitude: coords.longitude, accuracyMeters: coords.accuracy }
+  } catch {
+    return { status: LOCATION_STATUS.UNAVAILABLE }
+  }
+}
+
+/**
  * Busca una dirección con el geocodificador del teléfono (sin API de Places ni claves).
  * @param {string} address
  * @returns {Promise<[number, number] | null>} `[lng, lat]` del primer resultado; null si no se encontró o falló.

@@ -42,19 +42,31 @@ Estos casos salen del informe (7.5) y de las reglas de negocio. Cada uno tiene s
 - [x] Operadores Mongo en el body (`{ "email": { "$ne": null } }`) → 400.
 - [x] Coordenadas fuera de rango, `capacity` ≤ 0, fechas incoherentes → 400. *(plan.validators.test.js, tests/contract/plans.test.js; filtros inválidos del feed en tests/contract/feed.test.js)*
 
-**Cupos (concurrencia)**
-- [ ] N inscripciones simultáneas a un plan con cupo K < N → exactamente K exitosas, el resto 409 `PLAN_FULL`, `participantCount === K`.
-- [ ] El mismo usuario inscribiéndose en paralelo dos veces → 1 éxito, 1 `ALREADY_JOINED`, contador +1.
-- [ ] Baja → contador −1 y registro `cancelled`, en la misma transacción.
-- [x] `PATCH capacity` por debajo de los inscriptos → 409; a `null` (ilimitado) y de vuelta a un número. *(tests/contract/plans.test.js, tests/integration/plan-repository.test.js)*
+**Cupos (concurrencia)** *(tests/integration/participation-concurrency.test.js, tests/contract/participations.test.js)*
+- [x] N inscripciones simultáneas a un plan con cupo K < N → exactamente K exitosas, el resto 409 `PLAN_FULL`, `participantCount === K`.
+- [x] Con cupo ilimitado, N inscripciones simultáneas → N exitosas.
+- [x] El mismo usuario inscribiéndose en paralelo dos veces → 1 éxito, 1 `ALREADY_JOINED`, contador +1 (también al reactivar una inscripción cancelada).
+- [x] Baja → contador −1 y registro `cancelled`, en la misma transacción; si el plan ya no admite bajas, se revierte la cancelación.
+- [x] Altas y bajas mezcladas → `participantCount` igual a las inscripciones activas.
+- [x] `PATCH capacity` por debajo de los inscriptos → 409. *(tests/contract/plans.test.js)*
 
-**Check-in**
-- [ ] QR vencido → rechazado. QR de otro plan → rechazado.
-- [ ] Inscripción inactiva o inexistente → rechazado.
-- [ ] Fuera del radio o con `accuracyMeters` excesiva → 403 `OUT_OF_RANGE`.
-- [ ] Fuera de la ventana horaria → 409 `CHECKIN_WINDOW_CLOSED`.
-- [ ] Segundo check-in → 409 `ALREADY_CHECKED_IN`; reputación +1 una sola vez.
-- [ ] La ubicación exacta **no** queda guardada en `checkIns`.
+**Check-in** *(tests/contract/checkins.test.js)*
+- [x] QR vencido → rechazado. QR de otro plan → rechazado. QR anterior: válido 10 segundos después de renovarlo, rechazado después (y nunca más allá de su propio vencimiento).
+- [x] Inscripción inactiva o inexistente → rechazado.
+- [x] Fuera del radio o con `accuracyMeters` excesiva → 403 `OUT_OF_RANGE` (exactamente en el límite se acepta).
+- [x] Fuera de la ventana horaria → 409 `CHECKIN_WINDOW_CLOSED` (un segundo antes de abrir y un segundo después de cerrar).
+- [x] Segundo check-in → 409 `ALREADY_CHECKED_IN`; reputación +1 una sola vez (también con dos pedidos simultáneos).
+- [x] La ubicación exacta **no** queda guardada en `checkIns`.
+- [x] El creador inscripto registra su asistencia sin QR y no suma reputación en el momento.
+
+**Cierre de asistencia y estados del plan** *(tests/integration/attendance.test.js, tests/contract/plan-status-and-my-plans.test.js, src/jobs/scheduler.test.js)*
+- [x] Al cerrar la ventana, `noShow` solo en las inscripciones activas sin check-in; no resta reputación; una sola vez por plan, aunque dos instancias lleguen juntas.
+- [x] Cerrar inscripciones (`closed`) no marca `noShow`; los planes cancelados no se procesan.
+- [x] El creador recibe su +1 solo si hizo check-in y al menos 2 participantes más también.
+- [x] `completed` al llegar `endsAt`; si el cierre de asistencia no había corrido, se hace en la misma operación.
+- [x] Transiciones del creador: cerrar y reabrir antes de `startsAt`, cancelar hasta `endsAt`; `cancelled` es final.
+- [x] Scheduler: con dos instancias el job corre una sola vez por ciclo; sin Redis no corre.
+- [x] `GET /plans` y `POST /feed` no traen los planes propios ni aquellos con inscripción activa. *(tests/contract/plans.test.js, tests/contract/feed.test.js)*
 
 **Chat y reportes**
 - [ ] No participante → 403 por REST y por Socket.io.

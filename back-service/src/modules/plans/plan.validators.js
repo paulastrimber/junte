@@ -1,12 +1,13 @@
 // Esquemas Zod de /plans. Estrictos: un campo desconocido (incluidos los solo-backend: `creatorId`, `participantCount`,
 // `university`, `status`, `photoKey`…) es 400, no se descarta en silencio.
+import { ATTENDANCE } from '../../shared/attendance.js'
 import { MAX_INTERESTS } from '../../shared/catalog-keys.js'
 import { lngLatField, lngLatQueryField, radiusKmQueryField } from '../../shared/geo.js'
 import { cursorField, limitField } from '../../shared/pagination.js'
 import { catalogKeyField } from '../../shared/profile-fields.js'
 import { objectKeyPattern } from '../../shared/uploads.js'
 import { instantField, isAfterOrUnknown, objectIdField, z } from '../../shared/validation.js'
-import { AVAILABILITY, PLAN_LIMITS, PRICE_RANGE_KEYS } from './plan.rules.js'
+import { AVAILABILITY, CREATOR_STATUSES, PLAN_LIMITS, PRICE_RANGE_KEYS } from './plan.rules.js'
 
 const unique = (items) => new Set(items).size === items.length
 
@@ -27,22 +28,40 @@ const planFields = {
   price: z.int().min(0).max(PLAN_LIMITS.PRICE_MAX),
   // Keys del catálogo: acá solo la forma; que existan y la edad mínima lo decide el servicio contra la base.
   interests: z.array(catalogKeyField).min(PLAN_LIMITS.INTERESTS_MIN).max(MAX_INTERESTS)
-    .refine(unique, { error: 'No repitas intereses' })
+    .refine(unique, { error: 'No repitas intereses' }),
+  // Lo único del check-in que elige el creador; la ventana (`checkInOpensAt`/`checkInClosesAt`) la calcula el back.
+  checkInRadiusMeters: z.int().min(ATTENDANCE.RADIUS_MIN_METERS).max(ATTENDANCE.RADIUS_MAX_METERS)
 }
 
 export const createPlanBody = z.strictObject({
   ...planFields,
   description: planFields.description.optional(),
   capacity: planFields.capacity.default(null),
-  price: planFields.price.default(0)
+  price: planFields.price.default(0),
+  checkInRadiusMeters: planFields.checkInRadiusMeters.default(ATTENDANCE.RADIUS_DEFAULT_METERS)
 })
 
-export const updatePlanBody = z.strictObject(planFields).partial()
-  .refine((body) => Object.keys(body).length > 0, {
-    error: 'Enviá al menos un campo para actualizar',
-    // Si ya hay otros errores (campos desconocidos, valores inválidos) no se suma este.
-    when: (payload) => payload.issues.length === 0
+// Si ya hay otros errores (campos desconocidos, valores inválidos) no se suman los de conjunto.
+const whenOtherwiseValid = (payload) => payload.issues.length === 0
+
+export const updatePlanBody = z.strictObject({
+  ...planFields,
+  // Cambio de estado que dispara el creador: cerrar o reabrir inscripciones, o cancelar. `completed` lo pone el back.
+  status: z.enum(CREATOR_STATUSES)
+}).partial()
+  .refine((body) => Object.keys(body).length > 0, { error: 'Enviá al menos un campo para actualizar', when: whenOtherwiseValid })
+  .refine((body) => body.status === undefined || Object.keys(body).length === 1, {
+    error: 'El estado se cambia solo, sin otros campos',
+    path: ['status'],
+    when: whenOtherwiseValid
   })
+
+export const myPlansQuery = z.strictObject({
+  role: z.enum(['created', 'joined']),
+  when: z.enum(['upcoming', 'past']).default('upcoming'),
+  limit: limitField,
+  cursor: cursorField.optional()
+})
 
 export const planIdParams = z.strictObject({ id: objectIdField })
 

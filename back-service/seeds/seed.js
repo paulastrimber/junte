@@ -6,6 +6,7 @@ import { User } from '../src/modules/users/user.model.js'
 import { Plan } from '../src/modules/plans/plan.model.js'
 import { Participation } from '../src/modules/participations/participation.model.js'
 import { parseCalendarDate, toUtcMidnight } from '../src/shared/age.js'
+import { ATTENDANCE, computeCheckInWindow } from '../src/shared/attendance.js'
 import { PLANS, USERS } from './data.js'
 
 const MONTEVIDEO_UTC_OFFSET_HOURS = -3
@@ -51,6 +52,7 @@ async function seedUsers ({ passwordHasher, password, now }) {
 async function seedPlan (spec, users, now) {
   const creator = users.get(spec.creator)
   const startsAt = startsAtFor(spec, now)
+  const endsAt = new Date(startsAt.getTime() + (spec.durationHours ?? DEFAULT_DURATION_HOURS) * HOUR_MS)
   return withTransaction(async (session) => {
     const plan = await Plan.findOneAndUpdate(
       { creatorId: creator._id, title: spec.title },
@@ -58,7 +60,10 @@ async function seedPlan (spec, users, now) {
         $set: {
           description: spec.description,
           startsAt,
-          endsAt: new Date(startsAt.getTime() + (spec.durationHours ?? DEFAULT_DURATION_HOURS) * HOUR_MS),
+          endsAt,
+          // La ventana de check-in se deriva de las fechas, igual que al crear un plan por la API.
+          ...computeCheckInWindow({ startsAt, endsAt }),
+          checkInRadiusMeters: spec.checkInRadiusMeters ?? ATTENDANCE.RADIUS_DEFAULT_METERS,
           price: spec.price ?? 0,
           location: { type: 'Point', ...spec.location },
           interests: spec.interests,

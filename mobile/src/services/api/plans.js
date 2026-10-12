@@ -51,3 +51,13 @@ export async function getPlanFilters ({ client = getApiClient() } = {}) {
   const { data } = await client.get('/plans/filters')
   return data
 }
+
+/**
+ * "Mis planes": los que creó el usuario o aquellos en los que está inscripto, próximos o pasados.
+ * @param {{ role: 'created' | 'joined', when?: 'upcoming' | 'past', limit?: number, cursor?: string }} params
+ * @returns {Promise<{ items: object[], nextCursor: string | null }>}
+ */
+export async function listMyPlans (params, { client = getApiClient(), signal } = {}) {
+  const { data } = await client.get('/users/me/plans', { params: toQuery(params), signal })
+  return data
+}

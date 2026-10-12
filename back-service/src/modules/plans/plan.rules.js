@@ -51,6 +51,37 @@ export const availableSpots = (plan) => (hasUnlimitedCapacity(plan) ? null : Mat
 /** Estados en los que el creador todavía puede editar el plan. */
 export const EDITABLE_STATUSES = Object.freeze(['open', 'closed'])
 
+/** Estados "vivos": el plan admite bajas, QR y check-in, y el job todavía lo puede cerrar. */
+export const LIVE_STATUSES = EDITABLE_STATUSES
+
+/** @param {{ status: string }} plan */
+export const isLive = (plan) => LIVE_STATUSES.includes(plan.status)
+
+/**
+ * Transiciones que dispara el creador (docs/tareas/s4-decisiones.md#4-estados-del-plan). `completed` lo pone solo
+ * el job; `cancelled` y `completed` son finales. `until`: hasta cuándo se permite ('start' = antes de `startsAt`,
+ * 'end' = antes de `endsAt`).
+ * @type {Readonly<Record<string, { from: readonly string[], until: 'start' | 'end' }>>}
+ */
+export const STATUS_TRANSITIONS = Object.freeze({
+  closed: Object.freeze({ from: Object.freeze(['open']), until: 'start' }),
+  open: Object.freeze({ from: Object.freeze(['closed']), until: 'start' }),
+  cancelled: Object.freeze({ from: Object.freeze(['open', 'closed']), until: 'end' })
+})
+
+export const CREATOR_STATUSES = Object.freeze(Object.keys(STATUS_TRANSITIONS))
+
+/**
+ * ¿El creador puede pasar el plan a `to` ahora?
+ * @param {{ plan: { status: string, startsAt: Date, endsAt: Date }, to: string, now: Date }} params
+ */
+export function canTransition ({ plan, to, now }) {
+  const transition = STATUS_TRANSITIONS[to]
+  if (!transition || !transition.from.includes(plan.status)) return false
+  const limit = transition.until === 'start' ? plan.startsAt : plan.endsAt
+  return now.getTime() < limit.getTime()
+}
+
 const MAX_DURATION_DAYS = PLAN_LIMITS.MAX_DURATION_MS / (24 * 60 * 60 * 1000)
 const problem = (path, message) => ({ path, message })
 

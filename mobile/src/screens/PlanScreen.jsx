@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
 
 import { Avatar } from '../components/Avatar.jsx'
@@ -5,8 +6,13 @@ import { Button } from '../components/Button.jsx'
 import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorBanner } from '../components/ErrorBanner.jsx'
 import { useCatalogs } from '../hooks/useCatalogs.js'
+import { LIST_STATUS } from '../hooks/usePagedList.js'
+import { useParticipants } from '../hooks/useParticipants.js'
 import { PLAN_STATUS, usePlan } from '../hooks/usePlan.js'
+import { PLAN_ACTION, usePlanActions } from '../hooks/usePlanActions.js'
+import { usePlanAutoRefresh } from '../hooks/usePlanAutoRefresh.js'
 import { ROUTES } from '../navigation/routes.js'
+import { formatReputation, planActions } from '../utils/attendance.js'
 import { messageForError } from '../utils/errorMessages.js'
 import { formatPrice, formatSchedule, formatSpots } from '../utils/plans.js'
 
@@ -29,6 +35,24 @@ export const TEXTS = Object.freeze({
   you: 'Vos',
   edit: 'Editar plan',
   full: 'Este plan está lleno: no admite más inscripciones.',
+  join: 'Inscribirme',
+  leave: 'Darme de baja',
+  joinedNotice: 'Estás inscripto en este plan.',
+  checkIn: 'Registrar mi asistencia',
+  checkedIn: 'Ya registraste tu asistencia.',
+  noShow: 'No registraste tu asistencia a este plan.',
+  showQr: 'Mostrar QR de asistencia',
+  closeSignUps: 'Cerrar inscripciones',
+  reopenSignUps: 'Reabrir inscripciones',
+  cancelPlan: 'Cancelar plan',
+  confirmCancel: 'Sí, cancelar el plan',
+  confirmCancelHint: 'Cancelar un plan no se puede deshacer.',
+  keepPlan: 'No cancelar',
+  participants: 'Quiénes van',
+  participantsLoading: 'Cargando la lista…',
+  participantsEmpty: 'Todavía no hay nadie anotado.',
+  participantsError: 'No pudimos cargar la lista.',
+  participantsMore: 'Ver más',
   statusLabels: { closed: 'Inscripciones cerradas', cancelled: 'Plan cancelado', completed: 'Plan finalizado' }
 })
 
@@ -47,11 +71,55 @@ function Row ({ label, value }) {
   )
 }
 
+/** Lista de anotados: la ven quienes participan y quien organiza. Presentacional (los datos llegan por props). */
+function Participants ({ list, creatorId }) {
+  const { loadMore, retry } = list
+  return (
+    <View style={styles.block}>
+      <Text style={styles.rowLabel}>{TEXTS.participants}</Text>
+      {list.status === LIST_STATUS.LOADING ? <Text style={styles.muted}>{TEXTS.participantsLoading}</Text> : null}
+      {list.status === LIST_STATUS.ERROR
+        ? (
+          <>
+            <ErrorBanner message={`${TEXTS.participantsError} ${messageForError(list.error)}`} requestId={list.error?.requestId} />
+            <Button title={TEXTS.retry} variant='secondary' onPress={retry} />
+          </>
+          )
+        : null}
+      {list.status === LIST_STATUS.READY && list.items.length === 0 ? <Text style={styles.muted}>{TEXTS.participantsEmpty}</Text> : null}
+      {list.items.map((person) => (
+        <View key={person.id} style={styles.participant}>
+          <Text style={styles.rowValue}>{person.id === creatorId ? `${person.name ?? ''} (${TEXTS.creator.toLowerCase()})` : person.name}</Text>
+          <Text style={styles.muted}>{formatReputation(person.reputation)}</Text>
+        </View>
+      ))}
+      {list.loadMoreError ? <ErrorBanner message={messageForError(list.loadMoreError)} requestId={list.loadMoreError.requestId} /> : null}
+      {list.hasMore ? <Button title={TEXTS.participantsMore} variant='secondary' loading={list.isLoadingMore} onPress={loadMore} /> : null}
+    </View>
+  )
+}
+
 export default function PlanScreen ({ navigation, route }) {
   // `version` cambia cuando se vuelve de editar: fuerza a pedir el plan otra vez.
   const { planId, version = 0 } = route.params
-  const { status, plan, error, reload } = usePlan(planId, version)
+  const { status, plan, error, reload, refresh } = usePlan(planId, version)
   const { catalog } = useCatalogs()
+  // Cada cambio confirmado por el servidor vuelve a pedir el plan y la lista de anotados.
+  const [changes, setChanges] = useState(0)
+  const onChanged = useCallback(() => {
+    setChanges((value) => value + 1)
+    refresh()
+  }, [refresh])
+  const actions = usePlanActions(planId, { onChanged })
+  const { join, leave, closeSignUps, reopenSignUps, cancel } = actions
+  const [isConfirmingCancel, setIsConfirmingCancel] = useState(false)
+  const can = plan ? planActions(plan) : null
+  const participants = useParticipants(planId, { enabled: Boolean(can?.canSeeParticipants), version: changes })
+
+  // Al volver del QR o del check-in el plan pudo cambiar (asistencia registrada).
+  useEffect(() => navigation.addListener('focus', onChanged), [navigation, onChanged])
+  // Y sin salir de la pantalla: cuando abre el horario de asistencia (aparece el botón) o la app vuelve a primer plano.
+  usePlanAutoRefresh(plan, refresh)
 
   if (status === PLAN_STATUS.LOADING) {
     return (
@@ -107,13 +175,60 @@ export default function PlanScreen ({ navigation, route }) {
             <View>
               <Text style={styles.rowLabel}>{TEXTS.creator}</Text>
               <Text style={styles.rowValue}>{plan.isCreator ? `${plan.creator.name ?? ''} (${TEXTS.you})` : plan.creator.name}</Text>
+              <Text style={styles.muted}>{formatReputation(plan.creator.reputation ?? 0)}</Text>
             </View>
           </View>
           )
         : null}
 
+      {can.isJoined && !can.hasCheckedIn && !can.wasNoShow ? <Text style={styles.success}>{TEXTS.joinedNotice}</Text> : null}
+      {can.hasCheckedIn ? <Text style={styles.success}>{TEXTS.checkedIn}</Text> : null}
+      {can.wasNoShow ? <Text style={styles.notice}>{TEXTS.noShow}</Text> : null}
+
+      <ErrorBanner message={actions.error?.message} requestId={actions.error?.requestId} />
+
+      {can.canJoin ? <Button title={TEXTS.join} loading={actions.pending === PLAN_ACTION.JOIN} disabled={actions.isBusy} onPress={join} /> : null}
+      {can.canCheckIn
+        ? <Button title={TEXTS.checkIn} onPress={() => navigation.navigate(ROUTES.CHECK_IN, { planId: plan.id })} />
+        : null}
+      {can.canShowQr
+        ? <Button title={TEXTS.showQr} onPress={() => navigation.navigate(ROUTES.PLAN_QR, { planId: plan.id, canCheckIn: can.canCreatorCheckIn })} />
+        : null}
+      {can.canLeave
+        ? <Button title={TEXTS.leave} variant='secondary' loading={actions.pending === PLAN_ACTION.LEAVE} disabled={actions.isBusy} onPress={leave} />
+        : null}
+
+      {can.canSeeParticipants ? <Participants list={participants} creatorId={plan.creator?.id} /> : null}
+
       {plan.isCreator
         ? <Button title={TEXTS.edit} variant='secondary' onPress={() => navigation.navigate(ROUTES.EDIT_PLAN, { plan })} />
+        : null}
+      {can.canCloseSignUps
+        ? <Button title={TEXTS.closeSignUps} variant='secondary' loading={actions.pending === PLAN_ACTION.CLOSE} disabled={actions.isBusy} onPress={closeSignUps} />
+        : null}
+      {can.canReopenSignUps
+        ? <Button title={TEXTS.reopenSignUps} variant='secondary' loading={actions.pending === PLAN_ACTION.REOPEN} disabled={actions.isBusy} onPress={reopenSignUps} />
+        : null}
+      {can.canCancel && !isConfirmingCancel
+        ? <Button title={TEXTS.cancelPlan} variant='danger' disabled={actions.isBusy} onPress={() => setIsConfirmingCancel(true)} />
+        : null}
+      {can.canCancel && isConfirmingCancel
+        ? (
+          <View style={styles.block}>
+            <Text style={styles.notice}>{TEXTS.confirmCancelHint}</Text>
+            <Button
+              title={TEXTS.confirmCancel}
+              variant='danger'
+              loading={actions.pending === PLAN_ACTION.CANCEL}
+              disabled={actions.isBusy}
+              onPress={async () => {
+                await cancel()
+                setIsConfirmingCancel(false)
+              }}
+            />
+            <Button title={TEXTS.keepPlan} variant='secondary' disabled={actions.isBusy} onPress={() => setIsConfirmingCancel(false)} />
+          </View>
+          )
         : null}
     </ScrollView>
   )
@@ -130,5 +245,8 @@ const styles = StyleSheet.create({
   block: { gap: 4 },
   description: { fontSize: 15, color: '#333', lineHeight: 21 },
   creator: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  success: { fontSize: 14, color: '#1b7f3b', backgroundColor: '#e8f6ec', padding: 10, borderRadius: 8 },
+  muted: { fontSize: 13, color: '#666' },
+  participant: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#eee' },
   errorTitle: { fontSize: 16, fontWeight: '600', color: '#b42318' }
 })

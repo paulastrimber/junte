@@ -15,8 +15,9 @@ export { isProfileComplete }
  *   Valida universidad, carrera, ciudad, barrio e intereses contra los catálogos (módulo `catalogs`).
  * @param {import('../../adapters/clock.js').Clock} deps.clock
  * @param {{ warn: (obj: object, msg: string) => void }} deps.logger
+ * @param {(userId: string) => Promise<number>} [deps.countNoShows]  Ausencias del usuario (módulo `participations`).
  */
-export function createUserService ({ userRepo, storage, catalogs, clock, logger }) {
+export function createUserService ({ userRepo, storage, catalogs, clock, logger, countNoShows = async () => 0 }) {
   async function requireUser (load) {
     // authenticate ya comprobó que existe; si desapareció en el medio no es un 404 del recurso:
     // la sesión ya no corresponde a un usuario.
@@ -28,7 +29,11 @@ export function createUserService ({ userRepo, storage, catalogs, clock, logger 
   return {
     isProfileComplete,
 
-    getProfile: (userId) => requireUser(() => userRepo.findById(userId)),
+    /** Perfil propio, con sus ausencias (`noShowCount`): es el único lugar donde se informan. */
+    async getProfile (userId) {
+      const user = await requireUser(() => userRepo.findById(userId))
+      return { ...user, noShowCount: await countNoShows(userId) }
+    },
 
     /**
      * Actualiza el perfil (cambio parcial). Valida el perfil RESULTANTE contra los catálogos (que la opción exista, esté

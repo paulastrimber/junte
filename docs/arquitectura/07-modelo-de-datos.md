@@ -78,19 +78,25 @@ Reglas: máximo 5 sesiones activas (`revokedAt` vacío y `expiresAt` futuro) por
 | `creatorId` | ObjectId → users | Del token |
 | `status` | `open` \| `closed` \| `cancelled` \| `completed` | Transiciones: ver abajo |
 | `photoKey` | string? | |
-| `checkInOpensAt`, `checkInClosesAt` | Date | Ventana de asistencia |
-| `checkInRadiusMeters` | number | |
-| `qrNonceHash`, `qrExpiresAt` | string?, Date? | Desafío QR vigente (hash SHA-256 del nonce) |
+| `checkInOpensAt`, `checkInClosesAt` | Date | **➕ S4.** Ventana de asistencia. Solo el back: `startsAt − 15 min` a `min(startsAt + 60 min, endsAt)`. Se recalcula en la misma operación que cambia las fechas |
+| `checkInRadiusMeters` | int 50–1000 | **➕ S4.** Lo elige el creador; 150 por defecto |
+| `qrNonceHash`, `qrExpiresAt` | string?, Date? | Desafío QR vigente (hash SHA-256 del nonce, nunca el nonce) |
+| `qrPreviousNonceHash`, `qrPreviousExpiresAt` | string?, Date? | **➕ S4.** Desafío anterior: al renovar el QR sigue valiendo 10 segundos (y nunca más allá de su propio vencimiento). Se escriben en la misma operación que guarda el nuevo |
+| `attendanceClosedAt` | Date? | **➕ S4.** Cuándo el job cerró la asistencia (marcó `noShow` y resolvió el +1 del creador). Sin valor = pendiente. Se escribe una sola vez |
+
+Los parámetros de la asistencia (15 y 60 minutos, radio 50/150/1000 m, precisión máxima de 100 m, QR de 90 s con 10 s de margen para el anterior, y los 2 asistentes que necesita el creador) se definen en un único lugar: `back-service/src/shared/attendance.js`.
 
 ### `planParticipants`
 
 `planId`, `userId`, `status` (`active` \| `cancelled`), `joinedAt`, `cancelledAt?`, `noShow` (default `false`), `noShowAt?`.
-Un **único registro por par** plan–usuario; una baja lo pasa a `cancelled` y una nueva inscripción lo reactiva (si las reglas lo permiten, [pendiente](../pendientes.md)).
+Un **único registro por par** plan–usuario; una baja lo pasa a `cancelled` (con `cancelledAt`) y una nueva inscripción lo reactiva: vuelve a `active`, con `joinedAt` nuevo y sin `cancelledAt`. Las reglas son las mismas que para la primera inscripción (plan `open`, con lugar y sin empezar).
+`noShow` y `noShowAt` los escribe solo el job de cierre de asistencia.
 
 ### `checkIns`
 
-`planId`, `userId`, `checkedInAt` (hora del servidor), `method: 'qr-location'`, `distanceMeters`, `accuracyMeters`.
-**No se persiste la latitud/longitud del participante.**
+`planId`, `userId`, `checkedInAt` (hora del servidor), `method` (`'qr-location'` \| `'location'`), `distanceMeters`, `accuracyMeters`.
+`'location'` es el check-in del creador inscripto, que muestra el QR y no puede escanearlo (**➕ S4**).
+**No se persiste la latitud/longitud del participante** (el validador de la colección no admite otros campos).
 
 ### `messages`
 
@@ -137,8 +143,8 @@ Los índices que no figuran en el informe (`creatorId`, `userId+status`, `device
 1. `0 ≤ participantCount ≤ capacity` (con cupo ilimitado, `capacity: null`, solo aplica el `≥ 0`) y `participantCount` = cantidad de `planParticipants` con `status: 'active'`. "Lleno" **se calcula** (`capacity !== null && participantCount >= capacity`): no es un `status` ni un campo guardado.
 2. Inscripción y baja modifican **contador y registro en la misma transacción**. Nunca "consultar y después insertar".
 3. `PATCH` de `capacity` por debajo de `participantCount` → 409 (condición y escritura en una sola operación). Pasar a `null` (ilimitado) siempre es válido.
-4. Un check-in implica una inscripción activa y suma +1 a `reputation` del participante, **en la misma transacción**.
-5. Al pasar un plan a `closed` o `completed`, toda inscripción activa sin check-in queda con `noShow: true` y `noShowAt`, en la misma operación.
+4. Un check-in implica una inscripción activa y suma +1 a `reputation` del participante, **en la misma transacción**. Excepción: el check-in del creador inscripto (`method: 'location'`) no suma en ese momento; recibe el +1 al cerrar la asistencia, solo si al menos 2 participantes más hicieron check-in.
+5. Al cerrar la ventana de check-in, el job de cierre de asistencia marca `noShow: true` y `noShowAt` en toda inscripción activa sin check-in y fija `attendanceClosedAt` en el plan, **en una transacción y una sola vez por plan**. `noShow` no resta reputación. Pasar un plan a `closed` no marca nada y los planes `cancelled` no se procesan.
 6. Identidad (`creatorId`, `senderId`, `userId`, `reporterId`) siempre desde el token.
 
 ## Transacciones
@@ -154,27 +160,38 @@ Plan.findOneAndUpdate(
   {
     _id: planId,
     status: 'open',
+    startsAt: { $gt: now },           // un plan que ya empezó no admite inscripciones
     $expr: { $or: [{ $lte: ['$capacity', null] }, { $lt: ['$participantCount', '$capacity'] }] }
   },
   { $inc: { participantCount: 1 } },
-  { new: true, session }
+  { returnDocument: 'after', session }
 )
 ```
 
 Es la misma condición que usa el filtro `availability=available` de los listados (`plan.repository.js`).
 
-Si devuelve `null`, se averigua el motivo (no existe → 404, cerrado → `PLAN_CLOSED`, lleno → `PLAN_FULL`). Luego se activa la participación en la misma sesión; si ya estaba activa, el índice único dispara E11000 → `ALREADY_JOINED` y la transacción revierte el `$inc`.
+Si devuelve `null`, se averigua el motivo (no existe → 404, cerrado o ya empezado → `PLAN_CLOSED`, lleno → `PLAN_FULL`). Luego se activa la participación en la misma sesión; si ya estaba activa, el índice único dispara E11000 → `ALREADY_JOINED` y la transacción revierte el `$inc`.
+
+Las demás operaciones de S4 siguen el mismo criterio (condición y escritura juntas, todo en una transacción):
+
+- **Baja:** se cancela la inscripción activa y se resta 1 al contador (`participantCount > 0`, plan `open` o `closed` y sin empezar). Si el plan ya no admite bajas o la persona ya hizo check-in, la transacción revierte la cancelación.
+- **Check-in:** dentro de la transacción se vuelve a comprobar (y se toca) la inscripción activa, así una baja simultánea entra en conflicto en lugar de colarse; después se inserta el `checkIn` y se suma la reputación.
+- **Cierre de asistencia:** `attendanceClosedAt` se fija con una actualización condicional (`attendanceClosedAt` vacío, plan `open` o `closed`, ventana cerrada). Solo quien logra esa escritura marca los `noShow` y premia al creador: dos instancias a la vez no lo hacen dos veces.
 
 ## Transiciones de estado del plan
 
 ```
-open ──▶ closed ──▶ completed
-  │                    ▲
-  └──▶ cancelled       │ (cierre automático tras el evento: pendiente)
+open ◀──▶ closed ──▶ completed      (job, al llegar endsAt; también desde open)
+  │          │
+  └────┬─────┘
+       ▼
+   cancelled                        (creador, hasta endsAt)
 ```
 
-Quién y cuándo dispara cada transición está en [pendientes](../pendientes.md#estados-del-plan).
+- El creador (`PATCH /plans/:id { status }`): `open ↔ closed` antes de `startsAt`; `open | closed → cancelled` hasta `endsAt`. Cada cambio es una actualización condicional sobre el estado de origen.
+- El back: `open | closed → completed` cuando llega `endsAt` (job con lock en Redis). Si el cierre de asistencia no había corrido, se hace en la misma transacción.
+- `cancelled` y `completed` son finales. Detalle y reglas en [06-api.md](06-api.md#estado-del-plan).
 
 ## Validadores `$jsonSchema` (defensa en profundidad)
 
-Además de Zod y Mongoose, las migraciones agregan validadores en MongoDB para los invariantes críticos (en `plans`: `capacity` de 1 a 500 o `null`, `participantCount ≥ 0` y `≤ capacity` cuando hay cupo, `endsAt` posterior a `startsAt` y hasta 7 días después, `price` entero de 0 a 100000, `interests` de 1 a 10 keys, `title` de 3 a 100 y `location.label` obligatorio; además, enums de `status` y `role`, `users.birthDate` de tipo fecha, `university`/`career`/`city`/`neighborhood`/`interests` con forma de key, `interests` con máximo 10, campos obligatorios de `sessions` y de cada catálogo, `minAge` entero de 16 a 99) con `validationLevel: 'moderate'`. Así ni un script manual puede dejar datos inválidos.
+Además de Zod y Mongoose, las migraciones agregan validadores en MongoDB para los invariantes críticos (en `plans`: `capacity` de 1 a 500 o `null`, la ventana de check-in obligatoria, ordenada y nunca posterior a `endsAt`, `checkInRadiusMeters` de 50 a 1000, `participantCount ≥ 0` y `≤ capacity` cuando hay cupo, `endsAt` posterior a `startsAt` y hasta 7 días después, `price` entero de 0 a 100000, `interests` de 1 a 10 keys, `title` de 3 a 100 y `location.label` obligatorio; además, enums de `status` y `role`, `checkIns.method` (`qr-location` o `location`) sin campos adicionales, `users.birthDate` de tipo fecha, `university`/`career`/`city`/`neighborhood`/`interests` con forma de key, `interests` con máximo 10, campos obligatorios de `sessions` y de cada catálogo, `minAge` entero de 16 a 99) con `validationLevel: 'moderate'`. Así ni un script manual puede dejar datos inválidos.

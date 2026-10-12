@@ -33,3 +33,20 @@ export const radiusKmField = radiusRange(z.number())
 
 /** `radiusKm` en un query string (texto → número). */
 export const radiusKmQueryField = radiusRange(z.coerce.number())
+
+const EARTH_RADIUS_METERS = 6_371_008.8
+const toRadians = (degrees) => (degrees * Math.PI) / 180
+
+/**
+ * Distancia en metros entre dos puntos `[lng, lat]` (fórmula de Haversine). Función pura: la usa el check-in.
+ * @param {[number, number]} from  `[lng, lat]`.
+ * @param {[number, number]} to  `[lng, lat]`.
+ * @returns {number}
+ */
+export function haversineMeters ([fromLng, fromLat], [toLng, toLat]) {
+  const dLat = toRadians(toLat - fromLat)
+  const dLng = toRadians(toLng - fromLng)
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRadians(fromLat)) * Math.cos(toRadians(toLat)) * Math.sin(dLng / 2) ** 2
+  return 2 * EARTH_RADIUS_METERS * Math.asin(Math.min(1, Math.sqrt(a)))
+}

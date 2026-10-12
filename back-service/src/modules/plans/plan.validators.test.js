@@ -26,7 +26,8 @@ describe('POST /plans', () => {
     expect(result.data).toEqual({
       ...valid(),
       startsAt: new Date('2026-10-25T21:00:00.000Z'),
-      endsAt: new Date('2026-10-25T23:00:00.000Z')
+      endsAt: new Date('2026-10-25T23:00:00.000Z'),
+      checkInRadiusMeters: 150
     })
   })
 

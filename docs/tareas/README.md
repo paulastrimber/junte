@@ -45,6 +45,6 @@ El chat (S5) depende de las inscripciones (S4) porque el permiso es "participant
 | 1 | Redis (ElastiCache vs EC2) |
 | 2 | ✅ Sesiones múltiples, perfil completo, fecha de nacimiento (decididos) |
 | 3 | ✅ Intereses del plan, compatibilidad horaria, paginación del feed, visibilidad, filtros, costo y cupo ilimitado (decididos) |
-| 4 | Parámetros del check-in, estados del plan, reactivación, jobs. Aviso de cupo liberado: ✅ decidido, se implementa en S4–S5 |
+| 4 | ✅ Parámetros del check-in, estados del plan, reactivación y jobs: decididos en [s4-decisiones.md](s4-decisiones.md). El aviso de cupo liberado pasó completo a S5 |
 | 5 | Notas de voz y contactos (cupo liberado: ✅ decidido) |
 | 6 | Endpoints y métricas de admin |

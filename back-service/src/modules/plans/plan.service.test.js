@@ -57,11 +57,16 @@ function setup ({ users = [completeUser(), completeUser({ id: OTHER_ID, name: 'B
     findById: vi.fn(async (id) => users.find((user) => user.id === id) ?? null),
     findByIds: vi.fn(async (ids) => users.filter((user) => ids.includes(user.id)))
   }
-  const participationRepo = { isActiveParticipant: vi.fn(async (_planId, userId) => participants.includes(userId)) }
+  const participationRepo = {
+    isActiveParticipant: vi.fn(async (_planId, userId) => participants.includes(userId)),
+    findByUserAndPlans: vi.fn(async () => []),
+    findActivePlanIds: vi.fn(async () => [])
+  }
+  const checkInRepo = { findByUserAndPlans: vi.fn(async () => []) }
   const catalogs = { checkInterests: vi.fn(async () => []) }
   const isProfileComplete = (user) => Boolean(user.name && user.birthDate && user.interests.length > 0)
-  const logger = { warn: vi.fn() }
-  const service = createPlanService({ planRepo, userRepo, participationRepo, catalogs, isProfileComplete, storage, clock, logger })
+  const logger = { warn: vi.fn(), info: vi.fn() }
+  const service = createPlanService({ planRepo, userRepo, participationRepo, checkInRepo, catalogs, isProfileComplete, storage, clock, logger })
   return { service, planRepo, userRepo, participationRepo, catalogs, storage, clock, logger, state }
 }
 
@@ -355,10 +360,10 @@ describe('list (cronológico)', () => {
     const { service, planRepo } = setup()
     planRepo.listUpcoming.mockResolvedValueOnce(plans(3)).mockResolvedValueOnce(plans(2))
 
-    const withMore = await service.list({ filters: { availability: 'available' }, limit: 2 })
-    const lastPage = await service.list({ filters: { availability: 'available' }, limit: 2 })
+    const withMore = await service.list({ userId: OTHER_ID, filters: { availability: 'available' }, limit: 2 })
+    const lastPage = await service.list({ userId: OTHER_ID, filters: { availability: 'available' }, limit: 2 })
 
-    expect(planRepo.listUpcoming).toHaveBeenCalledWith({ filters: { availability: 'available' }, now: at(NOW), after: null, limit: 3 })
+    expect(planRepo.listUpcoming).toHaveBeenCalledWith({ filters: { availability: 'available' }, now: at(NOW), after: null, limit: 3, exclude: { creatorId: OTHER_ID, planIds: [] } })
     expect(withMore.items).toHaveLength(2)
     expect(withMore.nextCursor).toEqual(expect.any(String))
     expect(lastPage.nextCursor).toBeNull()
@@ -368,9 +373,9 @@ describe('list (cronológico)', () => {
     const { service, planRepo } = setup()
     const [first, second, third] = plans(3)
     planRepo.listUpcoming.mockResolvedValueOnce([first, second, third]).mockResolvedValueOnce([third])
-    const { nextCursor } = await service.list({ filters: {}, limit: 2 })
+    const { nextCursor } = await service.list({ userId: OTHER_ID, filters: {}, limit: 2 })
 
-    await service.list({ filters: {}, limit: 2, cursor: nextCursor })
+    await service.list({ userId: OTHER_ID, filters: {}, limit: 2, cursor: nextCursor })
 
     expect(planRepo.listUpcoming).toHaveBeenLastCalledWith(expect.objectContaining({ after: { startsAt: second.startsAt, id: second.id } }))
   })
@@ -379,7 +384,7 @@ describe('list (cronológico)', () => {
     const { service, planRepo, userRepo } = setup()
     planRepo.listUpcoming.mockResolvedValue(plans(2))
 
-    const { items } = await service.list({ filters: {}, limit: 20 })
+    const { items } = await service.list({ userId: OTHER_ID, filters: {}, limit: 20 })
 
     expect(items.map(({ creator }) => creator.id)).toEqual([CREATOR_ID, CREATOR_ID])
     expect(userRepo.findByIds).toHaveBeenCalledTimes(1)
@@ -393,7 +398,7 @@ describe('list (cronológico)', () => {
   ])('un cursor manipulado (%s) → 400 y no consulta', async (_label, cursor) => {
     const { service, planRepo } = setup()
 
-    await expect(service.list({ filters: {}, limit: 2, cursor })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 })
+    await expect(service.list({ userId: OTHER_ID, filters: {}, limit: 2, cursor })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 })
     expect(planRepo.listUpcoming).not.toHaveBeenCalled()
   })
 })

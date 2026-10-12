@@ -2,9 +2,9 @@
 
 Decisiones tomadas con Paula el 2026-10-12 para implementar el [sprint 4](04-inscripciones-asistencia.md). Cierran los cuatro puntos de "Decidir antes" de la tarea ([pendientes](../pendientes.md): parámetros del check-in, estados del plan, reactivación de inscripciones, jobs programados) y lo que no estaba definido en el informe ni en `docs/`.
 
-**Estado:** solo planificación. No se tocó código ni otros documentos porque el sprint 3 está en curso en el mismo árbol de trabajo. La implementación arranca cuando S3 esté commiteado, en una rama creada desde ahí.
+**Estado:** implementado en la rama `feat/s4-inscripciones-asistencia-reputacion` (2026-10-12). Lo que cambió al implementar respecto de este documento está marcado con **⟳**; las notas del sprint están en [pendientes](../pendientes.md#g-notas-del-sprint-4-inscripciones-asistencia-y-reputación).
 
-Leyenda: ✅ decidido por Paula · ◻ resuelto con la opción más chica para no bloquear; se puede cambiar sin tocar el resto, **confirmar al revisar**.
+Leyenda: ✅ decidido por Paula · ◻ resuelto con la opción más chica para no bloquear. **Los ◻ fueron confirmados por Paula el 2026-10-12** ([detalle](../pendientes.md#reglas-confirmadas)), con los cambios marcados **⟳**.
 
 ## 1. Resumen de lo que cambia respecto de los docs actuales
 
@@ -61,7 +61,7 @@ open ◀──▶ closed ──▶ completed      (job, al llegar endsAt; tambi�
 - ✅ El creador solo puede configurar el **radio**: `checkInRadiusMeters` opcional en `POST` y `PATCH /plans`, entero de 50 a 1000, por defecto 150.
 - ✅ La **ventana la calcula siempre el back**: `checkInOpensAt = startsAt − 15 min` y `checkInClosesAt = min(startsAt + 60 min, endsAt)`. Se recalcula cuando cambian `startsAt` o `endsAt`. `checkInOpensAt` y `checkInClosesAt` en un body son 400.
 - ✅ Precisión máxima aceptada del GPS: 100 m. Vida del QR: 90 s.
-- ◻ Los valores (15 min, 60 min, 50/150/1000 m, 100 m, 90 s y el mínimo de asistentes del punto 8) se definen en un único archivo de reglas del back, como los rangos de precio de S3.
+- ◻ Los valores (15 min, 60 min, 50/150/1000 m, 100 m, 90 s y el mínimo de asistentes del punto 8) se definen en un único archivo de reglas del back (`src/shared/attendance.js`), como los rangos de precio de S3.
 - ◻ Bordes inclusivos: vale `checkInOpensAt ≤ ahora ≤ checkInClosesAt`, distancia `≤` radio y precisión `≤` 100 m. Un segundo antes de abrir se rechaza; exactamente en el radio se acepta.
 - Los planes creados en S3 no tienen estos campos: la migración de S4 los completa con los valores por defecto. Los seeds también.
 
@@ -70,7 +70,7 @@ open ◀──▶ closed ──▶ completed      (job, al llegar endsAt; tambi�
 - Solo el creador (403 `FORBIDDEN` para el resto), con el plan `open` o `closed` (si no, 409 `PLAN_CLOSED`) y dentro de la ventana (si no, 409 `CHECKIN_WINDOW_CLOSED`).
 - Nonce de 32 bytes (`crypto.randomBytes`); se guarda `qrNonceHash = sha256(nonce)` y `qrExpiresAt`. Respuesta 201 `{ qrToken, expiresAt }`. El token no se loguea.
 - ◻ `expiresAt = min(ahora + 90 s, checkInClosesAt)`.
-- ◻ Hay **un solo QR válido por plan**: generar uno nuevo invalida el anterior. La pantalla del creador pide otro unos 15 segundos antes de que venza; quien escaneó justo en el cambio recibe `QR_INVALID` y vuelve a escanear.
+- ✅ **⟳** Al generar un QR nuevo, **el anterior sigue valiendo 10 segundos** (nunca más allá de su propio vencimiento; solo se conserva uno). Decidido por Paula al confirmar las notas del sprint; antes uno nuevo invalidaba el anterior. La pantalla del creador pide otro unos 15 segundos antes de que venza.
 - ◻ Formato del token: `<planId>.<nonce en base64url>`. Lleva el plan adentro para rechazar el QR de otro plan sin consultar nada más.
 
 ## 7. Check-in (`POST /plans/:id/check-in`)
@@ -118,7 +118,7 @@ Consecuencias para la implementación:
 
 - ✅ Corre dentro del back, con lock en Redis (`SET clave valor NX PX ttl`) para que, con dos o más instancias, cada job corra una sola vez por ciclo.
 - ◻ Un ciclo por minuto. Jobs de S4: cierre de asistencia y completar planes. El recordatorio (`reminderSentAt`) es de S5.
-- ◻ El lock se libera solo si sigue siendo de la instancia que lo tomó (comparar y borrar). Si Redis no responde, el ciclo se saltea y se loguea un `warn`; nunca se corre sin lock.
+- **⟳** El lock **no se libera al terminar: vence solo** (TTL de 54 s con un ciclo de 60 s). Si se liberara, otra instancia con el reloj un poco corrido repetiría el job dentro del mismo ciclo. Si Redis no responde, el ciclo se saltea y se loguea un `warn`; nunca se corre sin lock.
 - ◻ Arranca después del `listen` y se detiene en el apagado ordenado. Logs: inicio, fin, cantidad procesada y si obtuvo el lock.
 
 ## 11. Reputación, anotados y "Mis planes"
@@ -136,12 +136,12 @@ Consecuencias para la implementación:
 
 | Tarea | Decisión |
 |-------|----------|
-| S4-MOB-01 | PlanScreen: inscribirse / darse de baja; la UI cambia cuando el servidor confirma; un texto por `code` (`PLAN_FULL`, `PLAN_CLOSED`, `ALREADY_JOINED`). ✅ Suma la lista de anotados con su reputación |
-| S4-MOB-02 | Pantalla del creador con el QR (`react-native-qrcode-svg` + `react-native-svg`), que se regenera antes de vencer y deja de pedir QR al salir. ✅ Si el creador está inscripto, botón para registrar su asistencia con ubicación |
+| S4-MOB-01 | PlanScreen: inscribirse / darse de baja; la UI cambia cuando el servidor confirma; un texto por `code` (`PLAN_FULL`, `PLAN_CLOSED`, `ALREADY_JOINED`). ✅ Suma la lista de anotados con su reputación. **⟳** También las acciones del creador: cerrar y reabrir inscripciones y cancelar el plan (con confirmación) |
+| S4-MOB-02 | Pantalla del creador con el QR (`react-native-qrcode-svg` + `react-native-svg`), que se regenera antes de vencer y deja de pedir QR al salir. **⟳** Queda encendida mientras se muestra (`expo-keep-awake`). ✅ Si el creador está inscripto, botón para registrar su asistencia con ubicación |
 | S4-MOB-03 | CheckInScreen: `expo-camera` para leer el QR y ubicación con precisión. Explica cada rechazo: `OUT_OF_RANGE` (lejos o señal imprecisa), `QR_INVALID`, `CHECKIN_WINDOW_CLOSED`, `ALREADY_CHECKED_IN`. Permisos pedidos en el momento |
 | S4-MOB-04 | "Mis planes": creados / inscriptos, próximos / pasados. ✅ El perfil muestra la reputación y las ausencias propias (`noShowCount`) |
 
-Depende de lo que deje S3: PlanScreen, la navegación y `services/location.js`. Dónde se engancha cada pantalla se define al ver ese código.
+**⟳** "Mis planes" es un cuarto tab; el detalle del plan, el QR y el check-in se abren dentro del tab desde el que se entró ("Planes" o "Mis planes").
 
 ## 13. Pasado al sprint 5: aviso de cupo liberado
 
@@ -161,7 +161,7 @@ Push y avisos (nuevo inscripto, recordatorio, plan cancelado), chat, panel admin
 
 ## 15. Documentos a actualizar al implementar
 
-No se editaron ahora para no chocar con el trabajo de S3. Van en el mismo PR que el código:
+Actualizados en el mismo PR que el código:
 
 - **CLAUDE.md:** reglas 4 y 5 (redacción en el [punto 16](#16-cambios-a-aplicar-en-claudemd-al-iniciar-s4)), lista de endpoints, plan de sprints (aviso de cupo en S5).
 - **06-api.md:** `status` y `checkInRadiusMeters` en `POST`/`PATCH /plans`; `qrToken` opcional para el creador; endpoints nuevos; campos nuevos del detalle, del perfil (`noShowCount`) y de la vista pública (`reputation`).
@@ -175,7 +175,7 @@ Migraciones previstas (`up` + `down`): completar los campos de check-in en los p
 
 ## 16. Cambios a aplicar en CLAUDE.md al iniciar S4
 
-✅ Redacción aprobada por Paula el 2026-10-12. El cambio en las reglas de reputación es intencional. **Todavía no está aplicado:** se aplica en la rama `feat/s4`, cuando S3 esté mergeado, en un commit separado y sin tocar código.
+✅ Redacción aprobada por Paula el 2026-10-12. El cambio en las reglas de reputación es intencional. **Aplicado** en `CLAUDE.md`, en un commit separado y sin tocar código.
 
 Las reglas 4 y 5 de "Reglas que no se rompen" quedan así:
 
@@ -187,4 +187,4 @@ Aclaraciones confirmadas:
 
 - "2 participantes más" no cuenta al creador: son 3 check-ins en total con el suyo.
 - El creador solo recibe el +1 si está inscripto e hizo su check-in. Si está inscripto y no lo hizo, se le marca `noShow` como a cualquiera.
-- La regla 5 no nombra el campo que marca el plan como procesado: se define al implementar (la propuesta del [punto 9](#9-cierre-de-asistencia-noshow-y-completed), `attendanceClosedAt`, sigue sin confirmar).
+- La regla 5 no nombra el campo que marca el plan como procesado. Al implementar quedó `attendanceClosedAt` (la propuesta del [punto 9](#9-cierre-de-asistencia-noshow-y-completed)).

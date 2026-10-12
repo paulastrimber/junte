@@ -36,12 +36,25 @@ export function createPlanController ({ planService, planSerializer, feedService
       const filters = pickFilters(req.query)
       const page = near
         ? await feedService.recommend({ userId: req.user.id, near, radiusKm, filters, limit, cursor })
-        : await planService.list({ filters, limit, cursor })
+        : await planService.list({ userId: req.user.id, filters, limit, cursor })
       res.json(await planSerializer.serializePage(page, req.user.id))
     },
 
     filters (req, res) {
       res.json(planService.getFilterOptions())
+    },
+
+    async generateQr (req, res) {
+      const { qrToken, expiresAt } = await planService.generateQr({ planId: req.params.id, userId: req.user.id })
+      // Es una credencial de corta vida: que ningún intermediario la guarde.
+      res.set('Cache-Control', 'no-store')
+      res.status(201).json({ qrToken, expiresAt: expiresAt.toISOString() })
+    },
+
+    async listMine (req, res) {
+      const { role, when, limit, cursor } = req.query
+      const page = await planService.listMine({ userId: req.user.id, role, when, limit, cursor })
+      res.json(await planSerializer.serializePage(page, req.user.id))
     }
   }
 }

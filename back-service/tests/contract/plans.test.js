@@ -35,8 +35,13 @@ describe('POST /plans', () => {
       price: 150,
       status: 'open',
       photoUrl: null,
-      creator: { id: ana.id, name: 'Ana', photoUrl: null },
+      creator: { id: ana.id, name: 'Ana', photoUrl: null, reputation: 0 },
       isCreator: true,
+      // La ventana de check-in la calcula el back: 15 min antes y 60 min después del comienzo.
+      checkInOpensAt: new Date(hoursFromNow(48).getTime() - 15 * 60 * 1000).toISOString(),
+      checkInClosesAt: hoursFromNow(49).toISOString(),
+      checkInRadiusMeters: 150,
+      myParticipation: null,
       createdAt: expect.stringMatching(ISO_UTC)
     })
   })
@@ -316,7 +321,10 @@ describe('PATCH /plans/:id', () => {
     ['body vacío', {}],
     ['creatorId', { creatorId: UNKNOWN_ID }],
     ['participantCount', { participantCount: 0 }],
-    ['status', { status: 'cancelled' }],
+    ['status completed (lo pone solo el back)', { status: 'completed' }],
+    ['status junto con otros campos', { status: 'closed', title: 'Otro título' }],
+    ['checkInOpensAt (la ventana la calcula el back)', { checkInOpensAt: '2028-03-03T14:45:00Z' }],
+    ['radio de check-in fuera de rango', { checkInRadiusMeters: 20 }],
     ['university', { university: 'ort' }],
     ['capacity 0', { capacity: 0 }],
     ['interés inexistente', { interests: ['paracaidismo-extremo'] }]
@@ -331,8 +339,9 @@ describe('GET /plans (sin near: cronológico)', () => {
   it('200 con { items, nextCursor }: planes abiertos que no empezaron, por fecha, con la forma del detalle', async () => {
     const { signUp } = setupApi()
     const ana = await signUp({ name: 'Ana' })
-    const later = await makePlan({ creatorId: ana.id, startsAt: hoursFromNow(72) })
-    const sooner = await makePlan({ creatorId: ana.id, startsAt: hoursFromNow(24) })
+    const beto = await signUp({ name: 'Beto' })
+    const later = await makePlan({ creatorId: beto.id, startsAt: hoursFromNow(72) })
+    const sooner = await makePlan({ creatorId: beto.id, startsAt: hoursFromNow(24) })
     await makePlan({ startsAt: hoursFromNow(-1) })
     await makePlan({ startsAt: hoursFromNow(24), status: 'closed' })
     await makePlan({ startsAt: hoursFromNow(24), status: 'cancelled' })
@@ -342,8 +351,27 @@ describe('GET /plans (sin near: cronológico)', () => {
     expect(res.status).toBe(200)
     expect(ids(res)).toEqual([sooner.id, later.id])
     expect(res.body.nextCursor).toBeNull()
-    expect(res.body.items[0]).toMatchObject({ id: sooner.id, creator: { id: ana.id, name: 'Ana' }, isCreator: true, availableSpots: 5 })
+    expect(res.body.items[0]).toMatchObject({ id: sooner.id, creator: { id: beto.id, name: 'Beto' }, isCreator: false, availableSpots: 5 })
     expect(res.body.items[0]).not.toHaveProperty('distanceMeters')
+    expect(res.body.items[0]).not.toHaveProperty('myParticipation')
+  })
+
+  it('es para descubrir planes: no trae los que creó el usuario ni aquellos en los que ya está inscripto', async () => {
+    const { signUp } = setupApi()
+    const ana = await signUp()
+    await makePlan({ creatorId: ana.id, startsAt: hoursFromNow(24) })
+    const joined = await makePlan({ startsAt: hoursFromNow(30) })
+    const left = await makePlan({ startsAt: hoursFromNow(36) })
+    const other = await makePlan({ startsAt: hoursFromNow(48) })
+    await ana.api.post(`/plans/${joined.id}/join`)
+    await ana.api.post(`/plans/${left.id}/join`)
+    await ana.api.delete(`/plans/${left.id}/join`)
+
+    const res = await ana.api.get('/plans')
+
+    // Quien se dio de baja vuelve a verlo; otro usuario sigue viendo todos.
+    expect(ids(res)).toEqual([left.id, other.id])
+    expect((await (await signUp()).api.get('/plans')).body.items).toHaveLength(4)
   })
 
   it('paginación: recorre todo sin duplicados ni saltos y la última página trae nextCursor null', async () => {

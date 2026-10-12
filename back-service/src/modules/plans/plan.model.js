@@ -1,7 +1,8 @@
 // Colección `plans` (docs/arquitectura/07-modelo-de-datos.md#plans).
 // Índices: migrations/20261007120100-create-plans.js; validador $jsonSchema vigente:
-// migrations/20261012120100-plans-validator-ends-at-and-limits.js (nunca por autoIndex).
+// migrations/20261013120100-plans-validator-check-in.js (nunca por autoIndex).
 import mongoose from 'mongoose'
+import { ATTENDANCE } from '../../shared/attendance.js'
 import { PLAN_LIMITS } from './plan.rules.js'
 
 export const PLAN_STATUSES = Object.freeze(['open', 'closed', 'cancelled', 'completed'])
@@ -10,6 +11,7 @@ const { ObjectId } = mongoose.Schema.Types
 
 function hideSecrets (_doc, ret) {
   delete ret.qrNonceHash
+  delete ret.qrPreviousNonceHash
   return ret
 }
 
@@ -80,12 +82,25 @@ const planSchema = new mongoose.Schema(
     creatorId: { type: ObjectId, ref: 'User', required: true },
     status: { type: String, enum: PLAN_STATUSES, default: 'open', required: true },
     photoKey: { type: String },
-    checkInOpensAt: { type: Date },
-    checkInClosesAt: { type: Date },
-    checkInRadiusMeters: { type: Number, min: 1 },
+    // Solo-backend: la ventana se calcula a partir de startsAt/endsAt (shared/attendance.js).
+    checkInOpensAt: { type: Date, required: true },
+    checkInClosesAt: { type: Date, required: true },
+    // Lo único del check-in que elige el creador.
+    checkInRadiusMeters: {
+      type: Number,
+      required: true,
+      default: ATTENDANCE.RADIUS_DEFAULT_METERS,
+      min: ATTENDANCE.RADIUS_MIN_METERS,
+      max: ATTENDANCE.RADIUS_MAX_METERS
+    },
     // Desafío QR vigente: SHA-256 del nonce, nunca el nonce.
     qrNonceHash: { type: String },
-    qrExpiresAt: { type: Date }
+    qrExpiresAt: { type: Date },
+    // Desafío anterior: sigue valiendo unos segundos después de renovarlo (ATTENDANCE.QR_PREVIOUS_GRACE_MS).
+    qrPreviousNonceHash: { type: String },
+    qrPreviousExpiresAt: { type: Date },
+    // Solo-backend: cuándo el job cerró la asistencia (noShow y +1 del creador). Se escribe una sola vez.
+    attendanceClosedAt: { type: Date }
   },
   {
     collection: 'plans',

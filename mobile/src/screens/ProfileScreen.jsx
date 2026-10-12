@@ -10,15 +10,20 @@ import { InterestPicker } from '../components/InterestPicker.jsx'
 import { Screen } from '../components/Screen.jsx'
 import { SelectField } from '../components/SelectField.jsx'
 import { useAuth } from '../hooks/useAuth.js'
+import { useMyStats } from '../hooks/useMyStats.js'
 import { useProfileForm } from '../hooks/useProfileForm.js'
 import { useProfilePhoto } from '../hooks/useProfilePhoto.js'
 import { useSessionActions } from '../hooks/useSessionActions.js'
+import { formatNoShows, formatReputation } from '../utils/attendance.js'
 import { MAX_INTERESTS } from '../utils/catalog.js'
 
 export const TEXTS = Object.freeze({
   incomplete: 'Completá tu nombre, fecha de nacimiento y al menos un interés para poder crear planes.',
   email: 'Email',
   age: 'Edad',
+  reputation: 'Reputación',
+  noShows: 'Ausencias',
+  reputationHint: 'Sumás 1 punto cada vez que registrás tu asistencia a un plan. Las ausencias solo las ves vos.',
   name: 'Nombre',
   birthDate: 'Fecha de nacimiento',
   university: 'Universidad',
@@ -42,6 +47,7 @@ export default function ProfileScreen ({ navigation }) {
   const form = useProfileForm()
   const photo = useProfilePhoto()
   const session = useSessionActions()
+  const stats = useMyStats(user)
   // Los manejadores se pasan como identificadores sueltos (regla react/jsx-handler-names).
   const { choosePhoto } = photo
   const { toggleInterest, submit: saveProfile, retryCatalogs } = form
@@ -64,6 +70,12 @@ export default function ProfileScreen ({ navigation }) {
 
       <Text style={styles.readonly}>{TEXTS.email}: {user.email}</Text>
       {user.age !== null ? <Text style={styles.readonly}>{TEXTS.age}: {user.age}</Text> : null}
+
+      <View style={styles.stats}>
+        <Text style={styles.readonly}>{TEXTS.reputation}: {formatReputation(stats.reputation)}</Text>
+        {stats.noShowCount !== null ? <Text style={styles.readonly}>{TEXTS.noShows}: {formatNoShows(stats.noShowCount)}</Text> : null}
+        <Text style={styles.hint}>{TEXTS.reputationHint}</Text>
+      </View>
 
       <FormField
         label={TEXTS.name}
@@ -128,6 +140,8 @@ const styles = StyleSheet.create({
   header: { alignItems: 'center', gap: 12 },
   group: { gap: 16 },
   readonly: { fontSize: 14, color: '#444' },
+  stats: { gap: 4, padding: 12, borderRadius: 8, backgroundColor: '#f3f6ff' },
+  hint: { fontSize: 12, color: '#666' },
   sectionLabel: { fontSize: 14, fontWeight: '600', color: '#222' },
   error: { color: '#b42318', fontSize: 13 },
   saved: { color: '#1b7f3b' },

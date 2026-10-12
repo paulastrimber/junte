@@ -16,7 +16,7 @@ const participationSchema = new mongoose.Schema(
     status: { type: String, enum: PARTICIPATION_STATUSES, default: 'active', required: true },
     joinedAt: { type: Date, required: true },
     cancelledAt: { type: Date },
-    // Solo-backend: se marcan al cerrar/completar el plan si no hubo check-in.
+    // Solo-backend: los marca el job de cierre de asistencia si no hubo check-in.
     noShow: { type: Boolean, default: false, required: true },
     noShowAt: { type: Date }
   },
