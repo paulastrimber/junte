@@ -59,7 +59,7 @@ Las comprobaciones de **propiedad** van en el servicio (no en el controlador), a
 - MongoDB, firma JWT y credenciales FCM en **Secrets Manager**, leídos con el rol IAM de la instancia (permiso solo sobre esos secretos).
 - Nada de secretos en el código, Git, logs ni en el binario móvil (`EXPO_PUBLIC_*` es público por definición).
 - **Única excepción: la clave de Google Maps para Android** (`GOOGLE_MAPS_ANDROID_API_KEY`), que usa el mapa de "crear plan" (`react-native-maps`). El SDK de Google la lee del manifiesto de la app, así que **queda dentro del APK** y cualquiera puede extraerla: no se la trata como secreto sino como identificador restringido. Condiciones para aceptarla:
-  - Restringida en Google Cloud a **esta app** (nombre de paquete de Android + huella SHA-1 del certificado de firma) y a la API **"Maps SDK for Android"** únicamente. Sin Places, Geocoding ni Directions: la búsqueda de direcciones usa el geocodificador del teléfono (`expo-location`).
+  - Restringida en Google Cloud a **esta app** (nombre de paquete de Android, `com.junte.app`, + huella SHA-1 del certificado de firma) y a la API **"Maps SDK for Android"** únicamente. Sin Places, Geocoding ni Directions: la búsqueda de direcciones usa el geocodificador del teléfono (`expo-location`).
   - Con cuota y alerta de facturación en el proyecto de Google Cloud.
   - No se commitea: va en `mobile/.env` en local y como variable de entorno del proyecto en EAS (no en `eas.json`). `app.config.js` la pasa al plugin de `react-native-maps` y corta el build de EAS si falta.
   - Una clave por entorno (development / preview / production), cada una con la huella de su certificado. En iOS el mapa usa Apple Maps y no necesita clave.

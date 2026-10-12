@@ -12,6 +12,10 @@
 // que estar RESTRINGIDA en Google Cloud a esta app (nombre de paquete + huella SHA-1) y a "Maps SDK for Android".
 // No se commitea: sale de mobile/.env en local y de las variables de entorno de EAS en los builds.
 
+// Identificador de la app en Android (`package`) e iOS (`bundleIdentifier`). Es permanente: no se cambia una vez
+// publicada, y la clave de Google Maps se restringe a este paquete + la huella SHA-1 del certificado de firma.
+const APP_ID = 'com.junte.app'
+
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:'])
 // Dominio reservado (RFC 2606) usado como marcador en eas.json hasta que exista el DNS real.
 const PLACEHOLDER_TLD = '.invalid'
@@ -67,9 +71,11 @@ export default ({ config }) => ({
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
   ios: {
+    bundleIdentifier: APP_ID,
     supportsTablet: true
   },
   android: {
+    package: APP_ID,
     adaptiveIcon: {
       backgroundColor: '#E6F4FE',
       foregroundImage: './assets/android-icon-foreground.png',

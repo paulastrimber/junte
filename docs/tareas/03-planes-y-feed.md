@@ -34,7 +34,7 @@
 - [x] **S3-MOB-06 · Filtros del feed**: panel con distancia (0.5 a 50 km), fecha, costo y tipo de actividad; secciones "Con cupo" / "Llenos".
 - [x] **S3-MOB-07 · Navegación con tabs** (Planes, Crear, Perfil).
 
-> La app **no se probó en emulador ni en teléfono** (tests, lint y `expo export` sí). El mapa necesita la clave de Google Maps y un development build.
+> Probada en un teléfono con Expo Go (2026-10-12). Falta probarla en un development build / APK, donde el mapa necesita la clave de Google Maps. Queda pendiente [subir la foto del plan desde la app](../pendientes.md#tarea-pendiente-foto-del-plan-desde-la-app).
 
 ## Pruebas obligatorias
 

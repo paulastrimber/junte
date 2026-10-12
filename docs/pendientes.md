@@ -286,17 +286,24 @@ Decidido con Paula el 2026-10-12 (ver arriba: [intereses](#intereses-del-plan), 
 - **Tope de 200 candidatos:** con más de 200 planes dentro del radio se rankean los 200 más cercanos; un plan muy afín pero más lejano queda afuera hasta que el usuario achica el radio o filtra.
 - **Entre páginas del feed** un plan puede llenarse o cambiar: la página siguiente se calcula de nuevo, así que en ese caso puede saltearse o repetirse un plan (la app descarta los repetidos). Planes nuevos aparecen al refrescar.
 - **`photoUrl` del plan cambia en cada respuesta** (URL firmada de 10 minutos), igual que la del perfil.
-- **La app no sube todavía la foto del plan** (no estaba entre las tareas de la app de S3): el back ya tiene `presign` con `planId` y `PUT /plans/:id/photo`.
+- **La app no sube todavía la foto del plan**: ver la [tarea pendiente](#tarea-pendiente-foto-del-plan-desde-la-app).
 - **Compatibilidad horaria:** los eventos de día completo no cuentan como ocupado; el calendario se lee al cargar o refrescar el feed, no en cada página.
 - **Sin caché offline** del feed ni del detalle (S6).
 
+### Tarea pendiente: foto del plan desde la app
+**Para un próximo sprint (sin asignar).** El back ya está listo desde S3: `POST /uploads/presign` con `planId` (clave `plans/<planId>/…`, solo el creador) y `PUT /plans/:id/photo` (verifica creador, prefijo, existencia, tipo y tamaño reales), y el plan devuelve `photoUrl`. Falta la parte de la app:
+- En crear/editar plan (o en el detalle, para el creador): elegir la imagen, `presign` con `planId` → `PUT` directo a S3 → `PUT /plans/:id/photo`. Reutilizar `services/photoUpload.js` e `imagePicker.js` de la foto de perfil (hoy `uploadProfilePhoto` no acepta `planId` y el selector recorta cuadrado: definir la proporción de la foto del plan).
+- Al crear, el plan tiene que existir antes de subir la foto (primero `POST /plans`, después la foto).
+- Mostrar `photoUrl` en `PlanScreen` y en `PlanCard`.
+- Depende de que el rol IAM del back tenga permisos sobre `plans/*` (ver abajo).
+
 ### Para el equipo de AWS / configuración (no se tocó `infra/`)
 - **S3:** el rol IAM del back necesita los mismos permisos que para `users/*` también sobre **`plans/*`** (`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`).
-- **Google Maps:** crear en Google Cloud una clave de "Maps SDK for Android" por entorno, restringida al paquete de la app y a la huella SHA-1 de su certificado, y cargarla en EAS como `GOOGLE_MAPS_ANDROID_API_KEY` ([09](arquitectura/09-seguridad.md#secretos)). **Falta definir el `android.package`** en `mobile/app.config.js` (no existe todavía): sin él no se puede restringir la clave ni compilar con EAS.
+- **Google Maps:** crear en Google Cloud una clave de "Maps SDK for Android" por entorno, restringida al paquete de la app y a la huella SHA-1 de su certificado, y cargarla en EAS como `GOOGLE_MAPS_ANDROID_API_KEY` ([09](arquitectura/09-seguridad.md#secretos)). El paquete de la app es **`com.junte.app`** (`android.package` e `ios.bundleIdentifier` en `mobile/app.config.js`, decidido el 2026-10-12): la clave se restringe a ese paquete.
 - **`FEED_WEIGHTS`** es opcional; si se define tiene que ser JSON válido o el back no arranca.
 
 ### Sin probar
-- **La app sigue sin probarse en emulador ni en teléfono.** Verificado: tests (jest-expo), lint y `expo export --platform android`. Sin probar en un dispositivo: el mapa (`react-native-maps`, necesita la clave y un development build), arrastrar el pin, el geocodificador del teléfono (`expo-location`; la calidad de las búsquedas depende del dispositivo), los permisos de ubicación y calendario, los dos diálogos de fecha y hora de Android, los tabs y el scroll infinito con datos reales.
+- **Probada por Paula en un teléfono con Expo Go (2026-10-12): funciona.** Además: tests (jest-expo), lint y `expo export --platform android`. Sigue sin probarse en un **development build / APK** (el mapa ahí usa la clave de Google Maps propia, que todavía no existe) ni de forma sistemática caso por caso: el mapa (`react-native-maps`, necesita la clave y un development build), arrastrar el pin, el geocodificador del teléfono (`expo-location`; la calidad de las búsquedas depende del dispositivo), los permisos de ubicación y calendario, los dos diálogos de fecha y hora de Android, los tabs y el scroll infinito con datos reales.
 - **`expo-calendar` declara también el permiso de escritura** del calendario en Android (lo agrega su plugin); la app solo lee. Si se quiere quitar hay que probar en un teléfono que el pedido de permiso siga funcionando.
 - La app contra el back real no se probó de punta a punta; el back sí, por HTTP (Supertest) y contra MongoDB en memoria.
 - `expo-doctor` avisa de tres parches menores disponibles (`expo`, `expo-dev-client`, `jest-expo`), anteriores a este sprint: no se actualizaron.
