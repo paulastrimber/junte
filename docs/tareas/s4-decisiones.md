@@ -4,7 +4,7 @@ Decisiones tomadas con Paula el 2026-10-12 para implementar el [sprint 4](04-ins
 
 **Estado:** implementado en la rama `feat/s4-inscripciones-asistencia-reputacion` (2026-10-12). Lo que cambió al implementar respecto de este documento está marcado con **⟳**; las notas del sprint están en [pendientes](../pendientes.md#g-notas-del-sprint-4-inscripciones-asistencia-y-reputación).
 
-Leyenda: ✅ decidido por Paula · ◻ resuelto con la opción más chica para no bloquear; se puede cambiar sin tocar el resto, **confirmar al revisar**.
+Leyenda: ✅ decidido por Paula · ◻ resuelto con la opción más chica para no bloquear. **Los ◻ fueron confirmados por Paula el 2026-10-12** ([detalle](../pendientes.md#reglas-confirmadas)), con los cambios marcados **⟳**.
 
 ## 1. Resumen de lo que cambia respecto de los docs actuales
 
@@ -70,7 +70,7 @@ open ◀──▶ closed ──▶ completed      (job, al llegar endsAt; tambi�
 - Solo el creador (403 `FORBIDDEN` para el resto), con el plan `open` o `closed` (si no, 409 `PLAN_CLOSED`) y dentro de la ventana (si no, 409 `CHECKIN_WINDOW_CLOSED`).
 - Nonce de 32 bytes (`crypto.randomBytes`); se guarda `qrNonceHash = sha256(nonce)` y `qrExpiresAt`. Respuesta 201 `{ qrToken, expiresAt }`. El token no se loguea.
 - ◻ `expiresAt = min(ahora + 90 s, checkInClosesAt)`.
-- ◻ Hay **un solo QR válido por plan**: generar uno nuevo invalida el anterior. La pantalla del creador pide otro unos 15 segundos antes de que venza; quien escaneó justo en el cambio recibe `QR_INVALID` y vuelve a escanear.
+- ✅ **⟳** Al generar un QR nuevo, **el anterior sigue valiendo 10 segundos** (nunca más allá de su propio vencimiento; solo se conserva uno). Decidido por Paula al confirmar las notas del sprint; antes uno nuevo invalidaba el anterior. La pantalla del creador pide otro unos 15 segundos antes de que venza.
 - ◻ Formato del token: `<planId>.<nonce en base64url>`. Lleva el plan adentro para rechazar el QR de otro plan sin consultar nada más.
 
 ## 7. Check-in (`POST /plans/:id/check-in`)
@@ -137,7 +137,7 @@ Consecuencias para la implementación:
 | Tarea | Decisión |
 |-------|----------|
 | S4-MOB-01 | PlanScreen: inscribirse / darse de baja; la UI cambia cuando el servidor confirma; un texto por `code` (`PLAN_FULL`, `PLAN_CLOSED`, `ALREADY_JOINED`). ✅ Suma la lista de anotados con su reputación. **⟳** También las acciones del creador: cerrar y reabrir inscripciones y cancelar el plan (con confirmación) |
-| S4-MOB-02 | Pantalla del creador con el QR (`react-native-qrcode-svg` + `react-native-svg`), que se regenera antes de vencer y deja de pedir QR al salir. ✅ Si el creador está inscripto, botón para registrar su asistencia con ubicación |
+| S4-MOB-02 | Pantalla del creador con el QR (`react-native-qrcode-svg` + `react-native-svg`), que se regenera antes de vencer y deja de pedir QR al salir. **⟳** Queda encendida mientras se muestra (`expo-keep-awake`). ✅ Si el creador está inscripto, botón para registrar su asistencia con ubicación |
 | S4-MOB-03 | CheckInScreen: `expo-camera` para leer el QR y ubicación con precisión. Explica cada rechazo: `OUT_OF_RANGE` (lejos o señal imprecisa), `QR_INVALID`, `CHECKIN_WINDOW_CLOSED`, `ALREADY_CHECKED_IN`. Permisos pedidos en el momento |
 | S4-MOB-04 | "Mis planes": creados / inscriptos, próximos / pasados. ✅ El perfil muestra la reputación y las ausencias propias (`noShowCount`) |
 

@@ -80,10 +80,11 @@ Reglas: máximo 5 sesiones activas (`revokedAt` vacío y `expiresAt` futuro) por
 | `photoKey` | string? | |
 | `checkInOpensAt`, `checkInClosesAt` | Date | **➕ S4.** Ventana de asistencia. Solo el back: `startsAt − 15 min` a `min(startsAt + 60 min, endsAt)`. Se recalcula en la misma operación que cambia las fechas |
 | `checkInRadiusMeters` | int 50–1000 | **➕ S4.** Lo elige el creador; 150 por defecto |
-| `qrNonceHash`, `qrExpiresAt` | string?, Date? | Desafío QR vigente (hash SHA-256 del nonce, nunca el nonce). Uno nuevo reemplaza al anterior |
+| `qrNonceHash`, `qrExpiresAt` | string?, Date? | Desafío QR vigente (hash SHA-256 del nonce, nunca el nonce) |
+| `qrPreviousNonceHash`, `qrPreviousExpiresAt` | string?, Date? | **➕ S4.** Desafío anterior: al renovar el QR sigue valiendo 10 segundos (y nunca más allá de su propio vencimiento). Se escriben en la misma operación que guarda el nuevo |
 | `attendanceClosedAt` | Date? | **➕ S4.** Cuándo el job cerró la asistencia (marcó `noShow` y resolvió el +1 del creador). Sin valor = pendiente. Se escribe una sola vez |
 
-Los parámetros de la asistencia (15 y 60 minutos, radio 50/150/1000 m, precisión máxima de 100 m, QR de 90 s y los 2 asistentes que necesita el creador) se definen en un único lugar: `back-service/src/shared/attendance.js`.
+Los parámetros de la asistencia (15 y 60 minutos, radio 50/150/1000 m, precisión máxima de 100 m, QR de 90 s con 10 s de margen para el anterior, y los 2 asistentes que necesita el creador) se definen en un único lugar: `back-service/src/shared/attendance.js`.
 
 ### `planParticipants`
 

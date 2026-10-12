@@ -262,7 +262,7 @@ Decidido con Paula el 2026-10-12 (ver arriba: [intereses](#intereses-del-plan), 
 - **Bajar el cupo mientras hay inscripciones en curso** ya es seguro: `PATCH capacity` es una actualización condicional sobre `participantCount`, y el validador de MongoDB rechaza un `participantCount` mayor al cupo.
 - **Planes llenos:** el botón de inscribirse (S4-MOB-01) se deshabilita con `isFull`; el back responde `PLAN_FULL` igual.
 - **`status` no se editaba por `PATCH`** en S3. Desde S4 el creador cierra, reabre o cancela ([estados del plan](#estados-del-plan)).
-- **Feed:** incluye los planes creados por el propio usuario y los que ya tiene inscriptos. **Sigue abierto** (no era una tarea de S4): decidir si se excluyen o se marcan ("Vas a ir").
+- ✅ **Feed (decidido el 2026-10-12, Paula; implementado en S4):** ya no incluye los planes creados por el propio usuario ni aquellos en los que tiene inscripción activa.
 - **Aviso de cupo liberado:** diseñado, sin implementar. Pasó completo a S5 (S5-BE-10 y S5-MOB-06).
 
 ### Reglas que se resolvieron con la opción más chica
@@ -309,24 +309,27 @@ Decidido con Paula el 2026-10-12 (ver arriba: [intereses](#intereses-del-plan), 
 
 Decisiones en [s4-decisiones.md](tareas/s4-decisiones.md) (2026-10-12, Paula). Lo que quedó abierto o se resolvió con la opción más chica:
 
-### Reglas que se resolvieron con la opción más chica (a confirmar)
-- **Un solo QR válido por plan.** Pedir uno nuevo invalida el anterior. La pantalla del creador lo renueva 15 segundos antes de que venza; quien escaneó justo en el cambio recibe `QR_INVALID` y vuelve a escanear. Alternativa: aceptar también el QR anterior durante unos segundos.
-- **El lock de los jobs no se libera al terminar: vence solo** (a los 54 s, con un ciclo de 60 s). Si se liberara, otra instancia con el reloj un poco corrido repetiría el job en el mismo ciclo. Cambia lo que decía el documento de decisiones ("comparar y borrar"). Además cada job es idempotente (actualizaciones condicionales), así que una repetición no duplica nada.
-- **`attendanceClosedAt` en `plans`** marca que el cierre de asistencia ya corrió. Quedó con ese nombre.
-- **El mínimo de asistentes para el +1 del creador (2)** es una constante en `shared/attendance.js`, junto con el resto de los parámetros. No es una variable de entorno: cambiarlo es un cambio de código.
-- **Cambio de estado por `PATCH`:** `status` va solo en el body; pedir el estado que el plan ya tiene responde 200 sin cambios.
-- **Check-in ya hecho se informa antes que el horario:** un segundo intento fuera de la ventana responde `ALREADY_CHECKED_IN`, no `CHECKIN_WINDOW_CLOSED`.
-- **`OUT_OF_RANGE` es un solo código** para "lejos" y "GPS impreciso"; el `message` del servidor dice cuál (la app lo muestra tal cual).
-- **`noShowCount` solo sale en `GET /users/me`.** `PUT /users/me`, el registro y el login no lo devuelven; la app lo pide al abrir el perfil.
-- **Un plan cancelado deja de ser visible** para quien no es su creador ni tiene inscripción activa: inscribirse responde 404, no `PLAN_CLOSED`.
-- **Anotados dentro del detalle del plan:** la lista va paginada de a 20 con un botón "Ver más" (no es una pantalla aparte).
+### Reglas confirmadas
+✅ **Confirmadas por Paula el 2026-10-12**, con tres cambios (QR anterior, pantalla encendida y refresco del detalle) y una decisión nueva (feed).
+
+- ✅ **QR: al renovarlo, el anterior sigue valiendo 10 segundos** (cambio pedido al confirmar; antes uno nuevo invalidaba el anterior en el acto). Nunca más allá de su propio vencimiento, y solo se conserva uno: el anterior al anterior deja de valer. La pantalla del creador lo renueva 15 segundos antes de que venza.
+- ✅ **El lock de los jobs no se libera al terminar: vence solo** (a los 54 s, con un ciclo de 60 s). Si se liberara, otra instancia con el reloj un poco corrido repetiría el job en el mismo ciclo. Además cada job es idempotente (actualizaciones condicionales), así que una repetición no duplica nada.
+- ✅ **`attendanceClosedAt` en `plans`** marca que el cierre de asistencia ya corrió.
+- ✅ **El mínimo de asistentes para el +1 del creador (2)** es una constante en `shared/attendance.js`, junto con el resto de los parámetros. Cambiarlo es un cambio de código.
+- ✅ **Cambio de estado por `PATCH`:** `status` va solo en el body; pedir el estado que el plan ya tiene responde 200 sin cambios.
+- ✅ **Check-in ya hecho se informa antes que el horario:** un segundo intento fuera de la ventana responde `ALREADY_CHECKED_IN`, no `CHECKIN_WINDOW_CLOSED`.
+- ✅ **`OUT_OF_RANGE` es un solo código** para "lejos" y "GPS impreciso"; el `message` del servidor dice cuál (la app lo muestra tal cual).
+- ✅ **`noShowCount` solo sale en `GET /users/me`.** `PUT /users/me`, el registro y el login no lo devuelven; la app lo pide al abrir el perfil.
+- ✅ **Un plan cancelado deja de ser visible** para quien no es su creador ni tiene inscripción activa: inscribirse responde 404, no `PLAN_CLOSED`.
+- ✅ **Anotados dentro del detalle del plan:** la lista va paginada de a 20 con un botón "Ver más" (no es una pantalla aparte).
+- ✅ **Feed sin planes propios ni inscriptos** (decisión nueva): `GET /plans` y `POST /feed` no traen los planes que creó el usuario ni aquellos en los que tiene inscripción activa; esos están en "Mis planes". Quien se da de baja vuelve a verlo. Cierra el punto abierto de S3.
 
 ### App
-- **Cuarto tab "Mis planes"** (Voy / Organizo, Próximos / Pasados). El detalle del plan, el QR y el check-in se abren dentro del tab desde el que se entró.
-- **Acciones del creador en el detalle:** cerrar y reabrir inscripciones y cancelar el plan (con confirmación). No estaban en las tareas de la app, pero sin ellas los cambios de estado no se podían usar.
-- **Dependencias nuevas:** `expo-camera` (leer el QR; sin micrófono), `react-native-svg` y `react-native-qrcode-svg` (dibujar el QR).
-- **La pantalla del QR no mantiene el teléfono despierto.** Si se apaga la pantalla, al volver pide un QR nuevo. Si molesta, sumar `expo-keep-awake`.
-- **El detalle del plan se actualiza al volver a la pantalla**, no solo: quien deja abierto el detalle no ve aparecer el botón de asistencia cuando abre la ventana hasta que vuelve a entrar.
+- ✅ **Cuarto tab "Mis planes"** (Voy / Organizo, Próximos / Pasados). El detalle del plan, el QR y el check-in se abren dentro del tab desde el que se entró.
+- ✅ **Acciones del creador en el detalle:** cerrar y reabrir inscripciones y cancelar el plan (con confirmación). No estaban en las tareas de la app, pero sin ellas los cambios de estado no se podían usar.
+- **Dependencias nuevas:** `expo-camera` (leer el QR; sin micrófono), `react-native-svg` y `react-native-qrcode-svg` (dibujar el QR) y `expo-keep-awake`.
+- ✅ **La pantalla del QR queda encendida mientras se muestra** (`expo-keep-awake`; pedido al confirmar).
+- ✅ **El detalle del plan se refresca solo** (pedido al confirmar): cuando abre o cierra el horario de asistencia, cuando el plan empieza o termina, y cuando la app vuelve a primer plano. El botón de asistencia aparece sin salir y volver a entrar. Si el próximo de esos momentos está a más de un día, no se programa nada (se refresca al volver a la app).
 
 ### Límites conocidos
 - **Relojes:** la ventana, el vencimiento del QR y el cierre usan la hora del servidor. Entre dos instancias con relojes corridos, un check-in en el último segundo de la ventana podría entrar justo después del cierre de asistencia y quedar con check-in **y** `noShow`. Requiere una diferencia de reloj mayor al margen entre requests; se documenta, no se resolvió.
@@ -336,6 +339,6 @@ Decisiones en [s4-decisiones.md](tareas/s4-decisiones.md) (2026-10-12, Paula). L
 - **Editar las fechas de un plan con la asistencia ya cerrada** recalcula la ventana pero no reabre la asistencia.
 
 ### Sin probar
-- **Sin probar en un teléfono:** la cámara (`expo-camera`), la lectura real del QR, la precisión del GPS en interiores y el dibujo del QR. Verificado: tests (jest-expo), lint, `expo-doctor` y `expo export --platform android`.
+- **Sin probar en un teléfono:** la cámara (`expo-camera`), la lectura real del QR, la precisión del GPS en interiores, el dibujo del QR, que la pantalla quede encendida (`expo-keep-awake`) y el refresco al volver a primer plano. Verificado: tests (jest-expo), lint, `expo-doctor` y `expo export --platform android`.
 - **Dos instancias reales del back contra un Redis real** (criterio de aceptación de S4-BE-08): cubierto con un test de dos schedulers sobre un Redis simulado; falta la prueba con docker-compose levantado.
 - La app contra el back real no se probó de punta a punta; el back sí, por HTTP (Supertest) y contra MongoDB en memoria con replica set.

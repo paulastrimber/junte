@@ -51,7 +51,7 @@ Estos casos salen del informe (7.5) y de las reglas de negocio. Cada uno tiene s
 - [x] `PATCH capacity` por debajo de los inscriptos → 409. *(tests/contract/plans.test.js)*
 
 **Check-in** *(tests/contract/checkins.test.js)*
-- [x] QR vencido → rechazado. QR de otro plan → rechazado. QR anterior (reemplazado por uno nuevo) → rechazado.
+- [x] QR vencido → rechazado. QR de otro plan → rechazado. QR anterior: válido 10 segundos después de renovarlo, rechazado después (y nunca más allá de su propio vencimiento).
 - [x] Inscripción inactiva o inexistente → rechazado.
 - [x] Fuera del radio o con `accuracyMeters` excesiva → 403 `OUT_OF_RANGE` (exactamente en el límite se acepta).
 - [x] Fuera de la ventana horaria → 409 `CHECKIN_WINDOW_CLOSED` (un segundo antes de abrir y un segundo después de cerrar).
@@ -66,6 +66,7 @@ Estos casos salen del informe (7.5) y de las reglas de negocio. Cada uno tiene s
 - [x] `completed` al llegar `endsAt`; si el cierre de asistencia no había corrido, se hace en la misma operación.
 - [x] Transiciones del creador: cerrar y reabrir antes de `startsAt`, cancelar hasta `endsAt`; `cancelled` es final.
 - [x] Scheduler: con dos instancias el job corre una sola vez por ciclo; sin Redis no corre.
+- [x] `GET /plans` y `POST /feed` no traen los planes propios ni aquellos con inscripción activa. *(tests/contract/plans.test.js, tests/contract/feed.test.js)*
 
 **Chat y reportes**
 - [ ] No participante → 403 por REST y por Socket.io.

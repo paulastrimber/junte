@@ -24,7 +24,7 @@ Toda respuesta de error, venga de donde venga (Express o Nginx), tiene esta form
 | `INVALID_CREDENTIALS` | 401 | Login fallido (mismo mensaje para email inexistente, contraseña mala y hash guardado con formato inválido) |
 | `ACCOUNT_SUSPENDED` | 401 | Usuario con `status: 'suspended'` (en login, refresh o con cualquier token). Pierde todas sus sesiones |
 | `FORBIDDEN` | 403 | Autenticado sin permiso (plan ajeno, no participante —check-in y lista de anotados—, no admin) |
-| `QR_INVALID` | 403 | QR ausente, mal formado, vencido, de otro plan o reemplazado por uno más nuevo |
+| `QR_INVALID` | 403 | QR ausente, mal formado, vencido o de otro plan; también el QR anterior una vez pasados sus 10 segundos de margen |
 | `OUT_OF_RANGE` | 403 | Distancia mayor al radio del plan, o precisión del GPS peor que 100 m (el `message` dice cuál de las dos) |
 | `NOT_FOUND` | 404 | Recurso inexistente o no visible |
 | `EMAIL_TAKEN` | 409 | Registro con email existente (también con otras mayúsculas o espacios) |

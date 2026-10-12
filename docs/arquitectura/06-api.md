@@ -211,7 +211,7 @@ Campos que solo devuelve el back:
 - `participantCount`, `availableSpots` e `isFull`: **"lleno" se calcula** (`participantCount >= capacity`), no es un `status`. Con cupo ilimitado (`capacity: null`) `availableSpots` es `null` e `isFull` siempre `false`. Crear un plan no consume cupo: el creador se inscribe aparte.
 - `creator`: vista pública del creador (`id`, `name`, `photoUrl`, `reputation`). `isCreator`: si el usuario del token es quien lo creó (la app lo usa para ofrecer "Editar").
 - `photoUrl`: URL `GET` firmada de 10 minutos, o `null`. `distanceMeters`: solo en resultados por cercanía (`POST /feed`, `GET /plans?near=`), redondeada al metro.
-- Nunca salen `photoKey`, `qrNonceHash`, `qrExpiresAt`, `attendanceClosedAt` ni `creatorId` suelto.
+- Nunca salen `photoKey`, `qrNonceHash`, `qrExpiresAt`, el desafío anterior (`qrPreviousNonceHash`, `qrPreviousExpiresAt`), `attendanceClosedAt` ni `creatorId` suelto.
 
 Reglas:
 
@@ -244,7 +244,7 @@ open ◀──▶ closed ──▶ completed      (el back, al llegar endsAt; ta
 
 **Anotados (`GET /plans/:id/participants`).** Inscripciones activas, por orden de inscripción: `{ items: [{ id, name, photoUrl, reputation }], nextCursor }`. Solo para participantes activos y el creador (403 `FORBIDDEN` para el resto; 404 si el plan no le es visible). Nunca incluye ausencias.
 
-**QR (`POST /plans/:id/qr`).** Solo el creador, con el plan `open` o `closed` y dentro de la ventana de asistencia. Devuelve un desafío aleatorio (`qrToken`) que vence a los **90 segundos** (o al cerrar la ventana, lo que pase primero). Hay **un solo QR válido por plan**: pedir otro invalida el anterior. El back guarda solo el hash. `Cache-Control: no-store`.
+**QR (`POST /plans/:id/qr`).** Solo el creador, con el plan `open` o `closed` y dentro de la ventana de asistencia. Devuelve un desafío aleatorio (`qrToken`) que vence a los **90 segundos** (o al cerrar la ventana, lo que pase primero). Pedir otro lo reemplaza: **el anterior sigue valiendo 10 segundos más** (nunca más allá de su propio vencimiento), para que quien lo escaneó justo en el cambio no tenga que repetir. Solo se conserva uno: el anterior al anterior deja de valer. El back guarda solo el hash. `Cache-Control: no-store`.
 
 **Check-in (`POST /plans/:id/check-in`).** Validaciones, en orden:
 
@@ -256,7 +256,7 @@ open ◀──▶ closed ──▶ completed      (el back, al llegar endsAt; ta
 | 4 | Plan `open` o `closed` | 409 `PLAN_CLOSED` |
 | 5 | Todavía no registró su asistencia | 409 `ALREADY_CHECKED_IN` |
 | 6 | Dentro de la ventana (`checkInOpensAt` a `checkInClosesAt`, bordes incluidos) | 409 `CHECKIN_WINDOW_CLOSED` |
-| 7 | `qrToken` es el desafío vigente de **ese** plan y no venció | 403 `QR_INVALID` |
+| 7 | `qrToken` es el desafío vigente de **ese** plan y no venció, o el anterior dentro de sus 10 segundos de margen | 403 `QR_INVALID` |
 | 8 | `accuracyMeters` ≤ 100 y distancia al lugar ≤ `checkInRadiusMeters` | 403 `OUT_OF_RANGE` |
 
 - Si todo pasa, se registra la asistencia y se suma **+1 de reputación**, en la misma transacción. Respuesta: `{ planId, checkedInAt, method, distanceMeters }` (`distanceMeters` redondeada).
@@ -269,7 +269,7 @@ open ◀──▶ closed ──▶ completed      (el back, al llegar endsAt; ta
 
 #### Listados y filtros
 
-`GET /plans` y `POST /feed` devuelven `{ items: [plan…], nextCursor }` con planes **abiertos que todavía no empezaron**. Los filtros son **predefinidos**: el cliente elige valores y el back arma la consulta (un filtro desconocido es 400).
+`GET /plans` y `POST /feed` devuelven `{ items: [plan…], nextCursor }` con planes **abiertos que todavía no empezaron**. Son para descubrir planes: **no traen los que creó el usuario ni aquellos en los que tiene inscripción activa** (esos están en `GET /users/me/plans`); quien se da de baja vuelve a verlo. Los filtros son **predefinidos**: el cliente elige valores y el back arma la consulta (un filtro desconocido es 400).
 
 | Filtro | `GET /plans` (query) | `POST /feed` (body) | Qué hace |
 |--------|----------------------|---------------------|----------|
