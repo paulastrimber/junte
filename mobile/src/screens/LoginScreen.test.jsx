@@ -31,6 +31,14 @@ describe('LoginScreen', () => {
     expect(screen.getByRole('button', { name: TEXTS.register })).toBeOnTheScreen()
   })
 
+  it('muestra la marca y un único título de pantalla', async () => {
+    await renderLogin()
+
+    expect(screen.getByLabelText('junte')).toBeOnTheScreen()
+    expect(screen.getByRole('header', { name: TEXTS.title })).toBeOnTheScreen()
+    expect(screen.getByText(TEXTS.subtitle)).toBeOnTheScreen()
+  })
+
   it('la contraseña se oculta mientras se escribe', async () => {
     await renderLogin()
 
