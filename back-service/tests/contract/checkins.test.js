@@ -59,7 +59,8 @@ describe('POST /plans/:id/qr', () => {
     const stored = await Plan.findById(plan.id).lean()
     expect(stored.qrNonceHash).toMatch(/^[0-9a-f]{64}$/)
     expect(JSON.stringify(stored)).not.toContain(body.qrToken.split('.')[1])
-    expect(JSON.stringify((await ana.api.get(`/plans/${plan.id}`)).body)).not.toMatch(/qrNonceHash|qrToken|qrExpiresAt/)
+    await ana.api.post(qrPath) // al renovar, el hash anterior también queda guardado: tampoco se expone
+    expect(JSON.stringify((await ana.api.get(`/plans/${plan.id}`)).body)).not.toMatch(/qrNonceHash|qrPreviousNonceHash|qrToken|qrExpiresAt|qrPreviousExpiresAt/)
   })
 
   it('el QR nunca vence después de que cierra la ventana de check-in', async () => {
@@ -164,13 +165,42 @@ describe('POST /plans/:id/check-in', () => {
       expectError(await beto.api.post(checkInPath, checkInBody({ qrToken: otherQr })), expect, 403, 'QR_INVALID')
     })
 
-    it('un QR nuevo invalida el anterior', async () => {
-      const { beto, checkInPath, newQr } = await scenario()
+    it('al renovar el QR, el anterior sigue valiendo 10 segundos', async () => {
+      const { travelTo, ana, beto, checkInPath, newQr } = await scenario()
+      const previous = await newQr()
+      await newQr()
+      await travelTo(new Date(STARTS_AT.getTime() + 10 * 1000), ana, beto)
+
+      expect((await beto.api.post(checkInPath, checkInBody({ qrToken: previous }))).status).toBe(201)
+    })
+
+    it('pasados los 10 segundos el QR anterior ya no sirve; el nuevo sí', async () => {
+      const { travelTo, ana, beto, checkInPath, newQr } = await scenario()
       const previous = await newQr()
       const current = await newQr()
+      await travelTo(new Date(STARTS_AT.getTime() + 11 * 1000), ana, beto)
 
       expectError(await beto.api.post(checkInPath, checkInBody({ qrToken: previous })), expect, 403, 'QR_INVALID')
       expect((await beto.api.post(checkInPath, checkInBody({ qrToken: current }))).status).toBe(201)
+    })
+
+    it('el margen nunca alarga la vida del QR anterior más allá de su propio vencimiento', async () => {
+      const { travelTo, ana, beto, checkInPath, newQr } = await scenario()
+      const previous = await newQr() // vence a los 90 s
+      await travelTo(new Date(STARTS_AT.getTime() + 85 * 1000), ana, beto)
+      await newQr()
+      await travelTo(new Date(STARTS_AT.getTime() + 91 * 1000), ana, beto)
+
+      expectError(await beto.api.post(checkInPath, checkInBody({ qrToken: previous })), expect, 403, 'QR_INVALID')
+    })
+
+    it('solo se conserva un QR anterior: el anterior al anterior deja de valer en el acto', async () => {
+      const { beto, checkInPath, newQr } = await scenario()
+      const oldest = await newQr()
+      await newQr()
+      await newQr()
+
+      expectError(await beto.api.post(checkInPath, checkInBody({ qrToken: oldest })), expect, 403, 'QR_INVALID')
     })
 
     it.each([

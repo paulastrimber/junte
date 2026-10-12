@@ -1,7 +1,8 @@
 // plans: validador $jsonSchema con las reglas de S4 (defensa en profundidad; Zod y el servicio son la primera barrera).
 // - `checkInOpensAt`, `checkInClosesAt` y `checkInRadiusMeters` pasan a ser obligatorios (backfill en 20261013120000).
 // - `checkInRadiusMeters`: de 50 a 1000 m. La ventana abre antes de cerrar y nunca cierra después de `endsAt`.
-// - `qrNonceHash` y `qrExpiresAt`: desafío QR vigente (hash del nonce y vencimiento).
+// - `qrNonceHash` y `qrExpiresAt`: desafío QR vigente (hash del nonce y vencimiento). `qrPreviousNonceHash` y
+//   `qrPreviousExpiresAt`: el desafío anterior, que sigue valiendo unos segundos después de renovarlo.
 // - `attendanceClosedAt`: cuándo el job cerró la asistencia del plan (marca noShow una sola vez).
 // El resto es igual al validador de S3. `down` restaura el de 20261012120100. Autocontenida: no se edita una vez mergeada.
 const COLLECTION = 'plans'
@@ -74,6 +75,8 @@ const VALIDATOR = {
       checkInRadiusMeters: { bsonType: 'number', minimum: 50, maximum: 1000 },
       qrNonceHash: { bsonType: 'string' },
       qrExpiresAt: { bsonType: 'date' },
+      qrPreviousNonceHash: { bsonType: 'string' },
+      qrPreviousExpiresAt: { bsonType: 'date' },
       attendanceClosedAt: { bsonType: 'date' }
     }
   },

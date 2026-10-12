@@ -11,6 +11,7 @@ const { ObjectId } = mongoose.Schema.Types
 
 function hideSecrets (_doc, ret) {
   delete ret.qrNonceHash
+  delete ret.qrPreviousNonceHash
   return ret
 }
 
@@ -95,6 +96,9 @@ const planSchema = new mongoose.Schema(
     // Desafío QR vigente: SHA-256 del nonce, nunca el nonce.
     qrNonceHash: { type: String },
     qrExpiresAt: { type: Date },
+    // Desafío anterior: sigue valiendo unos segundos después de renovarlo (ATTENDANCE.QR_PREVIOUS_GRACE_MS).
+    qrPreviousNonceHash: { type: String },
+    qrPreviousExpiresAt: { type: Date },
     // Solo-backend: cuándo el job cerró la asistencia (noShow y +1 del creador). Se escribe una sola vez.
     attendanceClosedAt: { type: Date }
   },

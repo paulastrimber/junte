@@ -36,7 +36,7 @@ export function createPlanController ({ planService, planSerializer, feedService
       const filters = pickFilters(req.query)
       const page = near
         ? await feedService.recommend({ userId: req.user.id, near, radiusKm, filters, limit, cursor })
-        : await planService.list({ filters, limit, cursor })
+        : await planService.list({ userId: req.user.id, filters, limit, cursor })
       res.json(await planSerializer.serializePage(page, req.user.id))
     },
 

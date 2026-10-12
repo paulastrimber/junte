@@ -22,6 +22,15 @@ const outOfRange = (message) => new AppError('OUT_OF_RANGE', message)
  * @param {{ info: (obj: object, msg: string) => void }} deps.logger
  */
 export function createCheckInService ({ plans, isLive, matchesQrChallenge, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger }) {
+  const isStillValid = (expiresAt, now) => expiresAt instanceof Date && now.getTime() <= expiresAt.getTime()
+
+  /** El QR vale si es el desafío vigente o el anterior (que sigue valiendo unos segundos después de renovarlo). */
+  function isValidQr (plan, qrToken, now) {
+    const matches = (qrNonceHash) => matchesQrChallenge({ qrToken, planId: plan.id, qrNonceHash })
+    return (isStillValid(plan.qrExpiresAt, now) && matches(plan.qrNonceHash)) ||
+      (isStillValid(plan.qrPreviousExpiresAt, now) && matches(plan.qrPreviousNonceHash))
+  }
+
   return {
     /**
      * Registra la asistencia del usuario. El creador inscripto no escanea su propio QR: entra sin `qrToken`, solo con
@@ -42,10 +51,7 @@ export function createCheckInService ({ plans, isLive, matchesQrChallenge, parti
       if (!isWithinWindow({ opensAt: plan.checkInOpensAt, closesAt: plan.checkInClosesAt, now })) {
         throw new AppError('CHECKIN_WINDOW_CLOSED', 'El registro de asistencia no está habilitado en este momento')
       }
-      if (!isCreator) {
-        const isCurrent = matchesQrChallenge({ qrToken, planId: plan.id, qrNonceHash: plan.qrNonceHash })
-        if (!isCurrent || !plan.qrExpiresAt || now.getTime() > plan.qrExpiresAt.getTime()) throw qrInvalid()
-      }
+      if (!isCreator && !isValidQr(plan, qrToken, now)) throw qrInvalid()
       if (!isAccurateEnough(accuracyMeters)) {
         throw outOfRange(`La señal de GPS es poco precisa (se necesita una precisión de ${ATTENDANCE.MAX_ACCURACY_METERS} m o mejor). Probá al aire libre`)
       }

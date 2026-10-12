@@ -201,7 +201,8 @@ export function createPlanService ({ planRepo, userRepo, participationRepo, chec
 
     /**
      * Genera el desafío QR de asistencia (S4-BE-04). Solo el creador, con el plan vivo y dentro de la ventana de
-     * check-in. Hay un único QR válido por plan: uno nuevo invalida el anterior. El token no se guarda ni se loguea.
+     * check-in. Uno nuevo reemplaza al anterior, que sigue valiendo unos segundos (quien lo escaneó justo en el cambio
+     * no tiene que repetir). El token no se guarda ni se loguea.
      * @param {{ planId: string, userId: string }} params
      * @returns {Promise<{ qrToken: string, expiresAt: Date }>}
      * @throws {AppError} NOT_FOUND | FORBIDDEN | PLAN_CLOSED | CHECKIN_WINDOW_CLOSED
@@ -214,7 +215,8 @@ export function createPlanService ({ planRepo, userRepo, participationRepo, chec
 
       const { qrToken, qrNonceHash } = createQrChallenge(plan.id)
       const expiresAt = new Date(Math.min(now.getTime() + ATTENDANCE.QR_TTL_MS, plan.checkInClosesAt.getTime()))
-      const updated = await planRepo.setQr(plan.id, userId, { qrNonceHash, qrExpiresAt: expiresAt, now })
+      const previousValidUntil = new Date(now.getTime() + ATTENDANCE.QR_PREVIOUS_GRACE_MS)
+      const updated = await planRepo.setQr(plan.id, userId, { qrNonceHash, qrExpiresAt: expiresAt, previousValidUntil, now })
       // Cambió entre la lectura y la escritura: se canceló, se completó o cambiaron las fechas.
       if (!updated) {
         const latest = await planRepo.findById(plan.id)
@@ -264,15 +266,18 @@ export function createPlanService ({ planRepo, userRepo, participationRepo, chec
 
     /**
      * Listado cronológico (sin `near`): planes abiertos que todavía no empezaron, con los filtros predefinidos.
-     * @param {{ filters: import('./plan.repository.js').PlanFilters, limit: number, cursor?: string }} params
+     * Sirve para descubrir planes: no incluye los que el usuario creó ni aquellos en los que ya está inscripto
+     * (esos están en "Mis planes").
+     * @param {{ userId: string, filters: import('./plan.repository.js').PlanFilters, limit: number, cursor?: string }} params
      * @returns {Promise<{ items: Array<{ plan: object, creator: object | null }>, nextCursor: string | null }>}
      */
-    async list ({ filters, limit, cursor }) {
+    async list ({ userId, filters, limit, cursor }) {
       const decoded = cursor ? decodeCursor(cursor, listCursorSchema) : null
       const after = decoded ? { startsAt: new Date(decoded.s), id: decoded.i } : null
 
       // Uno de más para saber si hay otra página sin una segunda consulta.
-      const found = await planRepo.listUpcoming({ filters, now: clock.now(), after, limit: limit + 1 })
+      const exclude = { creatorId: userId, planIds: await participationRepo.findActivePlanIds(userId) }
+      const found = await planRepo.listUpcoming({ filters, now: clock.now(), after, limit: limit + 1, exclude })
       const page = found.slice(0, limit)
       const last = page.at(-1)
       const nextCursor = found.length > limit ? encodeCursor({ s: last.startsAt.getTime(), i: last.id }) : null

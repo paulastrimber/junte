@@ -45,8 +45,17 @@ describe('recommend', () => {
       maxDistanceMeters: 10_000,
       filters: { availability: 'available', university: 'um' },
       asOf: at(NOW),
-      limit: MAX_CANDIDATES
+      limit: MAX_CANDIDATES,
+      exclude: { creatorId: USER_ID, planIds: [] }
     })
+  })
+
+  it('excluye de los candidatos los planes propios y aquellos en los que ya está inscripto', async () => {
+    const { recommend, planRepo } = setup({ joined: [makePlan(7), makePlan(8)] })
+
+    await recommend()
+
+    expect(planRepo.findNearby).toHaveBeenCalledWith(expect.objectContaining({ exclude: { creatorId: USER_ID, planIds: ['plan-007', 'plan-008'] } }))
   })
 
   it('respeta el radio pedido', async () => {

@@ -16,6 +16,9 @@ export const ATTENDANCE = Object.freeze({
   // Tope de lo que se acepta como `accuracyMeters` en el body (validación de formato).
   ACCURACY_LIMIT_METERS: 100_000,
   QR_TTL_MS: 90 * 1000,
+  // Al renovar el QR, el anterior sigue valiendo este tiempo (y nunca más allá de su propio vencimiento): quien lo
+  // escaneó justo en el cambio no tiene que volver a escanear.
+  QR_PREVIOUS_GRACE_MS: 10 * 1000,
   // Check-ins de OTROS participantes que hacen falta para que el creador reciba su +1 al cerrar la asistencia.
   CREATOR_MIN_OTHER_CHECKINS: 2
 })

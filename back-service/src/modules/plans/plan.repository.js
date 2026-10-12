@@ -25,6 +25,8 @@ import { AVAILABILITY, EDITABLE_STATUSES, PRICE_RANGES } from './plan.rules.js'
  * @property {number} checkInRadiusMeters
  * @property {string} [qrNonceHash]  Nunca sale en una respuesta (el serializer no lo incluye).
  * @property {Date} [qrExpiresAt]
+ * @property {string} [qrPreviousNonceHash]  Desafío anterior, válido hasta `qrPreviousExpiresAt`.
+ * @property {Date} [qrPreviousExpiresAt]
  * @property {Date} [attendanceClosedAt]
  * @property {Date} createdAt
  * @property {number} [distanceMeters]  Solo en los resultados de `findNearby`.
@@ -39,6 +41,14 @@ import { AVAILABILITY, EDITABLE_STATUSES, PRICE_RANGES } from './plan.rules.js'
  * @property {string[]} [interests]  El plan tiene al menos uno.
  * @property {'available' | 'full'} [availability]  Con cupo (por defecto) o llenos.
  * @property {string[]} [priceRanges]  Keys de PRICE_RANGES; el precio cae en alguno.
+ */
+
+/**
+ * Planes que no se le muestran a un usuario en los listados para descubrir planes: los que creó y aquellos en los
+ * que ya tiene inscripción activa (los ve en "Mis planes"). Lo arma el servicio a partir del token, nunca el cliente.
+ * @typedef {object} PlanExclusion
+ * @property {string} [creatorId]
+ * @property {string[]} [planIds]
  */
 
 /** @returns {PlanEntity} */
@@ -63,6 +73,8 @@ function toEntity (doc) {
     checkInRadiusMeters: doc.checkInRadiusMeters,
     qrNonceHash: doc.qrNonceHash,
     qrExpiresAt: doc.qrExpiresAt,
+    qrPreviousNonceHash: doc.qrPreviousNonceHash,
+    qrPreviousExpiresAt: doc.qrPreviousExpiresAt,
     attendanceClosedAt: doc.attendanceClosedAt,
     createdAt: doc.createdAt,
     ...(doc.distanceMeters !== undefined ? { distanceMeters: doc.distanceMeters } : {})
@@ -97,10 +109,10 @@ function priceClause (keys) {
 /**
  * Condiciones comunes de los listados: planes abiertos que todavía no empezaron, más los filtros predefinidos.
  * @param {PlanFilters} filters
- * @param {{ startsAfter: Date, createdUntil?: Date }} window
+ * @param {{ startsAfter: Date, createdUntil?: Date, exclude?: PlanExclusion }} window
  * @returns {object[]} cláusulas para un `$and`.
  */
-function listClauses (filters, { startsAfter, createdUntil }) {
+function listClauses (filters, { startsAfter, createdUntil, exclude = {} }) {
   const { from, to, university, availability = AVAILABILITY.AVAILABLE } = filters
   const interests = onlyStrings(filters.interests)
   const clauses = [{ status: 'open' }, { startsAt: { $gt: startsAfter } }]
@@ -108,6 +120,9 @@ function listClauses (filters, { startsAfter, createdUntil }) {
   if (from instanceof Date) clauses.push({ startsAt: { $gte: from } })
   if (to instanceof Date) clauses.push({ startsAt: { $lte: to } })
   if (createdUntil instanceof Date) clauses.push({ createdAt: { $lte: createdUntil } })
+  if (mongoose.isValidObjectId(exclude.creatorId)) clauses.push({ creatorId: { $ne: new mongoose.Types.ObjectId(exclude.creatorId) } })
+  const excludedIds = onlyStrings(exclude.planIds).filter((id) => mongoose.isValidObjectId(id))
+  if (excludedIds.length > 0) clauses.push({ _id: { $nin: excludedIds.map((id) => new mongoose.Types.ObjectId(id)) } })
   if (typeof university === 'string') clauses.push({ university })
   if (interests.length > 0) clauses.push({ interests: { $in: interests } })
 
@@ -219,18 +234,29 @@ export function createPlanRepository (PlanModel) {
     },
 
     /**
-     * Guarda el desafío QR vigente (reemplaza al anterior): solo el creador, con el plan vivo y dentro de la ventana.
+     * Guarda el desafío QR vigente: solo el creador, con el plan vivo y dentro de la ventana. En la misma operación
+     * el desafío que estaba vigente pasa a ser "el anterior", válido hasta `previousValidUntil` (y nunca más allá de
+     * su propio vencimiento). Solo se conserva uno: el anterior al anterior deja de valer.
      * @param {string} id
      * @param {string} creatorId
-     * @param {{ qrNonceHash: string, qrExpiresAt: Date, now: Date }} qr
+     * @param {{ qrNonceHash: string, qrExpiresAt: Date, previousValidUntil: Date, now: Date }} qr
      * @returns {Promise<PlanEntity | null>} null si no se cumplió alguna condición.
      */
-    async setQr (id, creatorId, { qrNonceHash, qrExpiresAt, now }) {
+    async setQr (id, creatorId, { qrNonceHash, qrExpiresAt, previousValidUntil, now }) {
       if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(creatorId)) return null
       const doc = await PlanModel.findOneAndUpdate(
         { _id: id, creatorId, status: { $in: LIVE_STATUSES }, checkInOpensAt: { $lte: now }, checkInClosesAt: { $gte: now } },
-        { $set: { qrNonceHash, qrExpiresAt } },
-        { returnDocument: 'after', runValidators: true }
+        [
+          {
+            $set: {
+              // Sin desafío vigente (primer QR del plan) no queda ninguno anterior.
+              qrPreviousNonceHash: { $ifNull: ['$qrNonceHash', '$$REMOVE'] },
+              qrPreviousExpiresAt: { $cond: [{ $gt: ['$qrNonceHash', null] }, { $min: ['$qrExpiresAt', previousValidUntil] }, '$$REMOVE'] }
+            }
+          },
+          { $set: { qrNonceHash: { $literal: qrNonceHash }, qrExpiresAt, updatedAt: '$$NOW' } }
+        ],
+        { returnDocument: 'after', updatePipeline: true }
       ).lean()
       return doc ? toEntity(doc) : null
     },
@@ -331,10 +357,11 @@ export function createPlanRepository (PlanModel) {
      * @param {Date} params.now
      * @param {{ startsAt: Date, id: string } | null} params.after  Última clave de la página anterior.
      * @param {number} params.limit
+     * @param {PlanExclusion} [params.exclude]
      * @returns {Promise<PlanEntity[]>}
      */
-    async listUpcoming ({ filters, now, after, limit }) {
-      const clauses = listClauses(filters, { startsAfter: now })
+    async listUpcoming ({ filters, now, after, limit, exclude }) {
+      const clauses = listClauses(filters, { startsAfter: now, exclude })
       if (after && mongoose.isValidObjectId(after.id)) {
         clauses.push({ $or: [{ startsAt: { $gt: after.startsAt } }, { startsAt: after.startsAt, _id: { $gt: toObjectId(after.id) } }] })
       }
@@ -352,9 +379,10 @@ export function createPlanRepository (PlanModel) {
      * @param {PlanFilters} params.filters
      * @param {Date} params.asOf
      * @param {number} params.limit  Tope de candidatos.
+     * @param {PlanExclusion} [params.exclude]
      * @returns {Promise<Array<PlanEntity & { distanceMeters: number }>>} del más cercano al más lejano.
      */
-    async findNearby ({ near, maxDistanceMeters, filters, asOf, limit }) {
+    async findNearby ({ near, maxDistanceMeters, filters, asOf, limit, exclude }) {
       const docs = await PlanModel.aggregate([
         {
           $geoNear: {
@@ -363,7 +391,7 @@ export function createPlanRepository (PlanModel) {
             spherical: true,
             maxDistance: maxDistanceMeters,
             distanceField: 'distanceMeters',
-            query: { $and: listClauses(filters, { startsAfter: asOf, createdUntil: asOf }) }
+            query: { $and: listClauses(filters, { startsAfter: asOf, createdUntil: asOf, exclude }) }
           }
         },
         { $limit: limit }

@@ -34,8 +34,7 @@ const fingerprintOf = (query) => createHash('sha256').update(JSON.stringify(quer
  */
 export function createFeedService ({ planRepo, userRepo, participationRepo, attachCreators, scorers, clock }) {
   // Los planes en los que el usuario ya está inscripto cuentan como ocupados, haya o no permiso de calendario.
-  async function joinedPlanSlots (userId, now) {
-    const planIds = await participationRepo.findActivePlanIds(userId)
+  async function joinedPlanSlots (planIds, now) {
     const schedules = await planRepo.findSchedulesByIds(planIds, { endsAfter: now })
     return schedules.map(({ id, startsAt, endsAt }) => ({ planId: id, start: startsAt, end: endsAt }))
   }
@@ -66,9 +65,12 @@ export function createFeedService ({ planRepo, userRepo, participationRepo, atta
       if (!user) throw errors.unauthenticated()
 
       const radiusMeters = radiusKm * 1000
+      const joinedPlanIds = await participationRepo.findActivePlanIds(userId)
+      // El feed es para descubrir planes: no trae los que el usuario creó ni aquellos en los que ya está inscripto.
+      const exclude = { creatorId: userId, planIds: joinedPlanIds }
       const [candidates, joinedSlots] = await Promise.all([
-        planRepo.findNearby({ near, maxDistanceMeters: radiusMeters, filters, asOf, limit: MAX_CANDIDATES }),
-        joinedPlanSlots(userId, asOf)
+        planRepo.findNearby({ near, maxDistanceMeters: radiusMeters, filters, asOf, limit: MAX_CANDIDATES, exclude }),
+        joinedPlanSlots(joinedPlanIds, asOf)
       ])
 
       const ranked = rankPlans(candidates, {
