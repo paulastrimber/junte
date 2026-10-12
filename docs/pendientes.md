@@ -47,18 +47,15 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 
 ### Parámetros del check-in
 **Problema:** radio, precisión GPS aceptable, ventana horaria y vida del QR están "pendientes de acordar". Tampoco se define si `checkInOpensAt/ClosesAt/RadiusMeters` los carga el creador.
-**Propuesta:** el creador puede enviarlos en `POST/PATCH /plans`; defaults: ventana `startsAt − 15 min` a `startsAt + 60 min`, radio 150 m, precisión máx. 100 m, QR válido 90 s (la pantalla del creador lo regenera).
-**Bloquea:** S4.
+✅ **Decidido (2026-10-12, Paula) e implementado en S4** ([s4-decisiones.md](tareas/s4-decisiones.md)): el creador solo elige el **radio** (`checkInRadiusMeters`, 50 a 1000 m, 150 por defecto). La ventana la calcula siempre el back: `startsAt − 15 min` a `startsAt + 60 min`, y nunca después de `endsAt`. Precisión máxima del GPS 100 m; QR válido 90 s (la pantalla del creador lo renueva). Todos los valores están en `back-service/src/shared/attendance.js`.
 
 ### Estados del plan
 **Problema:** no está definido quién ni cuándo pasa un plan a `closed`, `completed` o `cancelled`, ni qué pasa con los inscriptos.
-**Propuesta:** el creador cierra inscripciones (`PATCH status: 'closed'`) o cancela (`'cancelled'`, notifica a inscriptos); un job marca `completed` al terminar la ventana de check-in y aplica `noShow`. Bajas no permitidas (409 `PLAN_CLOSED`) después de `startsAt`.
-**Bloquea:** S4.
+✅ **Decidido (2026-10-12, Paula) e implementado en S4** ([s4-decisiones.md](tareas/s4-decisiones.md)): el creador cierra o reabre las inscripciones (`PATCH status: 'closed' | 'open'`, antes de `startsAt`) y cancela (`'cancelled'`, hasta `endsAt`). Un job marca `noShow` **al cerrar la ventana de check-in** y pasa el plan a `completed` **al llegar `endsAt`**. `closed` no marca `noShow`. Bajas no permitidas (409 `PLAN_CLOSED`) después de `startsAt` ni con el check-in hecho. El aviso a los inscriptos cuando se cancela un plan queda para S5 (push).
 
 ### Reactivación de inscripciones
 **Problema:** "un registro por par, reactivable si las reglas lo permiten": ¿cuáles reglas?
-**Propuesta:** se puede volver a inscribir si el plan está `open`, hay cupo y no empezó.
-**Bloquea:** S4.
+✅ **Decidido (2026-10-12, Paula) e implementado en S4:** se puede volver a inscribir si el plan está `open`, hay cupo y no empezó (las mismas reglas que la primera vez). Se reutiliza el mismo registro.
 
 ### Sesiones múltiples
 ✅ **Decidido (2026-10-11, Phillip) e implementado en S2 ([ADR-0008](arquitectura/adr/0008-sesiones-multiples.md)):** un usuario puede tener sesión abierta en varios dispositivos a la vez. Se descarta el único `users.refreshTokenHash`.
@@ -85,16 +82,16 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 
 ### Jobs programados
 **Problema:** recordatorios y cierre automático requieren tareas periódicas, y con dos instancias correrían duplicadas.
-**Propuesta:** scheduler dentro del back con lock en Redis (`SET NX PX`); campo `reminderSentAt` en `plans` (por migración) para no repetir avisos; recordatorio 60 min antes.
-**Bloquea:** S4–S5.
+✅ **Scheduler implementado en S4** (`back-service/src/jobs/scheduler.js`): corre dentro del back, un ciclo por minuto, con lock en Redis (`SET NX PX`). Jobs actuales: cierre de asistencia y completar planes.
+**Queda para S5:** el recordatorio (campo `reminderSentAt` en `plans`, por migración, para no repetir avisos; propuesta: 60 min antes).
+**Bloquea:** S5 (recordatorios).
 
 ### Aviso de cupo liberado
 ✅ **Decidido (2026-10-12, Paula):** no hay lista de espera con orden. En un plan **lleno** (`participantCount >= capacity`; "lleno" se calcula, no es un `status`) el usuario puede pedir que le avisen cuando se libere un lugar. Al liberarse un cupo se avisa **a todos** los que lo pidieron y el primero que se inscribe se queda con el lugar (lo garantiza la transacción de cupos de S4).
 **Diseño propuesto (a confirmar antes de implementar):** colección `spotAlerts` (`planId`, `userId`, `createdAt`; índice único `{ planId, userId }`), `PUT /plans/:id/spot-alert` y `DELETE /plans/:id/spot-alert` (idempotentes, identidad desde el token) y `spotAlertRequested` en el detalle del plan.
-**Queda para más adelante:**
-- **S4:** al darse de baja un inscripto (después del commit, regla 10) se dispara el aviso; al inscribirse, se borra el pedido de aviso de ese usuario.
-- **S5:** el envío real por push (FCM) a quienes pidieron aviso, y qué pasa con los pedidos después de avisar (propuesta: se conservan hasta que el usuario se inscribe, cancela el aviso o el plan empieza).
-**Bloquea:** S5 (envío). El pedido/cancelación del aviso no depende de push.
+**Pasado completo a S5 (2026-10-12, Paula):** la colección `spotAlerts`, los endpoints, el botón "Avisarme" en la app, los ganchos (al darse de baja un inscripto, después del commit, se dispara el aviso; al inscribirse, se borra el pedido de ese usuario) y el envío por push (FCM). En S4 no se implementó nada de esto: la inscripción y la baja solo dejan el punto donde enganchar el aviso.
+**A definir en S5:** qué pasa con los pedidos después de avisar (propuesta: se conservan hasta que el usuario se inscribe, cancela el aviso o el plan empieza).
+**Bloquea:** S5.
 
 ### Notas de voz y contactos
 **Problema:** el sprint 5 los menciona, pero no hay modelo (`messages` solo tiene `text`) ni endpoints.
@@ -144,7 +141,7 @@ Lo que apareció al implementar el sprint 1 y queda para revisar con el equipo.
 ### back-data (Agente B)
 - ✅ **Resuelto en S2.** (Antes) **Hash de contraseñas en seeds:** no hay bcrypt/argon2 instalado, así que los usuarios sembrados tienen `passwordHash: '!seed-no-login'` (no es un hash válido: no pueden iniciar sesión). Cuando auth (S2) elija la librería, el seed debería hashear una contraseña de desarrollo leída de una variable (`SEED_PASSWORD`), nunca fija en el código. Además el login debe tratar un hash con formato inválido como credenciales incorrectas (401), no como 500.
 - **Lista de intereses:** los seeds usan valores de ejemplo (`futbol`, `running`, `estudio`, `musica`, `cine`, `juegos-de-mesa`) hasta que se defina la lista cerrada ([Intereses del plan](#intereses-del-plan)). Desde S2 esa es la lista inicial de `shared/interests.js` ([Lista de intereses](#lista-de-intereses)).
-- **Parámetros del check-in en seeds:** los planes sembrados no tienen `checkInOpensAt/ClosesAt/RadiusMeters` (dependen de [Parámetros del check-in](#parámetros-del-check-in)); agregarlos en S4.
+- ✅ **Resuelto en S4.** **Parámetros del check-in en seeds:** los planes sembrados ya llevan la ventana y el radio de check-in.
 - **`down` conserva colecciones y datos:** las migraciones iniciales crean la colección con su validador; `down` quita índices y validador pero no borra la colección (borrar datos sería irreversible). `migrate:check` verifica que después de `down` no quede ningún índice salvo `_id_`.
 - **Validadores más estrictos que 07 (a confirmar):** `users.email` sin mayúsculas ni espacios (garantiza la normalización de la que depende el índice único) y `checkIns` con `additionalProperties: false` (impide guardar la ubicación del participante; el modelo usa `strict: 'throw'`). `participantCount ≤ capacity` se valida con `$expr` junto al `$jsonSchema`. Todos con `validationLevel: 'moderate'`.
 - **Backfill de `role`/`status` (ADR-0004):** no se escribió migración de backfill porque no hay entornos con usuarios previos; la colección nace con el validador que exige ambos campos. Si aparece una base vieja, agregar la migración de backfill de [migraciones.md](practicas/migraciones.md).
@@ -190,7 +187,7 @@ Lo que apareció al implementar auth y perfiles (S2) y queda para revisar con el
 ✅ **Resuelto en S2b:** los intereses ya no son una lista fija del código. Son el catálogo `interests` (8 categorías, 57 opciones) que edita el admin en S6 ([ADR-0009](arquitectura/adr/0009-catalogos-en-la-base.md)). La lista inicial es una propuesta del equipo de desarrollo: **falta revisarla con el equipo** (qué categorías y opciones, orden, y qué opciones llevan edad mínima).
 
 ### Visibilidad del perfil público
-Solo existe una vista mínima para otros usuarios (`serializePublic`: `id`, `name`, `photoUrl`). Qué más se muestra del creador o de los inscriptos (edad, barrio, universidad, reputación) se decide en S3–S4. `birthDate`, `age`, `neighborhood` y `city` quedan solo para el dueño hasta entonces.
+✅ **Decidido (2026-10-12, Paula) e implementado en S4:** la vista para otros usuarios (`serializePublic`) lleva `id`, `name`, `photoUrl` y **`reputation`**: se ve en el creador de cada plan y en la lista de anotados. Las ausencias (`noShow`) nunca se muestran a otros. `birthDate`, `age`, `neighborhood`, `city` y la universidad siguen solo para el dueño.
 
 ### Decisiones de implementación a confirmar
 - **Logout sin body.** El informe/06 decía `POST /auth/logout` con `refreshToken` en el body (❓). Se resolvió con `sid` dentro del access token: `logout` y `logout-all` solo necesitan el `Authorization`. Consecuencia: si el access venció, la app lo refresca primero (lo hace el cliente HTTP solo).
@@ -264,9 +261,9 @@ Decidido con Paula el 2026-10-12 (ver arriba: [intereses](#intereses-del-plan), 
 - **Cupo ilimitado y la transacción de cupo.** El patrón `incrementIfCapacity` documentado usaba `$lt: ['$participantCount', '$capacity']`, que con `capacity: null` da siempre falso: un plan sin límite rechazaría todas las inscripciones con `PLAN_FULL`. La condición correcta ya está en [07](arquitectura/07-modelo-de-datos.md#transacciones) (`$or` con `capacity` nulo) y es la misma del filtro `availability=available`. El test de concurrencia de S4 tiene que cubrir también un plan ilimitado (N inscripciones simultáneas → N exitosas). El resto no cambia: el contador y el registro siguen en la misma transacción.
 - **Bajar el cupo mientras hay inscripciones en curso** ya es seguro: `PATCH capacity` es una actualización condicional sobre `participantCount`, y el validador de MongoDB rechaza un `participantCount` mayor al cupo.
 - **Planes llenos:** el botón de inscribirse (S4-MOB-01) se deshabilita con `isFull`; el back responde `PLAN_FULL` igual.
-- **`status` no se edita por `PATCH`** en S3 (cerrar, cancelar y completar siguen en [estados del plan](#estados-del-plan)). Mientras tanto un plan solo puede estar `open`, salvo por seeds o scripts.
-- **Feed:** hoy incluye los planes creados por el propio usuario y los que ya tiene inscriptos. Decidir en S4 si se excluyen o se marcan ("Vas a ir").
-- **Aviso de cupo liberado:** diseñado, sin implementar. Tareas S4-BE-09, S4-MOB-05 y S5-BE-08.
+- **`status` no se editaba por `PATCH`** en S3. Desde S4 el creador cierra, reabre o cancela ([estados del plan](#estados-del-plan)).
+- **Feed:** incluye los planes creados por el propio usuario y los que ya tiene inscriptos. **Sigue abierto** (no era una tarea de S4): decidir si se excluyen o se marcan ("Vas a ir").
+- **Aviso de cupo liberado:** diseñado, sin implementar. Pasó completo a S5 (S5-BE-10 y S5-MOB-06).
 
 ### Reglas que se resolvieron con la opción más chica
 - **`startsAt` tiene que ser futuro** al crear, y al editar solo si se cambia (un plan en curso se puede editar sin tocar el inicio). No hay un máximo de anticipación.
@@ -307,3 +304,38 @@ Decidido con Paula el 2026-10-12 (ver arriba: [intereses](#intereses-del-plan), 
 - **`expo-calendar` declara también el permiso de escritura** del calendario en Android (lo agrega su plugin); la app solo lee. Si se quiere quitar hay que probar en un teléfono que el pedido de permiso siga funcionando.
 - La app contra el back real no se probó de punta a punta; el back sí, por HTTP (Supertest) y contra MongoDB en memoria.
 - `expo-doctor` avisa de tres parches menores disponibles (`expo`, `expo-dev-client`, `jest-expo`), anteriores a este sprint: no se actualizaron.
+
+## G. Notas del sprint 4: inscripciones, asistencia y reputación
+
+Decisiones en [s4-decisiones.md](tareas/s4-decisiones.md) (2026-10-12, Paula). Lo que quedó abierto o se resolvió con la opción más chica:
+
+### Reglas que se resolvieron con la opción más chica (a confirmar)
+- **Un solo QR válido por plan.** Pedir uno nuevo invalida el anterior. La pantalla del creador lo renueva 15 segundos antes de que venza; quien escaneó justo en el cambio recibe `QR_INVALID` y vuelve a escanear. Alternativa: aceptar también el QR anterior durante unos segundos.
+- **El lock de los jobs no se libera al terminar: vence solo** (a los 54 s, con un ciclo de 60 s). Si se liberara, otra instancia con el reloj un poco corrido repetiría el job en el mismo ciclo. Cambia lo que decía el documento de decisiones ("comparar y borrar"). Además cada job es idempotente (actualizaciones condicionales), así que una repetición no duplica nada.
+- **`attendanceClosedAt` en `plans`** marca que el cierre de asistencia ya corrió. Quedó con ese nombre.
+- **El mínimo de asistentes para el +1 del creador (2)** es una constante en `shared/attendance.js`, junto con el resto de los parámetros. No es una variable de entorno: cambiarlo es un cambio de código.
+- **Cambio de estado por `PATCH`:** `status` va solo en el body; pedir el estado que el plan ya tiene responde 200 sin cambios.
+- **Check-in ya hecho se informa antes que el horario:** un segundo intento fuera de la ventana responde `ALREADY_CHECKED_IN`, no `CHECKIN_WINDOW_CLOSED`.
+- **`OUT_OF_RANGE` es un solo código** para "lejos" y "GPS impreciso"; el `message` del servidor dice cuál (la app lo muestra tal cual).
+- **`noShowCount` solo sale en `GET /users/me`.** `PUT /users/me`, el registro y el login no lo devuelven; la app lo pide al abrir el perfil.
+- **Un plan cancelado deja de ser visible** para quien no es su creador ni tiene inscripción activa: inscribirse responde 404, no `PLAN_CLOSED`.
+- **Anotados dentro del detalle del plan:** la lista va paginada de a 20 con un botón "Ver más" (no es una pantalla aparte).
+
+### App
+- **Cuarto tab "Mis planes"** (Voy / Organizo, Próximos / Pasados). El detalle del plan, el QR y el check-in se abren dentro del tab desde el que se entró.
+- **Acciones del creador en el detalle:** cerrar y reabrir inscripciones y cancelar el plan (con confirmación). No estaban en las tareas de la app, pero sin ellas los cambios de estado no se podían usar.
+- **Dependencias nuevas:** `expo-camera` (leer el QR; sin micrófono), `react-native-svg` y `react-native-qrcode-svg` (dibujar el QR).
+- **La pantalla del QR no mantiene el teléfono despierto.** Si se apaga la pantalla, al volver pide un QR nuevo. Si molesta, sumar `expo-keep-awake`.
+- **El detalle del plan se actualiza al volver a la pantalla**, no solo: quien deja abierto el detalle no ve aparecer el botón de asistencia cuando abre la ventana hasta que vuelve a entrar.
+
+### Límites conocidos
+- **Relojes:** la ventana, el vencimiento del QR y el cierre usan la hora del servidor. Entre dos instancias con relojes corridos, un check-in en el último segundo de la ventana podría entrar justo después del cierre de asistencia y quedar con check-in **y** `noShow`. Requiere una diferencia de reloj mayor al margen entre requests; se documenta, no se resolvió.
+- **Fraude:** un QR reenviado por mensaje o una ubicación simulada pasan los controles (límite que ya reconoce el informe). El QR corto y el radio lo dificultan, no lo impiden.
+- **Sin Redis los jobs no corren** (se loguea un `warn` por ciclo). Las ausencias y el `completed` se ponen al día solos cuando Redis vuelve.
+- **El scheduler procesa hasta 100 planes por job y por ciclo**; lo que quede pasa al ciclo siguiente.
+- **Editar las fechas de un plan con la asistencia ya cerrada** recalcula la ventana pero no reabre la asistencia.
+
+### Sin probar
+- **Sin probar en un teléfono:** la cámara (`expo-camera`), la lectura real del QR, la precisión del GPS en interiores y el dibujo del QR. Verificado: tests (jest-expo), lint, `expo-doctor` y `expo export --platform android`.
+- **Dos instancias reales del back contra un Redis real** (criterio de aceptación de S4-BE-08): cubierto con un test de dos schedulers sobre un Redis simulado; falta la prueba con docker-compose levantado.
+- La app contra el back real no se probó de punta a punta; el back sí, por HTTP (Supertest) y contra MongoDB en memoria con replica set.

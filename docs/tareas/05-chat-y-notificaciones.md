@@ -16,8 +16,10 @@
   *Acepta:* test con dos instancias del back en docker-compose: un mensaje enviado a la instancia A llega a un cliente conectado a la B.
 - [ ] **S5-BE-06 · `POST /devices` y `DELETE /devices/:token`** (upsert por token, reasignación de usuario).
 - [ ] **S5-BE-07 · Adapter FCM + `notifier`**: envío después del commit, sin bloquear la respuesta; borra tokens inválidos.
-- [ ] **S5-BE-08 · Avisos**: nuevo inscripto (al creador), recordatorio (job con lock + `reminderSentAt`) y **cupo liberado**: push a **todos** los que pidieron aviso en ese plan (`spotAlerts`, S4-BE-09); el primero que se inscribe se queda con el lugar. Definir qué pasa con los pedidos después de avisar (propuesta: se conservan hasta que el usuario se inscribe, cancela el aviso o el plan empieza).
+- [ ] **S5-BE-08 · Avisos**: nuevo inscripto (al creador), recordatorio (job con lock + `reminderSentAt`) y **cupo liberado**: push a **todos** los que pidieron aviso en ese plan (`spotAlerts`, S5-BE-10); el primero que se inscribe se queda con el lugar. Definir qué pasa con los pedidos después de avisar (propuesta: se conservan hasta que el usuario se inscribe, cancela el aviso o el plan empieza).
 - [ ] **S5-BE-09 · Notas de voz** (según decisión): `type: 'voice'` + `audioKey` vía presign.
+- [ ] **S5-BE-10 · Aviso de cupo liberado (pedido)** ([diseño](../pendientes.md#aviso-de-cupo-liberado); pasó de S4 a S5 el 2026-10-12): colección `spotAlerts` (`planId`, `userId`; índice único `{ planId, userId }`, por migración), `PUT` y `DELETE /plans/:id/spot-alert` (idempotentes, identidad del token; solo sobre un plan lleno y abierto) y `spotAlertRequested` en el detalle. Ganchos en el servicio de inscripciones de S4: al inscribirse se borra el pedido de ese usuario; al darse de baja alguien, **después del commit**, se dispara el aviso (S5-BE-08).
+  *Acepta:* dos pedidos del mismo usuario → uno solo; pedir aviso en un plan con cupo → 409; un plan de cupo ilimitado nunca admite pedidos.
 
 ## Front service
 
@@ -31,6 +33,7 @@
 - [ ] **S5-MOB-03 · `services/push.js`**: permiso, `getDevicePushTokenAsync()` (token FCM nativo), registro en `/devices`, baja al cerrar sesión, apertura del plan al tocar la notificación.
 - [ ] **S5-MOB-04 · Development build** con `google-services.json` y prueba en teléfono real.
 - [ ] **S5-MOB-05 · Notas de voz / contactos** según decisión.
+- [ ] **S5-MOB-06 · "Avisarme si se libera un lugar"** en el detalle de un plan lleno (pedir y cancelar el aviso). Pasó de S4 a S5.
 
 ## Pruebas obligatorias
 

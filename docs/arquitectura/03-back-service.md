@@ -31,19 +31,20 @@ back-service/
       auth/                # register, login, refresh, logout, sesiones (colección sessions), tokens
       users/               # perfil, foto, isProfileComplete
       catalogs/            # intereses, universidades, carreras, ciudades, barrios (GET /catalogs + reglas de validación)
-      plans/               # CRUD de planes, listados con filtros predefinidos, foto (QR y cierre: S4)
-      participations/      # inscripciones: lecturas en S3; join / leave con transacción de cupo en S4
-      checkins/            # check-in + reputación
+      plans/               # CRUD de planes, listados con filtros predefinidos, foto, estados, QR de asistencia y "Mis planes"
+      participations/      # inscripciones: join / leave con transacción de cupo, reactivación y lista de anotados
+      checkins/            # check-in + reputación, y cierre de asistencia (noShow, +1 del creador, completed)
       feed/                # recomendación: scorers puros, ranking y paginación por posición (POST /feed)
       messages/            # chat REST
       reports/
       devices/             # deviceTokens para FCM
       uploads/             # URLs firmadas de S3
       admin/               # moderación (requiere role=admin)
+    jobs/                  # scheduler de jobs periódicos: cada job corre una sola vez por ciclo (lock en Redis)
     middlewares/           # requestId, authenticate, requireRole, validate, errorHandler, notFound
     sockets/               # setup de Socket.io, auth del handshake, handlers de chat
-    adapters/              # db (Mongo + withTransaction), redis, storage (s3 + memoria), passwordHasher (Argon2id), fcm, secrets, clock, logger
-    shared/                # AppError + catálogo de errores, pagination (cursor opaco y limit), geo (coordenadas [lng, lat] y radio), utils puros (catalog-keys, age: fechas de calendario y edad, uploads: reglas y verificación de imágenes, validation: Zod en español, router: enrutado estricto)
+    adapters/              # db (Mongo + withTransaction), redis, redisLock (lock de los jobs), storage (s3 + memoria), passwordHasher (Argon2id), fcm, secrets, clock, logger
+    shared/                # AppError + catálogo de errores, pagination (cursor opaco y limit), geo (coordenadas [lng, lat], radio y Haversine), attendance (parámetros y reglas puras del check-in), utils puros (catalog-keys, age: fechas de calendario y edad, uploads: reglas y verificación de imágenes, validation: Zod en español, router: enrutado estricto)
   migrations/              # migrate-mongo (ver practicas/migraciones.md)
   catalogs/                # datos iniciales de los catálogos + syncCatalogs (solo inserta); los carga una migración
   seeds/                   # datos de desarrollo, nunca en producción

@@ -7,7 +7,7 @@ React Native con Expo + EAS Build. **Nunca accede a MongoDB ni recibe credencial
 | Rol | Pieza | Hace | Nunca hace |
 |-----|-------|------|-----------|
 | **View** | `screens/`, `components/` | Renderizan y emiten eventos | `fetch`/`axios`, leer tokens, lógica de negocio |
-| **Controller** | `hooks/` (`usePlans`, `useJoinPlan`, `useCheckIn`) | Orquestan: llaman services, manejan loading/error, devuelven estado listo para pintar | Renderizar |
+| **Controller** | `hooks/` (`usePlan`, `usePlanActions`, `usePlanQr`, `useCheckIn`, `useMyPlans`) | Orquestan: llaman services, manejan loading/error, devuelven estado listo para pintar | Renderizar |
 | **Model** | `services/` + `contexts/` | Cliente HTTP, Socket.io, auth/tokens, FCM, ubicación, persistencia offline; estado global mínimo | Conocer pantallas |
 
 Regla de oro: **una screen nunca llama a la API directamente**; siempre a través de un hook.
@@ -26,7 +26,7 @@ mobile/
   eas.json                 # perfiles development / preview / production
   src/
     screens/               # LoginScreen, RegisterScreen, OnboardingScreen (3 pasos), HomeScreen (feed), PlanScreen,
-                           # CreatePlanScreen, CheckInScreen, ChatScreen, ProfileScreen
+                           # CreatePlanScreen, PlanQrScreen (QR del creador), CheckInScreen, MyPlansScreen, ChatScreen, ProfileScreen
     components/            # PlanCard, Button, Avatar, EmptyState, ErrorBanner… (presentacionales)
     hooks/
     services/
@@ -42,7 +42,8 @@ mobile/
       calendar.js          # expo-calendar: franjas ocupadas (solo inicio y fin) para el feed
       socket.js            # socket.io-client
       push.js              # permisos + registro del token en POST /devices
-      location.js          # expo-location: permiso, posición actual [lng, lat] y búsqueda de direcciones (geocodificador del teléfono)
+      location.js          # expo-location: permiso, posición actual [lng, lat], posición precisa para el check-in y búsqueda de direcciones
+      camera.js            # expo-camera: permiso para leer el QR de asistencia
       offline/             # caché de lecturas y cola de pendientes
     contexts/              # AuthContext (sesión), estado mínimo compartido
     navigation/            # stacks y tabs (React Navigation); routes.js tiene los nombres de las rutas
