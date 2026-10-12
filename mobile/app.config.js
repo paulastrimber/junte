@@ -69,7 +69,8 @@ export default ({ config }) => ({
   version: '0.1.0',
   orientation: 'portrait',
   icon: './assets/icon.png',
-  userInterfaceStyle: 'light',
+  // Modo claro u oscuro según el sistema; los colores de cada modo están en src/theme/colors.js.
+  userInterfaceStyle: 'automatic',
   ios: {
     bundleIdentifier: APP_ID,
     supportsTablet: true
