@@ -1,5 +1,6 @@
 // Factories para tests de integración/contrato: crean documentos válidos con overrides.
 // Escriben directo con los modelos (sin pasar por servicios). Nunca usar contraseñas reales.
+import { computeCheckInWindow } from '../../src/shared/attendance.js'
 import { User } from '../../src/modules/users/user.model.js'
 import { Plan } from '../../src/modules/plans/plan.model.js'
 import { Participation } from '../../src/modules/participations/participation.model.js'
@@ -25,10 +26,12 @@ export async function makeUser (overrides = {}) {
 export async function makePlan (overrides = {}) {
   const creatorId = overrides.creatorId ?? (await makeUser())._id
   const startsAt = overrides.startsAt ?? new Date(Date.UTC(2030, 0, 1, 18))
+  const endsAt = overrides.endsAt ?? new Date(startsAt.getTime() + 2 * 60 * 60 * 1000)
   return Plan.create({
     title: `Plan ${next()}`,
     startsAt,
-    endsAt: overrides.endsAt ?? new Date(startsAt.getTime() + 2 * 60 * 60 * 1000),
+    endsAt,
+    ...computeCheckInWindow({ startsAt, endsAt }),
     location: { label: 'Montevideo', type: 'Point', coordinates: [...MONTEVIDEO] },
     interests: ['futbol'],
     university: 'um',

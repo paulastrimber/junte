@@ -34,6 +34,8 @@ export function createUserSerializer ({ storage, clock }) {
         neighborhood: user.neighborhood ?? null,
         interests: user.interests,
         reputation: user.reputation,
+        // Ausencias propias: solo en GET /users/me (el servicio las cuenta ahí) y nunca en la vista pública.
+        ...(user.noShowCount !== undefined ? { noShowCount: user.noShowCount } : {}),
         photoUrl: await photoUrlOf(user),
         profileComplete: isProfileComplete(user),
         onboardingCompleted: Boolean(user.onboardingCompletedAt),
@@ -42,12 +44,12 @@ export function createUserSerializer ({ storage, clock }) {
     },
 
     /**
-     * Vista mínima para otros usuarios (creador de un plan, inscriptos, chat). Qué más se muestra
-     * (edad, barrio, universidad) queda pendiente: docs/pendientes.md#visibilidad-del-perfil-público.
+     * Vista para otros usuarios (creador de un plan, anotados, chat): la reputación es pública; las ausencias
+     * (`noShow`), la edad, el barrio y la ciudad no se muestran nunca a otros.
      * @param {import('./user.repository.js').UserEntity} user
      */
     async serializePublic (user) {
-      return { id: user.id, name: user.name ?? null, photoUrl: await photoUrlOf(user) }
+      return { id: user.id, name: user.name ?? null, photoUrl: await photoUrlOf(user), reputation: user.reputation }
     }
   }
 }

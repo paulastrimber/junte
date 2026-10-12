@@ -1,11 +1,13 @@
 // Composition root: el único lugar que conoce las implementaciones concretas (DI sin framework).
 // Ver docs/arquitectura/03-back-service.md#inyección-de-dependencias-sin-framework.
 import { systemClock } from './adapters/clock.js'
-import { connectDb, disconnectDb, pingDb } from './adapters/db/index.js'
+import { connectDb, disconnectDb, pingDb, withTransaction } from './adapters/db/index.js'
 import { createLogger } from './adapters/logger.js'
 import { createArgon2Hasher } from './adapters/passwordHasher.js'
 import { connectRedis, disconnectRedis, pingRedis } from './adapters/redis.js'
+import { createRedisLock } from './adapters/redisLock.js'
 import { createMemoryStorage, createS3Storage } from './adapters/storage/index.js'
+import { createScheduler } from './jobs/scheduler.js'
 import { createAuthenticate } from './middlewares/authenticate.js'
 import {
   Career, City, Interest, InterestCategory, Neighborhood, University,
@@ -14,10 +16,16 @@ import {
 import {
   Session, createAuthController, createAuthRoutes, createAuthService, createSessionRepository, createTokenService
 } from './modules/auth/index.js'
-import { buildScorers, createFeedController, createFeedRoutes, createFeedService } from './modules/feed/index.js'
-import { Participation, createParticipationRepository } from './modules/participations/index.js'
 import {
-  Plan, createPlanController, createPlanRepository, createPlanRoutes, createPlanSerializer, createPlanService, pickFilters
+  CheckIn, createAttendanceService, createCheckInController, createCheckInRepository, createCheckInRoutes, createCheckInService
+} from './modules/checkins/index.js'
+import { buildScorers, createFeedController, createFeedRoutes, createFeedService } from './modules/feed/index.js'
+import {
+  Participation, createParticipationController, createParticipationRepository, createParticipationRoutes, createParticipationService
+} from './modules/participations/index.js'
+import {
+  Plan, createMyPlansRoutes, createPlanController, createPlanRepository, createPlanRoutes, createPlanSerializer, createPlanService,
+  isLive, matchesQrChallenge, pickFilters, planIdParams
 } from './modules/plans/index.js'
 import { createUploadController, createUploadRoutes, createUploadService } from './modules/uploads/index.js'
 import {
@@ -44,14 +52,25 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const authService = createAuthService({ userRepo, sessionRepo, passwordHasher, tokens, clock, maxActiveSessions })
   const catalogRepo = createCatalogRepository({ InterestCategory, Interest, University, Career, City, Neighborhood })
   const catalogService = createCatalogService({ catalogRepo, clock })
-  const userService = createUserService({ userRepo, storage, catalogs: catalogService, clock, logger })
-  const userSerializer = createUserSerializer({ storage, clock })
-
   const planRepo = createPlanRepository(Plan)
   const participationRepo = createParticipationRepository(Participation)
-  const planService = createPlanService({
-    planRepo, userRepo, participationRepo, catalogs: catalogService, isProfileComplete, storage, clock, logger
+  const checkInRepo = createCheckInRepository(CheckIn)
+
+  const userService = createUserService({
+    userRepo, storage, catalogs: catalogService, clock, logger, countNoShows: participationRepo.countNoShows
   })
+  const userSerializer = createUserSerializer({ storage, clock })
+
+  const planService = createPlanService({
+    planRepo, userRepo, participationRepo, checkInRepo, catalogs: catalogService, isProfileComplete, storage, clock, logger
+  })
+  const participationService = createParticipationService({
+    plans: planService, planRepo, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger
+  })
+  const checkInService = createCheckInService({
+    plans: planService, isLive, matchesQrChallenge, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger
+  })
+  const attendanceService = createAttendanceService({ planRepo, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger })
   const planSerializer = createPlanSerializer({ storage, serializeCreator: userSerializer.serializePublic })
   // Los pesos del score vienen de la configuración (FEED_WEIGHTS): cambiarlos no toca código ni contrato.
   const feedService = createFeedService({
@@ -67,18 +86,45 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const catalogController = createCatalogController({ catalogService })
   const planController = createPlanController({ planService, planSerializer, feedService })
   const feedController = createFeedController({ feedService, planSerializer, pickFilters })
+  const participationController = createParticipationController({ participationService, serializeParticipant: userSerializer.serializePublic })
+  const checkInController = createCheckInController({ checkInService })
 
   const routes = [
     { path: '/auth', router: createAuthRoutes({ authController, authenticate }) },
     { path: '/users', router: createUserRoutes({ userController, validators: createUserValidators({ clock }), authenticate }) },
+    // "Mis planes" (GET /users/me/plans) es del módulo de planes.
+    { path: '/users', router: createMyPlansRoutes({ planController, authenticate }) },
     { path: '/uploads', router: createUploadRoutes({ uploadController, authenticate }) },
     { path: '/catalogs', router: createCatalogRoutes({ catalogController, authenticate }) },
     { path: '/plans', router: createPlanRoutes({ planController, authenticate }) },
+    // Inscripciones y check-in cuelgan de /plans/:id.
+    { path: '/plans', router: createParticipationRoutes({ participationController, planIdParams, authenticate }) },
+    { path: '/plans', router: createCheckInRoutes({ checkInController, planIdParams, authenticate }) },
     { path: '/feed', router: createFeedRoutes({ feedController, authenticate }) }
   ]
 
+  // Jobs periódicos: el scheduler los corre con lock (uno por ciclo entre todas las instancias).
+  const jobs = [
+    { name: 'close-attendance', run: attendanceService.closeDueAttendance },
+    { name: 'complete-plans', run: attendanceService.completeDuePlans }
+  ]
+
   return {
-    routes, authenticate, authService, userService, uploadService, catalogService, planService, feedService, userSerializer, userRepo, sessionRepo
+    routes,
+    jobs,
+    authenticate,
+    authService,
+    userService,
+    uploadService,
+    catalogService,
+    planService,
+    feedService,
+    participationService,
+    checkInService,
+    attendanceService,
+    userSerializer,
+    userRepo,
+    sessionRepo
   }
 }
 
@@ -99,7 +145,10 @@ export function createContainer (config) {
   if (!config.storage) logger.warn('S3_BUCKET/AWS_REGION not set: using in-memory storage (photos are not persisted)')
 
   /** Routers de los módulos, montados bajo /internal por createApp. */
-  const { routes } = buildModules({ config, logger, clock, passwordHasher: createArgon2Hasher(), storage })
+  const { routes, jobs } = buildModules({ config, logger, clock, passwordHasher: createArgon2Hasher(), storage })
+
+  let redis = null
+  const scheduler = createScheduler({ jobs, lock: createRedisLock(() => redis), logger })
 
   return {
     config,
@@ -115,8 +164,11 @@ export function createContainer (config) {
     /** Abre las conexiones externas. Lanza si alguna falla (el proceso no debe arrancar). */
     async connect () {
       await connectDb(config.mongo.uri, { dbName: config.mongo.dbName })
-      await connectRedis(config.redis.url, { logger })
+      redis = await connectRedis(config.redis.url, { logger })
     },
+
+    /** Jobs periódicos (cierre de asistencia y de planes). Se arranca después del `listen` y se frena al apagar. */
+    scheduler,
 
     /** Cierra las conexiones. Nunca lanza: loguea lo que falle y sigue con el resto. */
     async disconnect () {

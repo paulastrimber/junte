@@ -92,9 +92,11 @@ export default ({ config }) => ({
     '@react-native-community/datetimepicker',
     // Feed cercano y lugar de un plan: solo mientras se usa la app (sin ubicación en segundo plano).
     ['expo-location', {
-      locationWhenInUsePermission: 'junte usa tu ubicación para mostrarte planes cercanos y para marcar el lugar de los planes que creás.',
+      locationWhenInUsePermission: 'junte usa tu ubicación para mostrarte planes cercanos, marcar el lugar de los planes que creás y confirmar tu asistencia.',
       isAndroidBackgroundLocationEnabled: false
     }],
+    // Check-in: la cámara solo se usa para leer el QR de asistencia (sin micrófono ni grabación).
+    ['expo-camera', { cameraPermission: 'junte usa la cámara para leer el QR de asistencia de los planes.', microphonePermission: false, recordAudioAndroid: false }],
     // Compatibilidad horaria del feed: solo se lee cuándo estás ocupado, nunca el contenido de los eventos.
     ['expo-calendar', { calendarPermission: 'junte mira cuándo estás ocupado en tu calendario para recomendarte planes en horarios que te queden libres.' }],
     // Mapa para elegir el lugar de un plan. En iOS usa Apple Maps (sin clave).

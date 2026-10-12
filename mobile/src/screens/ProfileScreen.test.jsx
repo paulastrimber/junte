@@ -46,6 +46,8 @@ describe('ProfileScreen', () => {
     getCatalogs.mockReset()
     getCatalogs.mockResolvedValue(CATALOG)
     usersApi.updateMe.mockReset()
+    // Reputación y ausencias: se piden al servidor al abrir el perfil.
+    usersApi.getMe.mockReset().mockResolvedValue({ ...USER, reputation: 0, noShowCount: 0 })
     pickProfileImage.mockReset()
     uploadProfilePhoto.mockReset()
   })

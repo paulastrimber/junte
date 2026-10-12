@@ -10,9 +10,11 @@ const LOADING_STATE = Object.freeze({ status: PLAN_STATUS.LOADING, plan: null, e
 
 /**
  * Detalle de un plan. Vuelve a pedirlo con `reload` o cuando cambia `version` (p. ej. al volver de editarlo).
+ * `refresh` lo pide otra vez SIN pasar por "cargando": la pantalla sigue mostrando el plan hasta que llega el nuevo
+ * (después de inscribirse o darse de baja, cuando el servidor ya confirmó).
  * @param {string} planId
  * @param {number} [version]
- * @returns {{ status: string, plan: object | null, error: import('../services/api/errors.js').ApiError | null, reload: () => void }}
+ * @returns {{ status: string, plan: object | null, error: import('../services/api/errors.js').ApiError | null, reload: () => void, refresh: () => void }}
  */
 export function usePlan (planId, version = 0) {
   const [state, setState] = useState(LOADING_STATE)
@@ -44,5 +46,7 @@ export function usePlan (planId, version = 0) {
     setAttempt((value) => value + 1)
   }, [])
 
-  return { ...state, reload }
+  const refresh = useCallback(() => setAttempt((value) => value + 1), [])
+
+  return { ...state, reload, refresh }
 }

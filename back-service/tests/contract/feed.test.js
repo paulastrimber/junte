@@ -32,6 +32,22 @@ describe('POST /feed', () => {
     expect(res.headers['cache-control']).toBe('no-store')
   })
 
+  it('no recomienda los planes que creó el usuario ni aquellos en los que ya está inscripto (tampoco con GET /plans?near=)', async () => {
+    const { signUp } = setupApi()
+    const ana = await signUp()
+    await makePlan({ creatorId: ana.id, location: northOf(100) })
+    const joined = await makePlan({ location: northOf(200) })
+    const other = await makePlan({ location: northOf(300) })
+    await ana.api.post(`/plans/${joined.id}/join`)
+
+    const feed = await ana.api.post('/feed', { near: NEAR })
+    const list = await ana.api.get(`/plans?${NEAR_QUERY}`)
+
+    expect(ids(feed)).toEqual([other.id])
+    expect(ids(list)).toEqual([other.id])
+    expect((await (await signUp()).api.post('/feed', { near: NEAR })).body.items).toHaveLength(3)
+  })
+
   it('radiusKm limita los candidatos', async () => {
     const { signUp } = setupApi()
     const ana = await signUp()
