@@ -2,11 +2,11 @@
 // inscripción cambian en la MISMA transacción, con actualizaciones condicionales (nunca "consultar y después
 // insertar"). No importa Express ni Mongoose: todo llega por parámetro (DI).
 import { AppError, errors } from '../../shared/errors.js'
-import { decodeCursor, encodeCursor } from '../../shared/pagination.js'
+import { cursorInstantField, decodeCursor, encodeCursor } from '../../shared/pagination.js'
 import { objectIdField, z } from '../../shared/validation.js'
 
 // Clave de orden de los anotados: `joinedAt` (ms) + `_id` de la inscripción.
-const participantsCursorSchema = z.strictObject({ j: z.number().int().nonnegative(), i: objectIdField })
+const participantsCursorSchema = z.strictObject({ j: cursorInstantField, i: objectIdField })
 
 const planClosed = (message) => new AppError('PLAN_CLOSED', message)
 const planFull = () => new AppError('PLAN_FULL', 'El plan no tiene cupos disponibles')

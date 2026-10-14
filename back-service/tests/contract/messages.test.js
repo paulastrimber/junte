@@ -98,6 +98,16 @@ describe('POST /plans/:id/messages', () => {
     expect(await Message.countDocuments()).toBe(1)
   })
 
+  it('el mismo clientId en otro plan es 400: no es un reintento', async () => {
+    const { ana, beto, path } = await scenario()
+    const { body: other } = await ana.api.post('/plans', planBody({ title: 'Otro plan' }))
+    await beto.api.post(`/plans/${other.id}/join`)
+    await beto.api.post(`/plans/${other.id}/messages`, { text: 'Hola', clientId: 'used-1' })
+
+    expectValidationError(await beto.api.post(path, { text: 'Hola', clientId: 'used-1' }), expect)
+    expect(await Message.countDocuments()).toBe(1)
+  })
+
   it('el mismo clientId de dos personas distintas son dos mensajes', async () => {
     const { ana, beto, path } = await scenario()
 
@@ -169,6 +179,8 @@ describe('GET /plans/:id/messages', () => {
 
     expectValidationError(await beto.api.get(`${path}?limit=101`), expect)
     expectValidationError(await beto.api.get(`${path}?cursor=bm8tZXMtdW4tY3Vyc29y`), expect)
+    const outOfRange = Buffer.from(JSON.stringify({ c: 9007199254740991, i: '0123456789abcdef01234567' })).toString('base64url')
+    expectValidationError(await beto.api.get(`${path}?cursor=${outOfRange}`), expect)
     expectValidationError(await beto.api.get(`${path}?status=hidden`), expect)
   })
 })
