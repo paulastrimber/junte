@@ -15,6 +15,13 @@ const MESSAGES = Object.freeze({
   [CLIENT_ERROR_CODES.TIMEOUT]: 'El servidor tardó demasiado en responder. Probá de nuevo.'
 })
 
+/** Textos del chat: el mismo `code` (FORBIDDEN, NOT_FOUND…) significa otra cosa que en el resto de la app. */
+export const CHAT_ERROR_MESSAGES = Object.freeze({
+  FORBIDDEN: 'Solo quienes están anotados y quien creó el plan pueden usar el chat.',
+  NOT_FOUND: 'Este plan no está disponible.',
+  VALIDATION_ERROR: 'El mensaje no es válido: tiene que tener entre 1 y 2000 caracteres.'
+})
+
 const GENERIC = 'Ocurrió un error inesperado. Probá de nuevo.'
 
 /**

@@ -43,7 +43,8 @@
     "react-native-qrcode-svg": "^6.3.26",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
-    "react-native-svg": "15.15.4"
+    "react-native-svg": "15.15.4",
+    "socket.io-client": "^4.8.4"
   },
   "devDependencies": {
     "@testing-library/react-native": "^14.0.1",
