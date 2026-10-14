@@ -89,12 +89,17 @@ function Composer ({ onSend }) {
   const styles = useStyles()
   const { colors } = useTheme()
   const [text, setText] = useState('')
+  // Cambia después de cada envío: el campo se vuelve a crear. En iOS, con una autocorrección pendiente, vaciar el
+  // campo no alcanza: el teclado vuelve a escribir el texto corregido después (y se reenviaría sin querer). La
+  // sugerencia queda en el campo viejo y el nuevo arranca vacío y con el foco.
+  const [inputKey, setInputKey] = useState(0)
   const canSend = text.trim().length > 0
 
   function submit () {
     if (!canSend) return
     onSend(text)
     setText('')
+    setInputKey((key) => key + 1)
   }
 
   return (
@@ -104,6 +109,8 @@ function Composer ({ onSend }) {
         : null}
       <View style={styles.composerRow}>
         <TextInput
+          key={inputKey}
+          autoFocus={inputKey > 0}
           accessibilityLabel={TEXTS.inputLabel}
           style={styles.input}
           value={text}

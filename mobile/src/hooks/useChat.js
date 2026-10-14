@@ -160,7 +160,10 @@ export function useChat (planId, { user, isActive = true }) {
       }
       setState((current) => ({ ...current, messages: mergeMessages(current.messages, [saved]) }))
     } catch (failure) {
-      markUnsent(clientId, { status: MESSAGE_STATUS.FAILED, error: toApiError(failure) })
+      const error = toApiError(failure)
+      markUnsent(clientId, { status: MESSAGE_STATUS.FAILED, error })
+      // Ya no tiene acceso (p. ej. se dio de baja con el chat abierto): reintentar no sirve, se muestra el error.
+      if (ACCESS_LOST.has(error.code)) setState((current) => ({ ...current, status: CHAT_STATUS.ERROR, error }))
     }
   }, [planId, markUnsent])
 

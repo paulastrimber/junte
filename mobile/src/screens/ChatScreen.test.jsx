@@ -215,14 +215,14 @@ describe('ChatScreen: enviar', () => {
   })
 
   it('si falla muestra "No se envió · Reintentar" y reintentar lo manda de nuevo', async () => {
-    socketService.sendChatMessage.mockRejectedValueOnce(apiError(0, 'FORBIDDEN'))
+    socketService.sendChatMessage.mockRejectedValueOnce(apiError(0, 'VALIDATION_ERROR'))
     await renderChat()
     await screen.findByText(TEXTS.emptyTitle)
     await fireEvent.changeText(input(), 'Hola')
     await fireEvent.press(sendButton())
 
     expect(await screen.findByText(`${TEXTS.notSent} · ${TEXTS.retrySend}`)).toBeOnTheScreen()
-    expect(screen.getByText('Solo quienes están anotados y quien creó el plan pueden usar el chat.')).toBeOnTheScreen()
+    expect(screen.getByText('El mensaje no es válido: tiene que tener entre 1 y 2000 caracteres.')).toBeOnTheScreen()
     const { clientId } = socketService.sendChatMessage.mock.calls[0][0]
     socketService.sendChatMessage.mockResolvedValueOnce(message(6, { sender: ME, text: 'Hola', clientId }))
     await fireEvent.press(screen.getByRole('button', { name: `${TEXTS.notSent}. ${TEXTS.retrySend}` }))
@@ -230,6 +230,18 @@ describe('ChatScreen: enviar', () => {
     expect(socketService.sendChatMessage).toHaveBeenLastCalledWith({ planId: 'p1', text: 'Hola', clientId })
     expect(screen.queryByText(`${TEXTS.notSent} · ${TEXTS.retrySend}`)).not.toBeOnTheScreen()
     expect(screen.getAllByText('Hola')).toHaveLength(1)
+  })
+
+  it('si al enviar ya no tiene acceso (se dio de baja) muestra el error del chat en lugar de "Reintentar"', async () => {
+    socketService.sendChatMessage.mockRejectedValueOnce(apiError(0, 'FORBIDDEN'))
+    await renderChat()
+    await screen.findByText(TEXTS.emptyTitle)
+    await fireEvent.changeText(input(), 'Hola')
+    await fireEvent.press(sendButton())
+
+    expect(await screen.findByText(TEXTS.errorTitle)).toBeOnTheScreen()
+    expect(screen.getByText('Solo quienes están anotados y quien creó el plan pueden usar el chat.')).toBeOnTheScreen()
+    expect(screen.queryByText(`${TEXTS.notSent} · ${TEXTS.retrySend}`)).not.toBeOnTheScreen()
   })
 
   it('limita el largo a 2000 y muestra el contador solo cerca del límite', async () => {

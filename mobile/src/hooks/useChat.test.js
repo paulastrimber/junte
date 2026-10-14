@@ -316,14 +316,25 @@ describe('useChat: enviar', () => {
     expect(result.current.messages[0]).toMatchObject({ id: 'm3', status: 'sent' })
   })
 
-  it('un error del servidor por el socket (p. ej. FORBIDDEN) marca el mensaje como fallido sin reintentar por REST', async () => {
-    socketService.sendChatMessage.mockRejectedValue(apiError(0, 'FORBIDDEN'))
+  it('un error del servidor por el socket (p. ej. VALIDATION_ERROR) marca el mensaje como fallido sin reintentar por REST', async () => {
+    socketService.sendChatMessage.mockRejectedValue(apiError(0, 'VALIDATION_ERROR'))
     const { result } = await setup()
 
     await act(async () => result.current.send('Hola'))
 
     expect(sendMessage).not.toHaveBeenCalled()
-    expect(result.current.messages[0]).toMatchObject({ status: 'failed', error: { code: 'FORBIDDEN' } })
+    expect(result.current.messages[0]).toMatchObject({ status: 'failed', error: { code: 'VALIDATION_ERROR' } })
+    expect(result.current.status).toBe(CHAT_STATUS.READY)
+  })
+
+  it.each(['FORBIDDEN', 'NOT_FOUND'])('si al enviar responde %s (perdió el acceso) el chat pasa a error', async (code) => {
+    socketService.sendChatMessage.mockRejectedValue(apiError(0, code))
+    const { result } = await setup()
+
+    await act(async () => result.current.send('Hola'))
+
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(result.current).toMatchObject({ status: CHAT_STATUS.ERROR, error: { code } })
   })
 
   it('si también falla el REST queda fallido y retrySend reintenta con el mismo clientId', async () => {
@@ -355,7 +366,7 @@ describe('useChat: enviar', () => {
   })
 
   it('retrySend vuelve a pendiente mientras reintenta', async () => {
-    socketService.sendChatMessage.mockRejectedValueOnce(apiError(0, 'FORBIDDEN'))
+    socketService.sendChatMessage.mockRejectedValueOnce(apiError(0, 'VALIDATION_ERROR'))
     const retry = deferred()
     socketService.sendChatMessage.mockReturnValueOnce(retry.promise)
     const { result } = await setup()
