@@ -31,6 +31,13 @@ export function createAuthService ({
   let dummyHash = null
   const getDummyHash = () => { dummyHash ??= passwordHasher.hash(randomBytes(16).toString('hex')); return dummyHash }
 
+  async function requireActiveUser (userId) {
+    const user = await userRepo.findById(userId)
+    if (!user) throw errors.unauthenticated()
+    if (user.status !== 'active') throw accountSuspended()
+    return user
+  }
+
   /** Abre una sesión nueva y emite su primer par de tokens. */
   async function openSession (user, deviceLabel) {
     const now = clock.now()
@@ -138,10 +145,18 @@ export function createAuthService ({
      */
     async authenticate (accessToken) {
       const { userId, sid } = await tokens.verifyAccess(accessToken)
-      const user = await userRepo.findById(userId)
-      if (!user) throw errors.unauthenticated()
-      if (user.status !== 'active') throw accountSuspended()
+      const user = await requireActiveUser(userId)
       return { user: { id: user.id, role: user.role }, sid }
+    },
+
+    /**
+     * Para conexiones largas (Socket.io): el token se verificó al conectar; en cada evento se comprueba que el
+     * usuario siga existiendo y activo.
+     * @param {string} userId
+     * @throws {AppError} UNAUTHENTICATED | ACCOUNT_SUSPENDED
+     */
+    async assertActive (userId) {
+      await requireActiveUser(userId)
     }
   }
 }

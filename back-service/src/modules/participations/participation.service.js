@@ -21,8 +21,12 @@ const planFull = () => new AppError('PLAN_FULL', 'El plan no tiene cupos disponi
  * @param {typeof import('../../adapters/db/index.js').withTransaction} deps.withTransaction
  * @param {import('../../adapters/clock.js').Clock} deps.clock
  * @param {{ info: (obj: object, msg: string) => void }} deps.logger
+ * @param {{ removeMember: (params: { planId: string, userId: string }) => void }} [deps.chatAccess]  Saca al usuario del chat
+ *   en tiempo real al darse de baja (Socket.io). Nunca lanza.
  */
-export function createParticipationService ({ plans, planRepo, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger }) {
+export function createParticipationService ({
+  plans, planRepo, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger, chatAccess = { removeMember () {} }
+}) {
   // El `$inc` condicional no se aplicó: se averigua por qué con el estado actual.
   async function explainJoinFailure (planId, now) {
     const plan = await planRepo.findById(planId)
@@ -73,7 +77,7 @@ export function createParticipationService ({ plans, planRepo, participationRepo
      * @throws {AppError} NOT_FOUND | PLAN_CLOSED
      */
     async leave ({ planId, userId }) {
-      await plans.requireVisible({ planId, userId })
+      const visible = await plans.requireVisible({ planId, userId })
       const now = clock.now()
 
       const left = await withTransaction(async (session) => {
@@ -87,7 +91,11 @@ export function createParticipationService ({ plans, planRepo, participationRepo
       })
 
       // Después del commit (regla 10). El aviso de cupo liberado es de S5.
-      if (left) logger.info({ event: 'plan.left', planId, userId }, 'plan left')
+      if (left) {
+        logger.info({ event: 'plan.left', planId, userId }, 'plan left')
+        // Ya no es parte del plan: deja de recibir el chat aunque tenga la conexión abierta. El creador sigue en el chat.
+        if (visible.creatorId !== userId) chatAccess.removeMember({ planId, userId })
+      }
       return { left }
     },
 
