@@ -16,6 +16,8 @@ export const ROUTES = Object.freeze({
   // Asistencia (desde el detalle de un plan, en los tabs "Planes" y "Mis planes")
   PLAN_QR: 'PlanQr',
   CHECK_IN: 'CheckIn',
+  // Chat del plan (solo creador y anotados), también desde el detalle de un plan
+  CHAT: 'Chat',
   // Tab "Mis planes"
   MY_PLANS: 'MyPlans',
   // Tab "Crear"

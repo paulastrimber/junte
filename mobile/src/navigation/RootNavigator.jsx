@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { Icon } from '../components/Icon.jsx'
 import { AUTH_STATUS } from '../contexts/AuthContext.jsx'
 import { useAuth } from '../hooks/useAuth.js'
+import ChatScreen, { TEXTS as CHAT_TEXTS } from '../screens/ChatScreen.jsx'
 import CheckInScreen, { TEXTS as CHECK_IN_TEXTS } from '../screens/CheckInScreen.jsx'
 import CreatePlanScreen, { TEXTS as CREATE_TEXTS } from '../screens/CreatePlanScreen.jsx'
 import HealthScreen, { TEXTS as HEALTH_TEXTS } from '../screens/HealthScreen.jsx'
@@ -61,6 +62,8 @@ function planScreens () {
       <Stack.Screen name={ROUTES.EDIT_PLAN} component={CreatePlanScreen} options={{ title: CREATE_TEXTS.editTitle }} />
       <Stack.Screen name={ROUTES.PLAN_QR} component={PlanQrScreen} options={{ title: QR_TEXTS.title }} />
       <Stack.Screen name={ROUTES.CHECK_IN} component={CheckInScreen} options={{ title: CHECK_IN_TEXTS.title }} />
+      {/* El título del encabezado es el del plan (llega como parámetro). */}
+      <Stack.Screen name={ROUTES.CHAT} component={ChatScreen} options={({ route }) => ({ title: route.params?.title ?? CHAT_TEXTS.title })} />
     </>
   )
 }

@@ -340,7 +340,7 @@ Decisiones en [s4-decisiones.md](tareas/s4-decisiones.md) (2026-10-12, Paula). L
 
 ### Sin probar
 - **Sin probar en un teléfono:** la cámara (`expo-camera`), la lectura real del QR, la precisión del GPS en interiores, el dibujo del QR, que la pantalla quede encendida (`expo-keep-awake`) y el refresco al volver a primer plano. Verificado: tests (jest-expo), lint, `expo-doctor` y `expo export --platform android`.
-- **Dos instancias reales del back contra un Redis real** (criterio de aceptación de S4-BE-08): cubierto con un test de dos schedulers sobre un Redis simulado; falta la prueba con docker-compose levantado.
+- ✅ **Dos instancias reales del back contra un Redis real** (criterio de aceptación de S4-BE-08): verificado el 2026-10-14 con docker-compose (perfil `scale`): en cada ciclo una instancia corre el job y la otra lo saltea por el lock.
 - La app contra el back real no se probó de punta a punta; el back sí, por HTTP (Supertest) y contra MongoDB en memoria con replica set.
 
 ### Para investigar
@@ -372,8 +372,24 @@ Decidido con @mperez14ang el 2026-10-14: el **chat completo** (S5-BE-01 a 05 y S
 - **Sin Redis**, cada instancia emite solo a sus propios clientes; el resto ve los mensajes por el polling REST de la app.
 - **Moderación:** el evento `chat:hidden` y `PATCH /admin/messages/:id` son de S6; el historial ya filtra los `hidden`.
 
-### Sin probar
-- **Dos instancias reales con Redis** (criterio de aceptación de S5-BE-05): está la prueba (`task chat:two-instances`, segunda instancia en docker-compose con el perfil `scale`), pero no se corrió porque Docker no estaba levantado en la máquina de desarrollo. Sirve también para la prueba pendiente de S4-BE-08 (los jobs corren una sola vez con dos instancias).
-- **WebSocket a través de Nginx:** `smoke.sh` ahora verifica el upgrade (101) y que el long-polling esté rechazado (400); no se corrió contra el compose por la misma razón. Del lado de AWS (S5-NG-01) falta confirmar que una conexión ociosa 5 minutos sigue viva a través de los dos ALB.
-- **Contra el back real desde el teléfono**: ver las notas de la app (llegan con el PR de la app).
+### Validación en local (2026-10-14)
+Cómo se corre cada prueba: [pruebas en local](practicas/pruebas-en-local.md).
+- ✅ **Dos instancias con Redis** (S5-BE-05): `task chat:two-instances` OK, en los dos sentidos.
+- ✅ **WebSocket a través de Nginx:** `nginx -t` y `smoke.sh` OK (30/30, con el upgrade a WebSocket y el long-polling rechazado).
+- ✅ **E2E del chat por Nginx** (un agente, con REST y Socket.io como la app): permisos (403 por REST y socket), validaciones, paginación sin duplicados, cursores manipulados → 400, idempotencia por `clientId` (socket + REST), mensajes entre instancias, la baja saca de la sala en las dos instancias, recuperación del historial al reconectar, refresh del token, y el texto de los mensajes nunca aparece en los logs de back ni de Nginx.
+- **Falta en AWS** (S5-NG-01): que una conexión ociosa 5 minutos siga viva a través de los dos ALB.
+
+### App
+- **Dependencia nueva:** `socket.io-client` 4.8.
+- ✅ **Botón "Chat del plan"** en el detalle, solo para el creador o un participante activo; el chat se abre dentro del tab desde el que se entró (como el QR y el check-in).
+- **Opción más chica:** páginas de 30 mensajes; sin cola offline (un envío fallido se reintenta a mano, con el mismo `clientId`); un mensaje pendiente se ordena arriba de los confirmados (el reloj del teléfono puede estar corrido); un `type` desconocido se muestra como "Mensaje no compatible con esta versión de la app".
+- **Reconexión tras un rechazo del servidor** (salió en la revisión): si el servidor rechaza la conexión por algo que no es el token (p. ej. `INTERNAL` con la base caída), Socket.io no reintenta solo; la app vuelve a intentar cada 3 s y, al tercer fallo seguido, pasa al polling. Un "Reintentar" de la pantalla ya no descarta los mensajes pendientes o fallidos.
+- **Hueco en el historial:** si al reconectar la primera página no comparte ningún mensaje con lo que se veía, se reemplaza la lista por esa página (no se muestra un hueco).
+- **Carrera conocida:** un mensaje enviado entre la carga de la primera página y el `chat:join` puede no verse hasta la próxima reconexión o refresco. La recuperación al conectar la achica, pero no la cierra del todo.
+- ✅ **Probada en el simulador de iOS (iPhone 17, Expo Go) contra el back local, el 2026-10-14**, con un agente usando la app y la otra persona simulada por REST/socket: botón y estado vacío, mensajes en tiempo real, envío confirmado una sola vez, botón deshabilitado con el campo vacío, historial hacia atrás sin duplicados, banner de polling y "Reintentar" con Nginx caído (el mensaje se mandó una sola vez), y la baja con el chat abierto. Checklist en [pruebas en local](practicas/pruebas-en-local.md#checklist-manual-del-chat).
+- **Encontrado en esa prueba y corregido:**
+  - Con una sugerencia del autocorrector de iOS pendiente, después de enviar el campo se volvía a llenar con el texto corregido y se podía mandar dos veces. Ahora el campo se recrea después de cada envío (y conserva el foco).
+  - Si la persona se daba de baja con el chat abierto, al enviar veía "No se envió · Reintentar", que no servía. Ahora un `FORBIDDEN`/`NOT_FOUND` al enviar lleva a la pantalla de error del chat.
+- **Sin probar:** el teclado en pantalla (el simulador sin la app Simulator no lo muestra; mirarlo en un teléfono, sobre todo Android edge-to-edge) y una caída de red con "conexión rechazada": durante la prueba un Jenkins local en `127.0.0.1:8080` respondía 404 en lugar de Nginx caído (ver [puerto 8080 ocupado](practicas/pruebas-en-local.md#puerto-8080-ocupado-por-otro-servicio)). Ese camino lo cubren los tests unitarios.
+- **Visto en la prueba, sin cambios:** en el detalle del plan el botón "Chat del plan" queda debajo de la barra de pestañas hasta scrollear (es el comportamiento normal del scroll); mensajes seguidos de la misma persona repiten nombre y avatar; con el aviso de polling visible, el primer mensaje queda en parte debajo del aviso.
 

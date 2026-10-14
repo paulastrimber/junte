@@ -41,6 +41,7 @@ export const TEXTS = Object.freeze({
   checkIn: 'Registrar mi asistencia',
   checkedIn: 'Ya registraste tu asistencia.',
   noShow: 'No registraste tu asistencia a este plan.',
+  chat: 'Chat del plan',
   showQr: 'Mostrar QR de asistencia',
   closeSignUps: 'Cerrar inscripciones',
   reopenSignUps: 'Reabrir inscripciones',
@@ -196,6 +197,10 @@ export default function PlanScreen ({ navigation, route }) {
         : null}
       {can.canLeave
         ? <Button title={TEXTS.leave} variant='secondary' loading={actions.pending === PLAN_ACTION.LEAVE} disabled={actions.isBusy} onPress={leave} />
+        : null}
+
+      {can.canChat
+        ? <Button title={TEXTS.chat} variant='secondary' onPress={() => navigation.navigate(ROUTES.CHAT, { planId: plan.id, title: plan.title })} />
         : null}
 
       {can.canSeeParticipants ? <Participants list={participants} creatorId={plan.creator?.id} /> : null}

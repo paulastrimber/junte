@@ -20,7 +20,7 @@ Decisiones del sprint en [s4-decisiones.md](s4-decisiones.md).
   *Acepta:* todos los casos de "Check-in" de [testing.md](../practicas/testing.md#qué-se-testea-sí-o-sí).
 - [x] **S4-BE-07 · Cierre de asistencia y de planes**: al cerrar la ventana de check-in, `noShow` en las inscripciones activas sin check-in y +1 del creador si corresponde, una sola vez por plan; `completed` al llegar `endsAt`. Cerrar inscripciones (`closed`) no marca `noShow`.
 - [x] **S4-BE-08 · Scheduler con lock en Redis** (base para cierre automático y recordatorios).
-  *Acepta:* con dos instancias levantadas, el job corre una sola vez por ciclo. *(Cubierto con dos schedulers sobre un Redis simulado; falta la prueba con docker-compose.)*
+  *Acepta:* con dos instancias levantadas, el job corre una sola vez por ciclo. *(Cubierto con dos schedulers sobre un Redis simulado y verificado el 2026-10-14 con dos instancias reales en docker-compose: una corre el job y la otra lo saltea por el lock. Ver [pruebas en local](../practicas/pruebas-en-local.md#pruebas-de-aceptación-con-docker).)*
 - [x] **S4-BE-09 · Estados del plan**: `PATCH /plans/:id { status }` para cerrar y reabrir inscripciones (antes de `startsAt`) y cancelar (hasta `endsAt`).
 - [x] **S4-BE-10 · `GET /plans/:id/participants`**: anotados con reputación, solo para participantes activos y el creador.
 - [x] **S4-BE-11 · `GET /users/me/plans`** (creados / inscriptos, próximos / pasados), `noShowCount` en `GET /users/me` y `reputation` en la vista pública del usuario.

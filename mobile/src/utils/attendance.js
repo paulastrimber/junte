@@ -41,7 +41,9 @@ export function planActions (plan, now = new Date()) {
     canCloseSignUps: plan.isCreator && plan.status === 'open' && !hasStarted,
     canReopenSignUps: plan.isCreator && plan.status === 'closed' && !hasStarted,
     canCancel: plan.isCreator && isLive && !hasEnded,
-    canSeeParticipants: plan.isCreator || isJoined
+    canSeeParticipants: plan.isCreator || isJoined,
+    // Mismo criterio que el servidor: el creador y quienes están anotados (aunque el plan ya haya terminado).
+    canChat: plan.isCreator || isJoined
   }
 }
 
