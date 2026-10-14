@@ -8,6 +8,7 @@ import { performance } from 'node:perf_hooks'
 import { Server } from 'socket.io'
 import { toAppError } from '../middlewares/errorHandler.js'
 import { errors } from '../shared/errors.js'
+import { objectIdField } from '../shared/validation.js'
 import { chatRoomPayload, chatSendPayload } from '../modules/messages/index.js'
 import { planRoom, userRoom } from './chat.broadcaster.js'
 
@@ -55,6 +56,10 @@ export function createSocketServer ({ httpServer, authService, messageService, m
       socket.data.userId = user.id
       next()
     } catch (err) {
+      // Un rechazo esperado (token vencido, usuario suspendido) es info; uno inesperado (p. ej. Mongo caído) es error.
+      const known = toAppError(err)
+      if (known) logger.info({ event: 'socket.handshake', status: 'rejected', code: known.code }, 'socket handshake rejected')
+      else logger.error({ event: 'socket.handshake', status: 'error', err }, 'socket handshake failed')
       next(handshakeError(err))
     }
   })
@@ -69,7 +74,8 @@ export function createSocketServer ({ httpServer, authService, messageService, m
       const requestId = randomUUID()
       const started = performance.now()
       const { userId } = socket.data
-      const log = { event, requestId, userId, planId: typeof payload?.planId === 'string' ? payload.planId : undefined }
+      // Solo se loguea un planId con forma válida: el resto es input del cliente sin validar.
+      const log = { event, requestId, userId, planId: objectIdField.safeParse(payload?.planId).data }
       try {
         // El token se verificó al conectar y no se vuelve a mirar (vence con la conexión abierta: límite aceptado),
         // pero un usuario suspendido no puede seguir usando el chat.
@@ -102,6 +108,14 @@ export function createSocketServer ({ httpServer, authService, messageService, m
     on(socket, 'chat:join', chatRoomPayload, async ({ planId }) => {
       await messageService.requireMember({ planId, userId })
       await socket.join(planRoom(planId))
+      // Una baja que terminó entre la verificación y el join ya hizo su `removeMember`: se vuelve a verificar con el
+      // socket adentro, así una de las dos operaciones siempre ve a la otra y no queda en la sala sin ser miembro.
+      try {
+        await messageService.requireMember({ planId, userId })
+      } catch (err) {
+        await socket.leave(planRoom(planId))
+        throw err
+      }
       return {}
     })
 

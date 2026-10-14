@@ -2,11 +2,11 @@
 // (docs/arquitectura/08-tiempo-real-y-push.md). Regla 6: solo el participante activo o el creador leen y escriben.
 // No importa Express ni Mongoose: todo llega por parámetro (DI).
 import { errors } from '../../shared/errors.js'
-import { decodeCursor, encodeCursor } from '../../shared/pagination.js'
+import { cursorInstantField, decodeCursor, encodeCursor } from '../../shared/pagination.js'
 import { objectIdField, z } from '../../shared/validation.js'
 
 // Clave de orden del chat: `createdAt` (ms) + `_id`, del más nuevo al más viejo.
-const messagesCursorSchema = z.strictObject({ c: z.number().int().nonnegative(), i: objectIdField })
+const messagesCursorSchema = z.strictObject({ c: cursorInstantField, i: objectIdField })
 
 const notMember = () => errors.forbidden('Solo quienes están anotados y quien creó el plan pueden usar el chat')
 

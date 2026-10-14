@@ -4,14 +4,14 @@ import { ageOn, calendarDateIn, fromUtcMidnight } from '../../shared/age.js'
 import { ATTENDANCE, isWithinWindow } from '../../shared/attendance.js'
 import { RADIUS_KM } from '../../shared/geo.js'
 import { AppError, errors } from '../../shared/errors.js'
-import { decodeCursor, encodeCursor } from '../../shared/pagination.js'
+import { cursorInstantField, decodeCursor, encodeCursor } from '../../shared/pagination.js'
 import { planObjectPrefix, verifyUploadedImage } from '../../shared/uploads.js'
 import { objectIdField, z } from '../../shared/validation.js'
 import { createQrChallenge } from './plan.qr.js'
 import { EDITABLE_STATUSES, PRICE_RANGES, STATUS_TRANSITIONS, canTransition, checkSchedule, isLive, isPubliclyVisible } from './plan.rules.js'
 
 // Clave de orden del listado cronológico: `startsAt` (ms) + `_id`.
-const listCursorSchema = z.strictObject({ s: z.number().int().nonnegative(), i: objectIdField })
+const listCursorSchema = z.strictObject({ s: cursorInstantField, i: objectIdField })
 
 const planNotFound = () => errors.notFound('No encontramos ese plan')
 const notEditable = () => new AppError('PLAN_CLOSED', 'El plan ya no se puede editar')

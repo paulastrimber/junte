@@ -104,6 +104,14 @@ describe('POST /feed', () => {
     expect(ids(refreshed)[0]).toBe(newcomer.id)
   })
 
+  it('400 si el cursor trae un instante fuera de rango (no un 500)', async () => {
+    const { signUp } = setupApi()
+    const ana = await signUp()
+    const cursor = Buffer.from(JSON.stringify({ o: 1, t: 9007199254740991, f: '0123456789abcdef' })).toString('base64url')
+
+    expectValidationError(await ana.api.post('/feed', { near: NEAR, cursor }), expect)
+  })
+
   it('400 si el cursor es de otra búsqueda', async () => {
     const { signUp } = setupApi()
     const ana = await signUp()
