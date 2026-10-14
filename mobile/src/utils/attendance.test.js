@@ -85,6 +85,18 @@ describe('planActions', () => {
   })
 })
 
+describe('planActions: chat', () => {
+  it('lo ven el creador y quienes están anotados', () => {
+    expect(planActions(plan({ isCreator: true }), NOW).canChat).toBe(true)
+    expect(planActions(plan({ myParticipation: joined() }), NOW).canChat).toBe(true)
+  })
+
+  it('no lo ven quienes no participan ni quienes se dieron de baja', () => {
+    expect(planActions(plan(), NOW).canChat).toBe(false)
+    expect(planActions(plan({ myParticipation: joined({ status: 'cancelled' }) }), NOW).canChat).toBe(false)
+  })
+})
+
 describe('qrRefreshDelay', () => {
   it('15 segundos antes de que venza, con un mínimo de 5 segundos', () => {
     expect(qrRefreshDelay(new Date(NOW.getTime() + 90_000).toISOString(), NOW)).toBe(75_000)

@@ -120,6 +120,17 @@ describe('refreshSession', () => {
     expect(tokenStorage.getRefreshToken()).toBe('refresh-0')
   })
 
+  it('pedidos a la vez (HTTP y socket) comparten un solo canje del refresh token', async () => {
+    const { service, api, tokenStorage } = setup({ stored: SAVED })
+    await tokenStorage.load()
+
+    await Promise.all([service.refreshSession(), service.refreshSession()])
+    await service.refreshSession()
+
+    // Dos juntos = 1 canje; el tercero, ya sin nada en vuelo, hace el suyo.
+    expect(api.refresh).toHaveBeenCalledTimes(2)
+  })
+
   it('sin refresh token rechaza con 401 sin llamar a la API', async () => {
     const { service, api } = setup()
 
@@ -180,6 +191,22 @@ describe('sesión vencida', () => {
     unsubscribe()
     await service.handleSessionExpired(reason)
     expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('onSessionEnded avisa en logout, logoutAll y sesión vencida (para soltar el socket)', async () => {
+    const { service, tokenStorage } = setup({ stored: SAVED })
+    await tokenStorage.load()
+    const listener = jest.fn()
+    const unsubscribe = service.onSessionEnded(listener)
+
+    await service.logout()
+    await service.logoutAll()
+    await service.handleSessionExpired(unauthorized())
+    expect(listener).toHaveBeenCalledTimes(3)
+
+    unsubscribe()
+    await service.logout()
+    expect(listener).toHaveBeenCalledTimes(3)
   })
 
   it('expone al cliente HTTP lo que necesita (apiAuth)', async () => {

@@ -1,0 +1,395 @@
+import { act, renderHook, waitFor } from '@testing-library/react-native'
+
+import { deferred } from '../../tests/helpers/deferred.js'
+import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
+import { listMessages, sendMessage } from '../services/api/messages.js'
+import { socketService } from '../services/socket.js'
+import { CHAT_STATUS, POLL_INTERVAL_MS, useChat } from './useChat.js'
+
+jest.mock('../services/api/messages.js', () => ({ listMessages: jest.fn(), sendMessage: jest.fn() }))
+jest.mock('../services/socket.js', () => ({
+  SOCKET_STATUS: { IDLE: 'idle', CONNECTING: 'connecting', CONNECTED: 'connected', RECONNECTING: 'reconnecting', UNAVAILABLE: 'unavailable' },
+  socketService: { subscribe: jest.fn(), sendChatMessage: jest.fn(), getStatus: jest.fn(), onStatusChange: jest.fn() }
+}))
+
+const USER = { id: 'u1', name: 'Ana', photoUrl: null, reputation: 2 }
+const OTHER = { id: 'u2', name: 'Beto', photoUrl: null, reputation: 0 }
+const message = (n, extra = {}) => ({
+  id: `m${n}`,
+  planId: 'p1',
+  sender: OTHER,
+  type: 'text',
+  text: `Mensaje ${n}`,
+  clientId: null,
+  createdAt: `2026-10-14T10:${String(n).padStart(2, '0')}:00.000Z`,
+  ...extra
+})
+const page = (numbers, nextCursor = null) => ({ items: numbers.map((n) => message(n)), nextCursor })
+const texts = (result) => result.current.messages.map((item) => item.text)
+const apiError = (status, code) => new ApiError({ status, code, requestId: 'r1' })
+const networkError = () => apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR)
+
+// Socket falso: el test dispara los mensajes y los cambios de estado.
+let socket
+function fakeSocket () {
+  const state = { status: 'connecting', onMessage: null, onJoinError: null, listener: null, unsubscribe: jest.fn(), stopStatus: jest.fn() }
+  socketService.getStatus.mockImplementation(() => state.status)
+  socketService.onStatusChange.mockImplementation((listener) => { state.listener = listener; return state.stopStatus })
+  socketService.subscribe.mockImplementation((planId, onMessage, onJoinError) => {
+    state.onMessage = onMessage
+    state.onJoinError = onJoinError
+    return state.unsubscribe
+  })
+  state.setStatus = async (status) => act(async () => { state.status = status; state.listener(status) })
+  state.receive = async (incoming) => act(async () => state.onMessage(incoming))
+  return state
+}
+
+const setup = async (options = {}) => {
+  const view = await renderHook(() => useChat('p1', { user: USER, ...options }))
+  await waitFor(() => expect(view.result.current.status).not.toBe(CHAT_STATUS.LOADING))
+  return view
+}
+
+beforeEach(() => {
+  listMessages.mockReset().mockResolvedValue(page([2, 1]))
+  sendMessage.mockReset()
+  socketService.sendChatMessage.mockReset()
+  socket = fakeSocket()
+})
+
+describe('useChat: carga e historial', () => {
+  it('arranca cargando y muestra la primera página del más nuevo al más viejo', async () => {
+    const pending = deferred()
+    listMessages.mockReturnValueOnce(pending.promise)
+
+    const { result } = await renderHook(() => useChat('p1', { user: USER }))
+    expect(result.current).toMatchObject({ status: CHAT_STATUS.LOADING, messages: [] })
+    await act(async () => pending.resolve(page([1, 2, 3], 'c1')))
+
+    expect(result.current.status).toBe(CHAT_STATUS.READY)
+    expect(texts(result)).toEqual(['Mensaje 3', 'Mensaje 2', 'Mensaje 1'])
+    expect(result.current.hasMore).toBe(true)
+    expect(listMessages).toHaveBeenCalledWith('p1', { limit: 30 })
+  })
+
+  it('un chat sin mensajes queda listo y vacío', async () => {
+    listMessages.mockResolvedValue({ items: [], nextCursor: null })
+
+    const { result } = await setup()
+
+    expect(result.current).toMatchObject({ status: CHAT_STATUS.READY, messages: [], hasMore: false })
+  })
+
+  it('un error en la primera carga pasa a error y reload lo reintenta', async () => {
+    listMessages.mockRejectedValueOnce(apiError(403, 'FORBIDDEN')).mockResolvedValueOnce(page([1]))
+
+    const { result } = await setup()
+    expect(result.current.status).toBe(CHAT_STATUS.ERROR)
+    expect(result.current.error).toMatchObject({ code: 'FORBIDDEN' })
+
+    await act(async () => result.current.reload())
+
+    await waitFor(() => expect(result.current.status).toBe(CHAT_STATUS.READY))
+    expect(texts(result)).toEqual(['Mensaje 1'])
+  })
+
+  it('loadOlder pide la página siguiente con el cursor y la agrega al final', async () => {
+    listMessages.mockResolvedValueOnce(page([4, 3], 'c1')).mockResolvedValueOnce(page([2, 1]))
+    const { result } = await setup()
+
+    await act(async () => result.current.loadOlder())
+
+    expect(listMessages).toHaveBeenLastCalledWith('p1', { limit: 30, cursor: 'c1' })
+    expect(texts(result)).toEqual(['Mensaje 4', 'Mensaje 3', 'Mensaje 2', 'Mensaje 1'])
+    expect(result.current).toMatchObject({ hasMore: false, isLoadingOlder: false })
+  })
+
+  it('loadOlder no hace nada sin más páginas ni mientras ya está cargando', async () => {
+    const olderPage = deferred()
+    listMessages.mockResolvedValueOnce(page([3], 'c1')).mockReturnValueOnce(olderPage.promise)
+    const { result } = await setup()
+
+    await act(async () => { result.current.loadOlder(); result.current.loadOlder() })
+    expect(listMessages).toHaveBeenCalledTimes(2)
+    expect(result.current.isLoadingOlder).toBe(true)
+    await act(async () => olderPage.resolve(page([1])))
+    await act(async () => result.current.loadOlder())
+
+    expect(listMessages).toHaveBeenCalledTimes(2)
+  })
+
+  it('si falla cargar mensajes anteriores conserva la lista y deja reintentar', async () => {
+    listMessages.mockResolvedValueOnce(page([3], 'c1')).mockRejectedValueOnce(networkError()).mockResolvedValueOnce(page([2]))
+    const { result } = await setup()
+
+    await act(async () => result.current.loadOlder())
+    expect(result.current.loadOlderError).toMatchObject({ code: CLIENT_ERROR_CODES.NETWORK_ERROR })
+    expect(texts(result)).toEqual(['Mensaje 3'])
+    await act(async () => result.current.loadOlder())
+
+    expect(result.current.loadOlderError).toBeNull()
+    expect(texts(result)).toEqual(['Mensaje 3', 'Mensaje 2'])
+  })
+})
+
+describe('useChat: tiempo real', () => {
+  it('se suscribe a la sala del plan y suelta la suscripción al desmontar', async () => {
+    const { unmount } = await setup()
+
+    expect(socketService.subscribe).toHaveBeenCalledWith('p1', expect.any(Function), expect.any(Function))
+    await unmount()
+
+    expect(socket.unsubscribe).toHaveBeenCalled()
+    expect(socket.stopStatus).toHaveBeenCalled()
+  })
+
+  it('un mensaje nuevo del socket aparece arriba, y repetido no se duplica', async () => {
+    const { result } = await setup()
+
+    await socket.receive(message(3))
+    await socket.receive(message(3))
+
+    expect(texts(result)).toEqual(['Mensaje 3', 'Mensaje 2', 'Mensaje 1'])
+  })
+
+  it('si el servidor no deja entrar a la sala (perdió el acceso) pasa a error', async () => {
+    const { result } = await setup()
+
+    await act(async () => socket.onJoinError(apiError(0, 'FORBIDDEN')))
+
+    expect(result.current).toMatchObject({ status: CHAT_STATUS.ERROR, error: { code: 'FORBIDDEN' } })
+  })
+
+  it('al conectarse (o reconectarse) vuelve a pedir la primera página y la fusiona', async () => {
+    const { result } = await setup()
+    await socket.setStatus('connected')
+    await socket.setStatus('reconnecting')
+    listMessages.mockResolvedValueOnce(page([4, 3, 2], 'c9'))
+
+    await socket.setStatus('connected')
+
+    await waitFor(() => expect(texts(result)).toEqual(['Mensaje 4', 'Mensaje 3', 'Mensaje 2', 'Mensaje 1']))
+    expect(listMessages).toHaveBeenCalledTimes(3)
+  })
+
+  it('si en la recuperación hay un hueco descarta lo anterior y toma el cursor de la página nueva', async () => {
+    listMessages.mockResolvedValueOnce(page([2, 1], null))
+    const { result } = await setup()
+    listMessages.mockResolvedValueOnce(page([9, 8], 'c8'))
+
+    await socket.setStatus('connected')
+
+    await waitFor(() => expect(texts(result)).toEqual(['Mensaje 9', 'Mensaje 8']))
+    expect(result.current.hasMore).toBe(true)
+  })
+
+  it('si la recuperación falla (sin red) conserva lo que se ve', async () => {
+    const { result } = await setup()
+    listMessages.mockRejectedValueOnce(networkError())
+
+    await socket.setStatus('connected')
+
+    expect(result.current.status).toBe(CHAT_STATUS.READY)
+    expect(texts(result)).toEqual(['Mensaje 2', 'Mensaje 1'])
+  })
+})
+
+describe('useChat: polling cuando el WebSocket no se sostiene', () => {
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  it('con el socket no disponible pide la primera página cada 5 s y se detiene al reconectar', async () => {
+    const { result } = await setup()
+    expect(result.current.isPolling).toBe(false)
+    listMessages.mockClear()
+
+    await socket.setStatus('unavailable')
+    expect(result.current.isPolling).toBe(true)
+    listMessages.mockResolvedValue(page([3, 2, 1]))
+    await act(async () => jest.advanceTimersByTimeAsync(POLL_INTERVAL_MS))
+    expect(listMessages).toHaveBeenCalledTimes(1)
+    expect(texts(result)).toEqual(['Mensaje 3', 'Mensaje 2', 'Mensaje 1'])
+    await act(async () => jest.advanceTimersByTimeAsync(POLL_INTERVAL_MS))
+    expect(listMessages).toHaveBeenCalledTimes(2)
+
+    await socket.setStatus('connected')
+    // Una más por la recuperación al conectar; después, silencio.
+    const afterReconnect = listMessages.mock.calls.length
+    await act(async () => jest.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 3))
+
+    expect(result.current.isPolling).toBe(false)
+    expect(listMessages).toHaveBeenCalledTimes(afterReconnect)
+  })
+
+  it('con la pantalla fuera de foco no hace polling', async () => {
+    const { result } = await setup({ isActive: false })
+    listMessages.mockClear()
+
+    await socket.setStatus('unavailable')
+    await act(async () => jest.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2))
+
+    expect(result.current.isPolling).toBe(true)
+    expect(listMessages).not.toHaveBeenCalled()
+  })
+
+  it('al desmontar detiene el polling', async () => {
+    const { unmount } = await setup()
+    await socket.setStatus('unavailable')
+    await unmount()
+    listMessages.mockClear()
+
+    await act(async () => jest.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2))
+
+    expect(listMessages).not.toHaveBeenCalled()
+  })
+
+  it('si el polling descubre que perdió el acceso pasa a error', async () => {
+    const { result } = await setup()
+    await socket.setStatus('unavailable')
+    listMessages.mockRejectedValue(apiError(403, 'FORBIDDEN'))
+
+    await act(async () => jest.advanceTimersByTimeAsync(POLL_INTERVAL_MS))
+
+    expect(result.current).toMatchObject({ status: CHAT_STATUS.ERROR, error: { code: 'FORBIDDEN' } })
+  })
+})
+
+describe('useChat: enviar', () => {
+  const SAVED = (clientId) => message(3, { sender: USER, text: 'Hola', clientId })
+
+  it('muestra el mensaje como pendiente de inmediato y lo confirma con el ack del socket', async () => {
+    const ack = deferred()
+    socketService.sendChatMessage.mockReturnValue(ack.promise)
+    const { result } = await setup()
+
+    await act(async () => result.current.send('  Hola  '))
+
+    const [pending] = result.current.messages
+    expect(pending).toMatchObject({ text: 'Hola', status: 'pending', sender: USER })
+    expect(pending.clientId).toMatch(/^[A-Za-z0-9_-]{1,64}$/)
+    expect(socketService.sendChatMessage).toHaveBeenCalledWith({ planId: 'p1', text: 'Hola', clientId: pending.clientId })
+
+    await act(async () => ack.resolve(SAVED(pending.clientId)))
+
+    expect(result.current.messages).toHaveLength(3)
+    expect(result.current.messages[0]).toMatchObject({ id: 'm3', status: 'sent' })
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('si el broadcast llega antes que el ack, reemplaza al pendiente y el ack no lo duplica', async () => {
+    const ack = deferred()
+    socketService.sendChatMessage.mockReturnValue(ack.promise)
+    const { result } = await setup()
+    await act(async () => result.current.send('Hola'))
+    const { clientId } = result.current.messages[0]
+
+    await socket.receive(SAVED(clientId))
+    expect(result.current.messages.filter((item) => item.text === 'Hola')).toHaveLength(1)
+    await act(async () => ack.resolve(SAVED(clientId)))
+
+    expect(result.current.messages).toHaveLength(3)
+    expect(result.current.messages[0].status).toBe('sent')
+  })
+
+  it('no manda mensajes vacíos o con solo espacios', async () => {
+    const { result } = await setup()
+
+    await act(async () => { result.current.send('   '); result.current.send('') })
+
+    expect(socketService.sendChatMessage).not.toHaveBeenCalled()
+    expect(result.current.messages).toHaveLength(2)
+  })
+
+  it.each([
+    ['no hay conexión', CLIENT_ERROR_CODES.NETWORK_ERROR],
+    ['el ack no llega', CLIENT_ERROR_CODES.TIMEOUT]
+  ])('si %s lo manda por REST con el MISMO clientId', async (_case, code) => {
+    socketService.sendChatMessage.mockRejectedValue(apiError(0, code))
+    sendMessage.mockImplementation(async (planId, { clientId }) => SAVED(clientId))
+    const { result } = await setup()
+
+    await act(async () => result.current.send('Hola'))
+
+    const socketCall = socketService.sendChatMessage.mock.calls[0][0]
+    expect(sendMessage).toHaveBeenCalledWith('p1', { text: 'Hola', clientId: socketCall.clientId })
+    expect(result.current.messages[0]).toMatchObject({ id: 'm3', status: 'sent' })
+  })
+
+  it('un error del servidor por el socket (p. ej. FORBIDDEN) marca el mensaje como fallido sin reintentar por REST', async () => {
+    socketService.sendChatMessage.mockRejectedValue(apiError(0, 'FORBIDDEN'))
+    const { result } = await setup()
+
+    await act(async () => result.current.send('Hola'))
+
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(result.current.messages[0]).toMatchObject({ status: 'failed', error: { code: 'FORBIDDEN' } })
+  })
+
+  it('si también falla el REST queda fallido y retrySend reintenta con el mismo clientId', async () => {
+    socketService.sendChatMessage.mockRejectedValue(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
+    sendMessage.mockRejectedValueOnce(networkError()).mockImplementationOnce(async (planId, { clientId }) => SAVED(clientId))
+    const { result } = await setup()
+    await act(async () => result.current.send('Hola'))
+    expect(result.current.messages[0]).toMatchObject({ status: 'failed', error: { code: CLIENT_ERROR_CODES.NETWORK_ERROR } })
+    const { clientId } = result.current.messages[0]
+
+    await act(async () => result.current.retrySend(clientId))
+
+    expect(sendMessage).toHaveBeenNthCalledWith(2, 'p1', { text: 'Hola', clientId })
+    expect(result.current.messages[0]).toMatchObject({ id: 'm3', status: 'sent' })
+    expect(result.current.messages.filter((item) => item.text === 'Hola')).toHaveLength(1)
+  })
+
+  it('reload conserva los mensajes que no se pudieron mandar', async () => {
+    socketService.sendChatMessage.mockRejectedValue(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
+    sendMessage.mockRejectedValue(networkError())
+    const { result } = await setup()
+    await act(async () => result.current.send('Sin red'))
+
+    await act(async () => result.current.reload())
+
+    expect(result.current.status).toBe(CHAT_STATUS.READY)
+    expect(result.current.messages[0]).toMatchObject({ text: 'Sin red', status: 'failed' })
+    expect(texts(result)).toEqual(['Sin red', 'Mensaje 2', 'Mensaje 1'])
+  })
+
+  it('retrySend vuelve a pendiente mientras reintenta', async () => {
+    socketService.sendChatMessage.mockRejectedValueOnce(apiError(0, 'FORBIDDEN'))
+    const retry = deferred()
+    socketService.sendChatMessage.mockReturnValueOnce(retry.promise)
+    const { result } = await setup()
+    await act(async () => result.current.send('Hola'))
+    const { clientId } = result.current.messages[0]
+
+    await act(async () => result.current.retrySend(clientId))
+
+    expect(result.current.messages[0]).toMatchObject({ status: 'pending', error: null })
+    await act(async () => retry.resolve(SAVED(clientId)))
+    expect(result.current.messages[0].status).toBe('sent')
+  })
+
+  it('retrySend ignora un mensaje que no está fallido', async () => {
+    socketService.sendChatMessage.mockReturnValue(new Promise(() => {}))
+    const { result } = await setup()
+    await act(async () => result.current.send('Hola'))
+    const { clientId } = result.current.messages[0]
+
+    await act(async () => { result.current.retrySend(clientId); result.current.retrySend('inexistente') })
+
+    expect(socketService.sendChatMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('un fallido que en realidad guardó el servidor se reemplaza cuando llega por el socket o al recuperar', async () => {
+    socketService.sendChatMessage.mockRejectedValue(apiError(0, CLIENT_ERROR_CODES.TIMEOUT))
+    sendMessage.mockRejectedValue(networkError())
+    const { result } = await setup()
+    await act(async () => result.current.send('Hola'))
+    const { clientId } = result.current.messages[0]
+    expect(result.current.messages[0].status).toBe('failed')
+
+    await socket.receive(SAVED(clientId))
+
+    expect(result.current.messages.filter((item) => item.text === 'Hola')).toEqual([expect.objectContaining({ id: 'm3', status: 'sent' })])
+  })
+})

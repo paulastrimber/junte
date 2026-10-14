@@ -28,8 +28,8 @@
 
 ## App
 
-- [ ] **S5-MOB-01 · `services/socket.js`**: conexión con token, reconexión con token nuevo tras refresh, recuperación de historial por REST, fallback a polling.
-- [ ] **S5-MOB-02 · ChatScreen**: `FlatList` invertida, envío con estado "pendiente" hasta el ack, paginación hacia atrás.
+- [x] **S5-MOB-01 · `services/socket.js`**: conexión con token, reconexión con token nuevo tras refresh, recuperación de historial por REST, fallback a polling.
+- [x] **S5-MOB-02 · ChatScreen**: `FlatList` invertida, envío con estado "pendiente" hasta el ack, paginación hacia atrás.
 - [ ] **S5-MOB-03 · `services/push.js`**: permiso, `getDevicePushTokenAsync()` (token FCM nativo), registro en `/devices`, baja al cerrar sesión, apertura del plan al tocar la notificación.
 - [ ] **S5-MOB-04 · Development build** con `google-services.json` y prueba en teléfono real.
 - [ ] **S5-MOB-05 · Notas de voz / contactos** según decisión.
