@@ -4,7 +4,7 @@
 #   bash front-service/tests/smoke.sh [base_url]        (por defecto http://localhost:8080)
 #
 # Verifica: /health, X-Request-Id (siempre generado por Nginx; el del cliente no llega al back), proxy /api/v1/* → /internal/*,
-# /internal no publicado, límite de body, 429 JSON tras una ráfaga en /api/v1/auth/login,
+# /internal no publicado, upgrade a WebSocket de Socket.io (y long-polling rechazado), límite de body, 429 JSON tras una ráfaga en /api/v1/auth/login,
 # que las variantes de esa URL y /auth/register comparten el límite estricto, que /auth/refresh NO lo
 # comparte (usa la zona general), que un X-Forwarded-For de un cliente externo no evade el límite y que
 # el límite es por IP real.
@@ -159,6 +159,20 @@ if [ "$(status internal)" = 404 ] && grep -q '"code":"NOT_FOUND"' "$TMP/internal
 else
   fail "GET /internal/health → $(status internal), se esperaba 404" "$(body internal | head -c 200)"
 fi
+
+# ── WebSocket (Socket.io) ────────────────────────────────────────────
+section 'WebSocket /api/v1/socket.io → back /internal/socket.io'
+# Handshake de WebSocket de Engine.IO: el back responde 101 si Nginx pasa Upgrade/Connection. La autenticación de
+# Socket.io viaja después, dentro del WebSocket, así que esto no necesita token. Después del 101 la conexión queda
+# abierta: curl corta por --max-time y el código igual queda registrado.
+ws_status="$(curl -sS --http1.1 --max-time 3 -o /dev/null -w '%{http_code}' \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
+  -H "Sec-WebSocket-Key: $(head -c 16 /dev/urandom | base64)" \
+  "$BASE_URL/api/v1/socket.io/?EIO=4&transport=websocket" 2>/dev/null)"
+[ "$ws_status" = 101 ] && ok "upgrade a WebSocket → 101 del back" || fail "upgrade a WebSocket → $ws_status, se esperaba 101"
+request ws_polling "$BASE_URL/api/v1/socket.io/?EIO=4&transport=polling"
+[ "$(status ws_polling)" = 400 ] && ok "long-polling deshabilitado (solo WebSocket, ADR-0003) → 400" \
+  || fail "long-polling → $(status ws_polling), se esperaba 400 (solo WebSocket)"
 
 # ── Límite de body ───────────────────────────────────────────────────
 section 'client_max_body_size'

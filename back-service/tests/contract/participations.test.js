@@ -209,6 +209,14 @@ describe('reactivación de una inscripción cancelada', () => {
 })
 
 describe('GET /plans/:id/participants', () => {
+  it('400 si el cursor trae un instante fuera de rango (no un 500)', async () => {
+    const { beto, plan, joinPath } = await scenario()
+    await beto.api.post(joinPath)
+    const cursor = Buffer.from(JSON.stringify({ j: 9007199254740991, i: '0123456789abcdef01234567' })).toString('base64url')
+
+    expectValidationError(await beto.api.get(`/plans/${plan.id}/participants?cursor=${cursor}`), expect)
+  })
+
   it('200 paginado con id, nombre, foto y reputación de los anotados activos, por orden de inscripción', async () => {
     const { signUp, clock, ana, beto, plan, joinPath } = await scenario()
     const caro = await signUp({ name: 'Caro' })

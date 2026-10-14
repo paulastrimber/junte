@@ -38,7 +38,7 @@ services:
       start_interval: 1s
     restart: unless-stopped
 
-  back:
+  back: &back
     build:
       context: ../back-service
       target: dev
@@ -82,6 +82,15 @@ services:
       start_period: 60s
       start_interval: 2s
     restart: unless-stopped
+
+  # Segunda instancia del back, solo con `--profile scale` (task chat:two-instances). Comparte Mongo y Redis:
+  # sirve para probar que un mensaje del chat cruza de una instancia a otra (adaptador de Redis de Socket.io)
+  # y que los jobs corren una sola vez por ciclo. Nginx sigue apuntando solo a `back`.
+  back-2:
+    <<: *back
+    profiles: [scale]
+    ports:
+      - "3001:3000"
 
   nginx:
     image: nginx:1.30.5-alpine

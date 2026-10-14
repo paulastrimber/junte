@@ -69,13 +69,15 @@ Estos casos salen del informe (7.5) y de las reglas de negocio. Cada uno tiene s
 - [x] `GET /plans` y `POST /feed` no traen los planes propios ni aquellos con inscripción activa. *(tests/contract/plans.test.js, tests/contract/feed.test.js)*
 
 **Chat y reportes**
-- [ ] No participante → 403 por REST y por Socket.io.
-- [ ] Texto vacío o > 2000 → 400.
-- [ ] Reintento de `chat:send` con el mismo `clientId` → un solo mensaje.
+- [x] No participante → 403 por REST y por Socket.io. *(tests/contract/messages.test.js, chat-socket.test.js; también después de darse de baja, y la baja lo saca de la sala)*
+- [x] Texto vacío o > 2000 → 400. *(también de solo espacios; por REST y por socket)*
+- [x] Reintento de `chat:send` con el mismo `clientId` → un solo mensaje. *(también reintentos simultáneos por REST y socket + REST con el mismo `clientId`; índice en tests/integration/indexes-and-validators.test.js)*
+- [ ] Reportes (S5/S6).
+- [ ] Un mensaje enviado a la instancia A llega a un cliente conectado a la B. *(`task chat:two-instances` contra docker-compose; falta correrlo)*
 
 **Contrato general**
 - [ ] Todo error tiene `{ code, message, requestId }` y nunca stack ni detalles internos.
-- [x] Paginación: `limit` > 100 → 400; último page con `nextCursor: null`; sin duplicados ni saltos entre páginas. *(listado cronológico y feed por ranking: tests/contract/plans.test.js y feed.test.js; falta repetirlo en el chat, S5)*
+- [x] Paginación: `limit` > 100 → 400; último page con `nextCursor: null`; sin duplicados ni saltos entre páginas. *(listado cronológico y feed por ranking: tests/contract/plans.test.js y feed.test.js; chat: tests/contract/messages.test.js)*
 
 **Planes y feed (S3)**
 - [x] Ranking: el plan con los mismos intereses y cerca queda primero; cambiar los pesos en la configuración cambia el orden. *(src/modules/feed/feed.scorers.test.js, feed.service.test.js, tests/contract/feed.test.js)*

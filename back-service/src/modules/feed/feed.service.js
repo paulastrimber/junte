@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto'
 import { RADIUS_KM } from '../../shared/geo.js'
 import { errors } from '../../shared/errors.js'
-import { decodeCursor, encodeCursor } from '../../shared/pagination.js'
+import { cursorInstantField, decodeCursor, encodeCursor } from '../../shared/pagination.js'
 import { z } from '../../shared/validation.js'
 import { rankPlans } from './feed.scorers.js'
 
@@ -17,7 +17,7 @@ export const MAX_CANDIDATES = 200
 
 const cursorSchema = z.strictObject({
   o: z.number().int().min(1).max(MAX_CANDIDATES), // posición en el ranking
-  t: z.number().int().nonnegative(), // asOf (ms)
+  t: cursorInstantField, // asOf (ms)
   f: z.string().regex(/^[0-9a-f]{16}$/) // huella de la consulta
 })
 

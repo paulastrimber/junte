@@ -38,8 +38,11 @@ function fromHttpClientError (err) {
   return new AppError('VALIDATION_ERROR', 'La solicitud no es válida')
 }
 
-/** @returns {AppError | null} null si el error no es previsto (→ 500 INTERNAL). */
-function toAppError (err) {
+/**
+ * También lo usan los handlers de Socket.io: mismo formato de error por los dos caminos.
+ * @returns {AppError | null} null si el error no es previsto (→ 500 INTERNAL).
+ */
+export function toAppError (err) {
   if (isAppError(err)) return err
   if (isZodError(err)) return fromZod(err)
   if (isHttpClientError(err)) return fromHttpClientError(err)

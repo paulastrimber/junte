@@ -100,7 +100,8 @@ Un **único registro por par** plan–usuario; una baja lo pasa a `cancelled` (c
 
 ### `messages`
 
-`planId`, `senderId` (del token), `text` (1–2000), `status` (`visible` \| `hidden`), `createdAt`.
+`planId`, `senderId` (del token), `type` (`text`; **➕ S5**, sin `type` cuenta como texto), `text` (1–2000, recortado), `status` (`visible` \| `hidden`), `clientId?`, `createdAt` (hora del servidor).
+`clientId` (**➕ S5**): clave de idempotencia que genera el teléfono (1–64 caracteres `[A-Za-z0-9_-]`, opcional). Con el índice único parcial `{ senderId, clientId }`, un reintento del mismo mensaje (por Socket.io o por REST) devuelve el que ya existía en lugar de crear otro.
 
 ### `reports`
 
@@ -123,6 +124,7 @@ Un **único registro por par** plan–usuario; una baja lo pasa a `cancelled` (c
 | `planParticipants` | `{ userId: 1, status: 1 }` | "Planes a los que voy" |
 | `checkIns` | `{ planId: 1, userId: 1 }` único | Una asistencia por persona |
 | `messages` | `{ planId: 1, createdAt: -1, _id: -1 }` | Paginación estable del chat |
+| `messages` | `{ senderId: 1, clientId: 1 }` único, parcial (`clientId` string) | Un reintento de envío no duplica el mensaje (**➕ S5**) |
 | `reports` | `{ status: 1, createdAt: 1 }` | Cola de moderación |
 | `deviceTokens` | `{ token: 1 }` único | Un registro por dispositivo |
 | `deviceTokens` | `{ userId: 1 }` | Enviar push a un usuario |

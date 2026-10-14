@@ -36,14 +36,14 @@ tasks:
     cmds: ['{{.COMPOSE}} up -d --build --wait']
 
   down:
-    desc: Detiene el entorno local
-    cmds: ['{{.COMPOSE}} down']
+    desc: Detiene el entorno local (también la segunda instancia del back, si se levantó)
+    cmds: ['{{.COMPOSE}} --profile scale down']
 
   reset:
     desc: Detiene y BORRA los datos locales, luego levanta, migra y siembra
     prompt: Esto borra la base local. ¿Continuar?
     cmds:
-      - '{{.COMPOSE}} down -v'
+      - '{{.COMPOSE}} --profile scale down -v'
       - task: up
       - task: db:migrate
       - task: db:seed
@@ -72,6 +72,12 @@ tasks:
     desc: Lint del back
     dir: '{{.BACK}}'
     cmds: [npm run lint]
+
+  chat:two-instances:
+    desc: Levanta una segunda instancia del back y comprueba que un mensaje del chat llega de una a la otra (S5-BE-05)
+    cmds:
+      - '{{.COMPOSE}} --profile scale up -d --build --wait back-2'
+      - node {{.BACK}}/scripts/chat-two-instances.js http://localhost:3000 http://localhost:3001
 
   # ── Base de datos (migrate-mongo) ────────────────────────────────
   db:migrate:

@@ -95,8 +95,8 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 
 ### Notas de voz y contactos
 **Problema:** el sprint 5 los menciona, pero no hay modelo (`messages` solo tiene `text`) ni endpoints.
-**Propuesta:** notas de voz = `messages.type: 'text'|'voice'` + `audioKey` en S3 por el mismo flujo de `uploads/presign`; contactos = solo invitar compartiendo un link del plan (sin subir contactos al back).
-**Bloquea:** S5.
+✅ **Decidido (2026-10-14, @mperez14ang):** se aprueba la propuesta: notas de voz = `messages.type: 'text'|'voice'` + `audioKey` en S3 por el mismo flujo de `uploads/presign`; contactos = solo invitar compartiendo un link del plan (sin subir contactos al back). **Se implementa después del chat de texto, en otro PR** (S5-BE-09 y S5-MOB-05). El chat de texto ya guarda `type: 'text'`, así que sumar `voice` no necesita backfill.
+**A definir al implementarlo:** duración y tamaño máximos del audio, formato (AAC/M4A), y si el link para compartir abre la app (deep link) o una página.
 
 ### Endpoints y métricas de administración
 **Problema:** `/admin` existe pero sus operaciones no.
@@ -146,7 +146,7 @@ Lo que apareció al implementar el sprint 1 y queda para revisar con el equipo.
 - **Validadores más estrictos que 07 (a confirmar):** `users.email` sin mayúsculas ni espacios (garantiza la normalización de la que depende el índice único) y `checkIns` con `additionalProperties: false` (impide guardar la ubicación del participante; el modelo usa `strict: 'throw'`). `participantCount ≤ capacity` se valida con `$expr` junto al `$jsonSchema`. Todos con `validationLevel: 'moderate'`.
 - **Backfill de `role`/`status` (ADR-0004):** no se escribió migración de backfill porque no hay entornos con usuarios previos; la colección nace con el validador que exige ambos campos. Si aparece una base vieja, agregar la migración de backfill de [migraciones.md](practicas/migraciones.md).
 - **Mongoose 9 depreca `{ new: true }`** en `findOneAndUpdate`: el ejemplo de 07 (patrón de inscripción) debería usar `{ returnDocument: 'after' }`.
-- **Idempotencia del chat (`clientId`):** [testing.md](practicas/testing.md) pide que reintentar `chat:send` con el mismo `clientId` cree un solo mensaje, pero `messages` no tiene `clientId` ni índice en 07. Definir antes de S5 (campo + índice único parcial `{ senderId, clientId }` por migración).
+- ✅ **Resuelto en S5 (decidido el 2026-10-14, @mperez14ang).** **Idempotencia del chat (`clientId`):** campo `clientId` opcional + índice único parcial `{ senderId, clientId }` por migración, **por Socket.io y por REST**: un reintento devuelve el mensaje ya creado (REST: 200 en lugar de 201). Ver [H](#h-notas-del-sprint-5-chat).
 - **Helpers para otros agentes:** `tests/helpers/db.js` (`useTestDb()` / `startDb` / `clearDb` / `stopDb`) y `tests/helpers/factories.js` (`makeUser`, `makePlan`, `makeParticipation`). `src/adapters/db/index.js` exporta además `getConnection()`; `src/adapters/db/migrations.js` expone `runMigrations`/`rollbackMigrations`/`migrationStatus` (no se llaman al arrancar la app).
 
 ### infra local + Nginx (Agente C)
@@ -345,3 +345,35 @@ Decisiones en [s4-decisiones.md](tareas/s4-decisiones.md) (2026-10-12, Paula). L
 
 ### Para investigar
 - **Aviso intermitente de consola en los tests de la app.** En dos corridas completas de `npm test` (mobile) del 2026-10-12, Jest mostró un bloque `● Console` en alguna suite, sin que fallara ningún test. No se pudo reproducir en las corridas siguientes (cinco seguidas, incluida la de `task ci`), así que no se sabe de qué suite viene ni qué dice. Sospecha sin confirmar: una actualización de estado fuera de `act()` en alguna pantalla con efectos asíncronos (las suites que se agregaron en S4 usan timers y promesas diferidas), que solo aparece cuando la máquina está cargada. Para encontrarlo: correr `npx jest --runInBand` varias veces guardando la salida completa, o hacer fallar los tests ante cualquier `console.error`/`console.warn` en un `setupFilesAfterEach`.
+
+## H. Notas del sprint 5: chat
+
+Decidido con @mperez14ang el 2026-10-14: el **chat completo** (S5-BE-01 a 05 y S5-NG-01 del lado local en el PR del back; S5-MOB-01 y 02 en el PR de la app, apilado sobre el del back); devices, FCM, avisos, recordatorio, `spotAlerts` y notas de voz van en PRs siguientes. `clientId` por socket y por REST ([idempotencia](#back-data-agente-b)); notas de voz aprobadas para después ([notas de voz](#notas-de-voz-y-contactos)). Lo que quedó abierto o se resolvió con la opción más chica:
+
+### Reglas que se resolvieron con la opción más chica
+- **El chat funciona en cualquier estado del plan** (abierto, cerrado, cancelado, completado o ya terminado) para quien tenga acceso: participante activo o creador. Alternativa: dejarlo de solo lectura cuando el plan se cancela o termina.
+- **El creador siempre tiene chat**, aunque no esté inscripto o se dé de baja.
+- **Darse de baja quita el acceso** (403) y saca al usuario de la sala en tiempo real en todas las instancias (sala `user:<id>`). Su historial anterior no se borra: si se vuelve a inscribir lo ve completo.
+- **El mismo `clientId` en otro plan** es 400 (no es un reintento). El mismo `clientId` de dos personas son dos mensajes.
+- **`chat:message` llega también a quien lo mandó** (la app fusiona por `id`/`clientId`); un reintento por `clientId` no se vuelve a emitir.
+- **`type: 'text'`** se guarda desde ahora para que las notas de voz no necesiten backfill. Sin `type` (mensajes de desarrollo anteriores) cuenta como texto.
+- **Forma del mensaje** (no estaba definida): `{ id, planId, sender, type, text, clientId, createdAt }`, con `sender` = vista pública del usuario ([06](arquitectura/06-api.md#chat)). `status` no sale para usuarios comunes.
+- **`chat:join` y una baja simultánea:** después de unir el socket a la sala se vuelve a verificar el permiso; si en el medio terminó una baja, sale de la sala y responde `FORBIDDEN`.
+- **Errores por socket:** el ack lleva `{ error: { code, message, requestId } }` con un `requestId` generado por evento (no hay header). Un usuario suspendido recibe `ACCOUNT_SUSPENDED` y se le cierra la conexión.
+
+### Para los próximos PRs de S5
+- **FCM (S5-BE-07, S5-MOB-03/04): no hay proyecto de Firebase todavía** (2026-10-14). Hace falta que alguien del equipo lo cree y cargue: `google-services.json` para el development build (EAS) y una cuenta de servicio para el back (Secrets Manager / `.env`, nunca en Git). Mientras tanto el adapter de FCM se puede hacer detrás de una interfaz con una implementación en memoria para desarrollo y tests.
+
+### Límites conocidos
+- **Sin rate limit de eventos de socket:** Nginx limita la conexión (upgrade), no los mensajes dentro del WebSocket. Un cliente podría mandar muchos `chat:send` seguidos. Propuesta: un límite por usuario en Redis (p. ej. 20 mensajes cada 10 s) si se ve abuso.
+- **Token vencido con la conexión abierta:** la conexión sigue hasta que se corta (límite ya aceptado en [08](arquitectura/08-tiempo-real-y-push.md#autenticación-y-autorización)); en cada evento sí se verifica que el usuario siga activo.
+- **A confirmar con el equipo (salió en la revisión):** con el socket abierto, un `logout` o `logout-all` no corta la conexión (en cada evento se mira que el usuario esté activo, no que la sesión siga vigente; igual que el HTTP, que no consulta `sessions`), y un usuario suspendido que solo escucha sigue recibiendo mensajes hasta que manda un evento o se reconecta. Propuesta si no se acepta: guardar el `sid` en el socket, verificar la sesión en cada evento, y que `logout-all` / la suspensión (S6) desconecten los sockets del usuario con `io.in('user:<id>').disconnectSockets()`.
+- **Cursores con un instante fuera de rango** (salió en la revisión): un cursor manipulado con un número que no entra en un `Date` daba 500 en todos los listados (planes, anotados, feed y chat). Ahora es 400 (`cursorInstantField` en `shared/pagination.js`).
+- **Sin Redis**, cada instancia emite solo a sus propios clientes; el resto ve los mensajes por el polling REST de la app.
+- **Moderación:** el evento `chat:hidden` y `PATCH /admin/messages/:id` son de S6; el historial ya filtra los `hidden`.
+
+### Sin probar
+- **Dos instancias reales con Redis** (criterio de aceptación de S5-BE-05): está la prueba (`task chat:two-instances`, segunda instancia en docker-compose con el perfil `scale`), pero no se corrió porque Docker no estaba levantado en la máquina de desarrollo. Sirve también para la prueba pendiente de S4-BE-08 (los jobs corren una sola vez con dos instancias).
+- **WebSocket a través de Nginx:** `smoke.sh` ahora verifica el upgrade (101) y que el long-polling esté rechazado (400); no se corrió contra el compose por la misma razón. Del lado de AWS (S5-NG-01) falta confirmar que una conexión ociosa 5 minutos sigue viva a través de los dos ALB.
+- **Contra el back real desde el teléfono**: ver las notas de la app (llegan con el PR de la app).
+

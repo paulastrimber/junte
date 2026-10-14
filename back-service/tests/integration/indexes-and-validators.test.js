@@ -53,6 +53,32 @@ describe('índices únicos', () => {
   })
 })
 
+describe('messages: idempotencia por clientId', () => {
+  const SENDER_ID = new mongoose.Types.ObjectId()
+  const message = (overrides) => ({ planId: new mongoose.Types.ObjectId(), senderId: SENDER_ID, text: 'Hola', status: 'visible', ...overrides })
+
+  it('rechaza dos mensajes del mismo remitente con el mismo clientId', async () => {
+    await raw('messages').insertOne(message({ clientId: 'c-1' }))
+
+    await expect(raw('messages').insertOne(message({ clientId: 'c-1' }))).rejects.toMatchObject({ code: 11000 })
+  })
+
+  it('los mensajes sin clientId no compiten entre sí (índice parcial)', async () => {
+    await raw('messages').insertMany([message(), message()])
+
+    expect(await raw('messages').countDocuments()).toBe(2)
+  })
+
+  it('rechaza un type que no es texto (las notas de voz todavía no existen)', async () => {
+    await expect(raw('messages').insertOne(message({ type: 'voice' }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+
+  it('rechaza un clientId con caracteres no permitidos o de más de 64', async () => {
+    await expect(raw('messages').insertOne(message({ clientId: 'con espacios' }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('messages').insertOne(message({ clientId: 'x'.repeat(65) }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+})
+
 describe('validadores $jsonSchema (sin pasar por Mongoose)', () => {
   it('rechaza participantCount mayor que capacity', async () => {
     const plan = await makePlan({ capacity: 2 })

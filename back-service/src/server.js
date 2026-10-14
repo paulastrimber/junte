@@ -39,8 +39,10 @@ function registerShutdown (server) {
     }, SHUTDOWN_TIMEOUT_MS)
     forceExit.unref()
 
-    // Deja de aceptar conexiones y espera las requests en curso (Node ≥ 19 cierra las keep-alive ociosas).
-    await new Promise((resolve) => server.close(resolve))
+    // Corta los WebSocket (la app reconecta contra otra instancia) y deja de aceptar conexiones HTTP.
+    await container.closeSockets()
+    // Espera las requests en curso (Node ≥ 19 cierra las keep-alive ociosas). Si Socket.io ya lo cerró, no hace nada.
+    await new Promise((resolve) => server.close(() => resolve()))
     // Espera al ciclo de jobs en curso antes de cerrar las conexiones que usa.
     await container.scheduler.stop()
     await container.disconnect()
@@ -70,7 +72,8 @@ async function start () {
   const server = createServer(createApp(container.appDeps))
   server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS
   server.headersTimeout = HEADERS_TIMEOUT_MS
-  // TODO(S5-BE): montar Socket.io (path /internal/socket.io, adaptador Redis) sobre este server.
+  // Chat en tiempo real: Socket.io en /internal/socket.io con el adaptador de Redis (S5-BE-04).
+  await container.attachSockets(server)
 
   registerShutdown(server)
   await listen(server, config.port)

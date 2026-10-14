@@ -6,6 +6,7 @@ import { createLogger } from './adapters/logger.js'
 import { createArgon2Hasher } from './adapters/passwordHasher.js'
 import { connectRedis, disconnectRedis, pingRedis } from './adapters/redis.js'
 import { createRedisLock } from './adapters/redisLock.js'
+import { createRedisSocketAdapter } from './adapters/socketAdapter.js'
 import { createMemoryStorage, createS3Storage } from './adapters/storage/index.js'
 import { createScheduler } from './jobs/scheduler.js'
 import { createAuthenticate } from './middlewares/authenticate.js'
@@ -21,6 +22,9 @@ import {
 } from './modules/checkins/index.js'
 import { buildScorers, createFeedController, createFeedRoutes, createFeedService } from './modules/feed/index.js'
 import {
+  Message, createMessageController, createMessageRepository, createMessageRoutes, createMessageSerializer, createMessageService
+} from './modules/messages/index.js'
+import {
   Participation, createParticipationController, createParticipationRepository, createParticipationRoutes, createParticipationService
 } from './modules/participations/index.js'
 import {
@@ -28,6 +32,8 @@ import {
   isLive, matchesQrChallenge, pickFilters, planIdParams
 } from './modules/plans/index.js'
 import { createUploadController, createUploadRoutes, createUploadService } from './modules/uploads/index.js'
+import { createChatBroadcaster } from './sockets/chat.broadcaster.js'
+import { createSocketServer } from './sockets/index.js'
 import {
   User, createUserController, createUserRepository, createUserRoutes, createUserSerializer, createUserService, createUserValidators,
   isProfileComplete
@@ -55,17 +61,21 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const planRepo = createPlanRepository(Plan)
   const participationRepo = createParticipationRepository(Participation)
   const checkInRepo = createCheckInRepository(CheckIn)
+  const messageRepo = createMessageRepository(Message)
 
   const userService = createUserService({
     userRepo, storage, catalogs: catalogService, clock, logger, countNoShows: participationRepo.countNoShows
   })
   const userSerializer = createUserSerializer({ storage, clock })
+  const messageSerializer = createMessageSerializer({ serializeSender: userSerializer.serializePublic })
+  // Tiempo real del chat: se conecta al servidor Socket.io cuando arranca (attachSockets); antes no emite nada.
+  const chatBroadcaster = createChatBroadcaster({ serializeMessage: messageSerializer.serialize, logger })
 
   const planService = createPlanService({
     planRepo, userRepo, participationRepo, checkInRepo, catalogs: catalogService, isProfileComplete, storage, clock, logger
   })
   const participationService = createParticipationService({
-    plans: planService, planRepo, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger
+    plans: planService, planRepo, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger, chatAccess: chatBroadcaster
   })
   const checkInService = createCheckInService({
     plans: planService, isLive, matchesQrChallenge, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger
@@ -77,6 +87,9 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     planRepo, userRepo, participationRepo, attachCreators: planService.attachCreators, scorers: buildScorers(config.feed.weights), clock
   })
   const uploadService = createUploadService({ storage, plans: planService })
+  const messageService = createMessageService({
+    plans: planService, participationRepo, messageRepo, userRepo, broadcaster: chatBroadcaster, clock, logger
+  })
 
   const authenticate = createAuthenticate({ authService })
 
@@ -88,6 +101,7 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const feedController = createFeedController({ feedService, planSerializer, pickFilters })
   const participationController = createParticipationController({ participationService, serializeParticipant: userSerializer.serializePublic })
   const checkInController = createCheckInController({ checkInService })
+  const messageController = createMessageController({ messageService, messageSerializer })
 
   const routes = [
     { path: '/auth', router: createAuthRoutes({ authController, authenticate }) },
@@ -100,6 +114,7 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     // Inscripciones y check-in cuelgan de /plans/:id.
     { path: '/plans', router: createParticipationRoutes({ participationController, planIdParams, authenticate }) },
     { path: '/plans', router: createCheckInRoutes({ checkInController, planIdParams, authenticate }) },
+    { path: '/plans', router: createMessageRoutes({ messageController, planIdParams, authenticate }) },
     { path: '/feed', router: createFeedRoutes({ feedController, authenticate }) }
   ]
 
@@ -122,6 +137,9 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     participationService,
     checkInService,
     attendanceService,
+    messageService,
+    messageSerializer,
+    chatBroadcaster,
     userSerializer,
     userRepo,
     sessionRepo
@@ -145,9 +163,12 @@ export function createContainer (config) {
   if (!config.storage) logger.warn('S3_BUCKET/AWS_REGION not set: using in-memory storage (photos are not persisted)')
 
   /** Routers de los módulos, montados bajo /internal por createApp. */
-  const { routes, jobs } = buildModules({ config, logger, clock, passwordHasher: createArgon2Hasher(), storage })
+  const modules = buildModules({ config, logger, clock, passwordHasher: createArgon2Hasher(), storage })
+  const { routes, jobs } = modules
 
   let redis = null
+  let io = null
+  let socketAdapter = null
   const scheduler = createScheduler({ jobs, lock: createRedisLock(() => redis), logger })
 
   return {
@@ -170,8 +191,35 @@ export function createContainer (config) {
     /** Jobs periódicos (cierre de asistencia y de planes). Se arranca después del `listen` y se frena al apagar. */
     scheduler,
 
+    /**
+     * Monta Socket.io (chat) sobre el servidor HTTP, con el adaptador de Redis para que un mensaje llegue a los
+     * clientes conectados a cualquier instancia. Se llama después de `connect`.
+     * @param {import('node:http').Server} httpServer
+     */
+    async attachSockets (httpServer) {
+      socketAdapter = await createRedisSocketAdapter(redis, { logger })
+      io = createSocketServer({
+        httpServer,
+        authService: modules.authService,
+        messageService: modules.messageService,
+        messageSerializer: modules.messageSerializer,
+        broadcaster: modules.chatBroadcaster,
+        logger,
+        adapter: socketAdapter.adapter
+      })
+    },
+
+    /** Corta las conexiones de Socket.io (los clientes reconectan contra otra instancia). Nunca lanza. */
+    async closeSockets () {
+      if (!io) return
+      io.disconnectSockets(true)
+      await new Promise((resolve) => io.close(() => resolve()))
+      io = null
+    },
+
     /** Cierra las conexiones. Nunca lanza: loguea lo que falle y sigue con el resto. */
     async disconnect () {
+      if (socketAdapter) await socketAdapter.close()
       const results = await Promise.allSettled([disconnectRedis(), disconnectDb()])
       results
         .filter((result) => result.status === 'rejected')
