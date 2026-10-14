@@ -17,14 +17,20 @@ const UNAUTHORIZED = 401
  */
 export function createAuthService ({ tokenStorage, api, deviceLabel }) {
   const expiredListeners = new Set()
+  const endedListeners = new Set()
+  let refreshInFlight = null
+
+  /** La sesión local terminó (logout, logout-all o sesión vencida): quien guarda estado de la sesión (el socket) lo suelta. */
+  function notifyEnded () {
+    endedListeners.forEach((listener) => listener())
+  }
 
   async function storeSession ({ user, accessToken, refreshToken }) {
     await tokenStorage.save({ accessToken, refreshToken })
     return user
   }
 
-  /** Renueva el par de tokens. Un 401 del servidor significa que la sesión terminó: se borra la local. */
-  async function refreshSession () {
+  async function renewTokens () {
     const refreshToken = tokenStorage.getRefreshToken()
     if (!refreshToken) throw new ApiError({ status: UNAUTHORIZED, code: 'UNAUTHENTICATED' })
     try {
@@ -35,9 +41,20 @@ export function createAuthService ({ tokenStorage, api, deviceLabel }) {
     }
   }
 
+  /**
+   * Renueva el par de tokens. Un 401 del servidor significa que la sesión terminó: se borra la local.
+   * Un solo refresh en vuelo para toda la app (HTTP y socket): el refresh token rota, y dos canjes a la vez
+   * dejarían al segundo con un token ya usado.
+   */
+  function refreshSession () {
+    refreshInFlight ??= renewTokens().finally(() => { refreshInFlight = null })
+    return refreshInFlight
+  }
+
   /** La sesión no se puede renovar: se borra y se avisa para volver al login. */
   async function handleSessionExpired (error) {
     await tokenStorage.clear()
+    notifyEnded()
     expiredListeners.forEach((listener) => listener(error))
   }
 
@@ -78,12 +95,14 @@ export function createAuthService ({ tokenStorage, api, deviceLabel }) {
         // Sin conexión o sesión ya cerrada: igual se cierra acá. El servidor la deja vencer.
       }
       await tokenStorage.clear()
+      notifyEnded()
     },
 
     /** Cierra todas las sesiones. Si el servidor no responde NO se cierra nada: el usuario tiene que saberlo. */
     async logoutAll () {
       await api.logoutAll()
       await tokenStorage.clear()
+      notifyEnded()
     },
 
     refreshSession,
@@ -93,6 +112,12 @@ export function createAuthService ({ tokenStorage, api, deviceLabel }) {
     onSessionExpired (listener) {
       expiredListeners.add(listener)
       return () => expiredListeners.delete(listener)
+    },
+
+    /** @param {() => void} listener Se llama cada vez que la sesión local termina. @returns {() => void} cancelar suscripción */
+    onSessionEnded (listener) {
+      endedListeners.add(listener)
+      return () => endedListeners.delete(listener)
     },
 
     /** Lo que el cliente HTTP necesita de la sesión (ver configureApiAuth). */

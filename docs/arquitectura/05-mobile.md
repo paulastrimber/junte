@@ -40,7 +40,7 @@ mobile/
       api/plans.js         # GET/POST /plans, GET/PATCH /plans/:id, GET /plans/filters
       api/feed.js          # POST /feed (cercanía + recomendación)
       calendar.js          # expo-calendar: franjas ocupadas (solo inicio y fin) para el feed
-      socket.js            # socket.io-client
+      socket.js            # socket.io-client: una conexión para toda la app, salas, ack con timeout y estado de la conexión
       push.js              # permisos + registro del token en POST /devices
       location.js          # expo-location: permiso, posición actual [lng, lat], posición precisa para el check-in y búsqueda de direcciones
       camera.js            # expo-camera: permiso para leer el QR de asistencia
@@ -83,8 +83,11 @@ mobile/
 
 ## Tiempo real y push
 
-- `socket.io-client` con `path: '/api/v1/socket.io'`, `transports: ['websocket']` y `auth: { token }`. Al reconectar, se pide el historial por REST desde el último mensaje conocido.
-- Si el WebSocket no se puede sostener, se pasa a polling de `GET /plans/:id/messages`.
+- `socket.io-client` con `path: '/api/v1/socket.io'`, `transports: ['websocket']` y `auth` como función (se evalúa en cada intento, así cada reconexión lleva el token vigente). Una sola conexión para toda la app (`services/socket.js`): se abre al entrar al primer chat y se cierra al salir del último, al cerrar sesión o al vencerse (`authService.onSessionEnded`).
+- Un `connect_error` con `TOKEN_EXPIRED`/`UNAUTHENTICATED` renueva la sesión **una vez** con el mismo refresh único que usa el cliente HTTP (`authService.refreshSession` es *single-flight*: el refresh token rota y dos canjes a la vez cerrarían la sesión) y reconecta; `ACCOUNT_SUSPENDED` o un segundo rechazo terminan la sesión.
+- Al (re)conectar vuelve a hacer `chat:join` de las salas abiertas y `useChat` pide la primera página por REST y la fusiona por `id`/`clientId`.
+- `useChat` muestra el mensaje propio como pendiente, lo manda por `chat:send` y, si no hay conexión o el ack no llega en 8 s, por `POST /plans/:id/messages` con el mismo `clientId` (el back no lo duplica). Un error del servidor (permiso, validación) lo deja "No se envió · Reintentar".
+- Si el WebSocket falla 3 veces seguidas, `useChat` pasa a polling de `GET /plans/:id/messages` cada 5 s mientras la pantalla está activa, y lo avisa en un banner.
 - Push: como el back envía directo por FCM, el token se obtiene con `getDevicePushTokenAsync()` (token nativo FCM), **no** con el token de Expo Push. Se registra en `POST /devices` y se borra con `DELETE /devices/:token` al cerrar sesión.
 - Push solo se prueba en un **development build** (Expo Go no lo soporta).
 
