@@ -348,7 +348,7 @@ Decisiones en [s4-decisiones.md](tareas/s4-decisiones.md) (2026-10-12, Paula). L
 
 ## H. Notas del sprint 5: chat
 
-Decidido con @mperez14ang el 2026-10-14: este PR es el **chat completo** (S5-BE-01 a 05, S5-NG-01 del lado local, S5-MOB-01 y 02); devices, FCM, avisos, recordatorio, `spotAlerts` y notas de voz van en PRs siguientes. `clientId` por socket y por REST ([idempotencia](#back-data-agente-b)); notas de voz aprobadas para después ([notas de voz](#notas-de-voz-y-contactos)). Lo que quedó abierto o se resolvió con la opción más chica:
+Decidido con @mperez14ang el 2026-10-14: el **chat completo** (S5-BE-01 a 05 y S5-NG-01 del lado local en el PR del back; S5-MOB-01 y 02 en el PR de la app, apilado sobre el del back); devices, FCM, avisos, recordatorio, `spotAlerts` y notas de voz van en PRs siguientes. `clientId` por socket y por REST ([idempotencia](#back-data-agente-b)); notas de voz aprobadas para después ([notas de voz](#notas-de-voz-y-contactos)). Lo que quedó abierto o se resolvió con la opción más chica:
 
 ### Reglas que se resolvieron con la opción más chica
 - **El chat funciona en cualquier estado del plan** (abierto, cerrado, cancelado, completado o ya terminado) para quien tenga acceso: participante activo o creador. Alternativa: dejarlo de solo lectura cuando el plan se cancela o termina.
@@ -358,6 +358,7 @@ Decidido con @mperez14ang el 2026-10-14: este PR es el **chat completo** (S5-BE-
 - **`chat:message` llega también a quien lo mandó** (la app fusiona por `id`/`clientId`); un reintento por `clientId` no se vuelve a emitir.
 - **`type: 'text'`** se guarda desde ahora para que las notas de voz no necesiten backfill. Sin `type` (mensajes de desarrollo anteriores) cuenta como texto.
 - **Forma del mensaje** (no estaba definida): `{ id, planId, sender, type, text, clientId, createdAt }`, con `sender` = vista pública del usuario ([06](arquitectura/06-api.md#chat)). `status` no sale para usuarios comunes.
+- **`chat:join` y una baja simultánea:** después de unir el socket a la sala se vuelve a verificar el permiso; si en el medio terminó una baja, sale de la sala y responde `FORBIDDEN`.
 - **Errores por socket:** el ack lleva `{ error: { code, message, requestId } }` con un `requestId` generado por evento (no hay header). Un usuario suspendido recibe `ACCOUNT_SUSPENDED` y se le cierra la conexión.
 
 ### Para los próximos PRs de S5
@@ -366,11 +367,13 @@ Decidido con @mperez14ang el 2026-10-14: este PR es el **chat completo** (S5-BE-
 ### Límites conocidos
 - **Sin rate limit de eventos de socket:** Nginx limita la conexión (upgrade), no los mensajes dentro del WebSocket. Un cliente podría mandar muchos `chat:send` seguidos. Propuesta: un límite por usuario en Redis (p. ej. 20 mensajes cada 10 s) si se ve abuso.
 - **Token vencido con la conexión abierta:** la conexión sigue hasta que se corta (límite ya aceptado en [08](arquitectura/08-tiempo-real-y-push.md#autenticación-y-autorización)); en cada evento sí se verifica que el usuario siga activo.
+- **A confirmar con el equipo (salió en la revisión):** con el socket abierto, un `logout` o `logout-all` no corta la conexión (en cada evento se mira que el usuario esté activo, no que la sesión siga vigente; igual que el HTTP, que no consulta `sessions`), y un usuario suspendido que solo escucha sigue recibiendo mensajes hasta que manda un evento o se reconecta. Propuesta si no se acepta: guardar el `sid` en el socket, verificar la sesión en cada evento, y que `logout-all` / la suspensión (S6) desconecten los sockets del usuario con `io.in('user:<id>').disconnectSockets()`.
+- **Cursores con un instante fuera de rango** (salió en la revisión): un cursor manipulado con un número que no entra en un `Date` daba 500 en todos los listados (planes, anotados, feed y chat). Ahora es 400 (`cursorInstantField` en `shared/pagination.js`).
 - **Sin Redis**, cada instancia emite solo a sus propios clientes; el resto ve los mensajes por el polling REST de la app.
 - **Moderación:** el evento `chat:hidden` y `PATCH /admin/messages/:id` son de S6; el historial ya filtra los `hidden`.
 
 ### Sin probar
 - **Dos instancias reales con Redis** (criterio de aceptación de S5-BE-05): está la prueba (`task chat:two-instances`, segunda instancia en docker-compose con el perfil `scale`), pero no se corrió porque Docker no estaba levantado en la máquina de desarrollo. Sirve también para la prueba pendiente de S4-BE-08 (los jobs corren una sola vez con dos instancias).
 - **WebSocket a través de Nginx:** `smoke.sh` ahora verifica el upgrade (101) y que el long-polling esté rechazado (400); no se corrió contra el compose por la misma razón. Del lado de AWS (S5-NG-01) falta confirmar que una conexión ociosa 5 minutos sigue viva a través de los dos ALB.
-- **Contra el back real desde el teléfono**: ver las notas de la app abajo.
+- **Contra el back real desde el teléfono**: ver las notas de la app (llegan con el PR de la app).
 
