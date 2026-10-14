@@ -35,15 +35,15 @@ back-service/
       participations/      # inscripciones: join / leave con transacción de cupo, reactivación y lista de anotados
       checkins/            # check-in + reputación, y cierre de asistencia (noShow, +1 del creador, completed)
       feed/                # recomendación: scorers puros, ranking y paginación por posición (POST /feed)
-      messages/            # chat REST
+      messages/            # chat: servicio compartido por REST y Socket.io, historial paginado, idempotencia por clientId
       reports/
       devices/             # deviceTokens para FCM
       uploads/             # URLs firmadas de S3
       admin/               # moderación (requiere role=admin)
     jobs/                  # scheduler de jobs periódicos: cada job corre una sola vez por ciclo (lock en Redis)
     middlewares/           # requestId, authenticate, requireRole, validate, errorHandler, notFound
-    sockets/               # setup de Socket.io, auth del handshake, handlers de chat
-    adapters/              # db (Mongo + withTransaction), redis, redisLock (lock de los jobs), storage (s3 + memoria), passwordHasher (Argon2id), fcm, secrets, clock, logger
+    sockets/               # setup de Socket.io, auth del handshake, handlers de chat y chat.broadcaster (emite desde los servicios sin que conozcan Socket.io)
+    adapters/              # db (Mongo + withTransaction), redis, redisLock (lock de los jobs), socketAdapter (adaptador de Redis de Socket.io), storage (s3 + memoria), passwordHasher (Argon2id), fcm, secrets, clock, logger
     shared/                # AppError + catálogo de errores, pagination (cursor opaco y limit), geo (coordenadas [lng, lat], radio y Haversine), attendance (parámetros y reglas puras del check-in), utils puros (catalog-keys, age: fechas de calendario y edad, uploads: reglas y verificación de imágenes, validation: Zod en español, router: enrutado estricto)
   migrations/              # migrate-mongo (ver practicas/migraciones.md)
   catalogs/                # datos iniciales de los catálogos + syncCatalogs (solo inserta); los carga una migración

@@ -4,16 +4,16 @@
 
 **Entregable:** chat con Socket.io + Redis entre instancias y fallback REST, historial tras desconexión, push FCM probado en dispositivo.
 
-**Decidir antes:** [notas de voz y contactos](../pendientes.md#notas-de-voz-y-contactos). El [aviso de cupo liberado](../pendientes.md#aviso-de-cupo-liberado) ya está decidido (2026-10-12).
+**Decidido:** [notas de voz y contactos](../pendientes.md#notas-de-voz-y-contactos) (2026-10-14: propuesta aprobada, se implementa después del chat de texto) y el [aviso de cupo liberado](../pendientes.md#aviso-de-cupo-liberado) (2026-10-12). Notas del chat en [pendientes · H](../pendientes.md#h-notas-del-sprint-5-chat).
 
 ## Back service
 
-- [ ] **S5-BE-01 · Servicio de mensajes** compartido por REST y Socket.io: permiso (participante activo o creador), texto 1–2000, `senderId` del token, `status: 'visible'`.
-- [ ] **S5-BE-02 · `GET /plans/:id/messages`** paginado por `{ createdAt, _id }` descendente; solo `visible` para usuarios comunes.
-- [ ] **S5-BE-03 · `POST /plans/:id/messages`** (fallback y para clientes sin WebSocket).
-- [ ] **S5-BE-04 · Socket.io** en `/internal/socket.io`, `transports: ['websocket']`, auth en handshake, `@socket.io/redis-adapter`.
-- [ ] **S5-BE-05 · Eventos** `chat:join`, `chat:leave`, `chat:send` (ack + `clientId` idempotente), `chat:message` ([08](../arquitectura/08-tiempo-real-y-push.md#eventos)).
-  *Acepta:* test con dos instancias del back en docker-compose: un mensaje enviado a la instancia A llega a un cliente conectado a la B.
+- [x] **S5-BE-01 · Servicio de mensajes** compartido por REST y Socket.io: permiso (participante activo o creador), texto 1–2000, `senderId` del token, `status: 'visible'`.
+- [x] **S5-BE-02 · `GET /plans/:id/messages`** paginado por `{ createdAt, _id }` descendente; solo `visible` para usuarios comunes.
+- [x] **S5-BE-03 · `POST /plans/:id/messages`** (fallback y para clientes sin WebSocket).
+- [x] **S5-BE-04 · Socket.io** en `/internal/socket.io`, `transports: ['websocket']`, auth en handshake, `@socket.io/redis-adapter`.
+- [x] **S5-BE-05 · Eventos** `chat:join`, `chat:leave`, `chat:send` (ack + `clientId` idempotente), `chat:message` ([08](../arquitectura/08-tiempo-real-y-push.md#eventos)).
+  *Acepta:* test con dos instancias del back en docker-compose: un mensaje enviado a la instancia A llega a un cliente conectado a la B. *(Prueba lista: `task chat:two-instances`; falta correrla con Docker levantado.)*
 - [ ] **S5-BE-06 · `POST /devices` y `DELETE /devices/:token`** (upsert por token, reasignación de usuario).
 - [ ] **S5-BE-07 · Adapter FCM + `notifier`**: envío después del commit, sin bloquear la respuesta; borra tokens inválidos.
 - [ ] **S5-BE-08 · Avisos**: nuevo inscripto (al creador), recordatorio (job con lock + `reminderSentAt`) y **cupo liberado**: push a **todos** los que pidieron aviso en ese plan (`spotAlerts`, S5-BE-10); el primero que se inscribe se queda con el lugar. Definir qué pasa con los pedidos después de avisar (propuesta: se conservan hasta que el usuario se inscribe, cancela el aviso o el plan empieza).
@@ -24,7 +24,7 @@
 ## Front service
 
 - [ ] **S5-NG-01 · WebSocket a través de Nginx y ambos ALB**: `Upgrade`/`Connection`, `proxy_read_timeout 300s`.
-  *Acepta:* una conexión ociosa 5 minutos sigue viva en AWS.
+  *Acepta:* una conexión ociosa 5 minutos sigue viva en AWS. *(Nginx ya tenía el upgrade y los 300 s; `smoke.sh` ahora verifica el upgrade y que el long-polling esté rechazado. Falta la prueba en AWS, a cargo del equipo de AWS.)*
 
 ## App
 

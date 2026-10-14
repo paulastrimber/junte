@@ -308,10 +308,21 @@ POST /api/v1/feed
 
 | Método y ruta | Body / query | OK | Errores | Permiso | Estado |
 |---|---|---|---|---|---|
-| `GET /plans/:id/messages` | `limit, cursor` | 200 paginado (más nuevo primero) | 403, 404 | Participante o creador | ✔ |
-| `POST /plans/:id/messages` | `text` (1–2000) | 201 | 400, 403, 404 | Participante o creador | ✔ |
+| `GET /plans/:id/messages` | `limit, cursor` | 200 paginado (más nuevo primero) | 400, 403, 404 | Participante activo o creador | ✔ |
+| `POST /plans/:id/messages` | `text` (1–2000), `clientId?` | 201 creado / 200 reintento | 400, 403, 404 | Participante activo o creador | ✔ |
 
-Eventos Socket.io: ver [08-tiempo-real-y-push.md](08-tiempo-real-y-push.md).
+```json
+{ "id": "6710…", "planId": "507f1f77bcf86cd799439011", "sender": { "id": "665f…", "name": "Beto", "photoUrl": null, "reputation": 3 },
+  "type": "text", "text": "¿Alguien lleva pelota?", "clientId": "m2k9x1-4f8a2c1d", "createdAt": "2026-10-14T19:30:00.000Z" }
+```
+
+- **Permiso:** el participante con inscripción activa o el creador del plan (aunque no esté inscripto), en cualquier estado del plan. Plan inexistente o no visible para el usuario → 404; visible pero sin pertenecer → 403. Quien se da de baja pierde el acceso (403) y deja de recibir los mensajes en tiempo real.
+- **`text`** se recorta antes de validar: vacío o de solo espacios → 400. El `senderId` sale del token; cualquier otro campo (`senderId`, `status`…) es 400.
+- **`clientId`** (opcional, 1–64 caracteres `[A-Za-z0-9_-]`): lo genera la app para cada mensaje. Si el mismo remitente lo repite, el back **no crea otro mensaje**: responde **200** con el que ya existía (también si el primero entró por Socket.io). El mismo `clientId` en otro plan es 400.
+- **Historial:** solo mensajes `visible`, del más nuevo al más viejo; cursor sobre `createdAt` + `id` (estable aunque haya mensajes en el mismo milisegundo). `Cache-Control: no-store`. `sender` es la vista pública del usuario (`null` si ya no existe); `status` no sale. `type` hoy es siempre `text` (las notas de voz sumarán `voice`).
+- Un mensaje creado por REST también se emite por Socket.io (`chat:message`) a la sala del plan.
+
+Eventos Socket.io: ver [08-tiempo-real-y-push.md](08-tiempo-real-y-push.md#eventos).
 
 ### Reportes y cargas
 
