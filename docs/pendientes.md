@@ -374,3 +374,11 @@ Decidido con @mperez14ang el 2026-10-14: este PR es el **chat completo** (S5-BE-
 - **WebSocket a través de Nginx:** `smoke.sh` ahora verifica el upgrade (101) y que el long-polling esté rechazado (400); no se corrió contra el compose por la misma razón. Del lado de AWS (S5-NG-01) falta confirmar que una conexión ociosa 5 minutos sigue viva a través de los dos ALB.
 - **Contra el back real desde el teléfono**: ver las notas de la app abajo.
 
+### App
+- **Dependencia nueva:** `socket.io-client` 4.8.
+- ✅ **Botón "Chat del plan"** en el detalle, solo para el creador o un participante activo; el chat se abre dentro del tab desde el que se entró (como el QR y el check-in).
+- **Opción más chica:** páginas de 30 mensajes; sin cola offline (un envío fallido se reintenta a mano, con el mismo `clientId`); un mensaje pendiente se ordena arriba de los confirmados (el reloj del teléfono puede estar corrido); un `type` desconocido se muestra como "Mensaje no compatible con esta versión de la app".
+- **Hueco en el historial:** si al reconectar la primera página no comparte ningún mensaje con lo que se veía, se reemplaza la lista por esa página (no se muestra un hueco).
+- **Carrera conocida:** un mensaje enviado entre la carga de la primera página y el `chat:join` puede no verse hasta la próxima reconexión o refresco. La recuperación al conectar la achica, pero no la cierra del todo.
+- **Sin probar en un teléfono ni contra el back real:** la conexión WebSocket real (refresh del token y reingreso a la sala), el teclado (sobre todo Android edge-to-edge) y el polling. Verificado: tests (jest-expo), lint y `expo export --platform android`.
+
