@@ -5,4 +5,4 @@
 
 ## Prompt
 
-Clone the following repo, https://github.com/paulastrimber/junte.git. Luego revisa los docs, en tareas fijate que es lo siguiente a trabajar y ponte con eso. Recuerda usar buenas practicas, la documentacion del proyecto, cualquier duda delegamela y si necesitas y crees que usar subagentes es beneficioso usalos, ten en cuenta el modelo que les asignas para que no consuman demasiado
+En docs/tareas identifica el sprint 5, crea un plan para atacarlo y una vez lo apruebe comienza a trabajar en ella. Segui las buenas practicas y la documentacion del proyecto y discutamos cada ambiguedad que encuentres. Si creés que usar subagentes es beneficioso, usalos, cuidando qué modelo les asignás para que no consuman de más.
