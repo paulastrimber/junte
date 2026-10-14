@@ -1,6 +1,6 @@
 # Testing
 
-Herramientas en [ADR-0007](../arquitectura/adr/0007-herramientas-de-testing.md). Regla general: **nada se mergea sin tests de lo que cambió**, y todo bug corregido trae el test que lo reproduce.
+Herramientas en [ADR-0007](../arquitectura/adr/0007-herramientas-de-testing.md). Pruebas manuales y de aceptación con el entorno levantado (Docker, simulador, teléfono): [pruebas-en-local.md](pruebas-en-local.md). Regla general: **nada se mergea sin tests de lo que cambió**, y todo bug corregido trae el test que lo reproduce.
 
 ## Pirámide
 
@@ -73,7 +73,7 @@ Estos casos salen del informe (7.5) y de las reglas de negocio. Cada uno tiene s
 - [x] Texto vacío o > 2000 → 400. *(también de solo espacios; por REST y por socket)*
 - [x] Reintento de `chat:send` con el mismo `clientId` → un solo mensaje. *(también reintentos simultáneos por REST y socket + REST con el mismo `clientId`; índice en tests/integration/indexes-and-validators.test.js)*
 - [ ] Reportes (S5/S6).
-- [ ] Un mensaje enviado a la instancia A llega a un cliente conectado a la B. *(`task chat:two-instances` contra docker-compose; falta correrlo)*
+- [x] Un mensaje enviado a la instancia A llega a un cliente conectado a la B. *(`task chat:two-instances` contra docker-compose; corrido OK el 2026-10-14)*
 
 **Contrato general**
 - [ ] Todo error tiene `{ code, message, requestId }` y nunca stack ni detalles internos.

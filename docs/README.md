@@ -34,6 +34,7 @@ Punto de entrada. Cada tema vive en **un solo archivo**: si hay que cambiar algo
 | [Testing](practicas/testing.md) | Pirámide, casos obligatorios, convenciones |
 | [Migraciones](practicas/migraciones.md) | Versionado de la base con migrate-mongo |
 | [Errores y logs](practicas/errores-y-logs.md) | Catálogo de códigos, qué se loguea y qué no |
+| [Pruebas en local](practicas/pruebas-en-local.md) | Entorno con Docker, pruebas de aceptación, app en el simulador de iOS o el teléfono, puertos ocupados |
 
 ## Flujo
 

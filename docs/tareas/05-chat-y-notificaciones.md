@@ -13,7 +13,7 @@
 - [x] **S5-BE-03 · `POST /plans/:id/messages`** (fallback y para clientes sin WebSocket).
 - [x] **S5-BE-04 · Socket.io** en `/internal/socket.io`, `transports: ['websocket']`, auth en handshake, `@socket.io/redis-adapter`.
 - [x] **S5-BE-05 · Eventos** `chat:join`, `chat:leave`, `chat:send` (ack + `clientId` idempotente), `chat:message` ([08](../arquitectura/08-tiempo-real-y-push.md#eventos)).
-  *Acepta:* test con dos instancias del back en docker-compose: un mensaje enviado a la instancia A llega a un cliente conectado a la B. *(Prueba lista: `task chat:two-instances`; falta correrla con Docker levantado.)*
+  *Acepta:* test con dos instancias del back en docker-compose: un mensaje enviado a la instancia A llega a un cliente conectado a la B. *(`task chat:two-instances` corrido OK el 2026-10-14, en los dos sentidos.)*
 - [ ] **S5-BE-06 · `POST /devices` y `DELETE /devices/:token`** (upsert por token, reasignación de usuario).
 - [ ] **S5-BE-07 · Adapter FCM + `notifier`**: envío después del commit, sin bloquear la respuesta; borra tokens inválidos.
 - [ ] **S5-BE-08 · Avisos**: nuevo inscripto (al creador), recordatorio (job con lock + `reminderSentAt`) y **cupo liberado**: push a **todos** los que pidieron aviso en ese plan (`spotAlerts`, S5-BE-10); el primero que se inscribe se queda con el lugar. Definir qué pasa con los pedidos después de avisar (propuesta: se conservan hasta que el usuario se inscribe, cancela el aviso o el plan empieza).
@@ -24,7 +24,7 @@
 ## Front service
 
 - [ ] **S5-NG-01 · WebSocket a través de Nginx y ambos ALB**: `Upgrade`/`Connection`, `proxy_read_timeout 300s`.
-  *Acepta:* una conexión ociosa 5 minutos sigue viva en AWS. *(Nginx ya tenía el upgrade y los 300 s; `smoke.sh` ahora verifica el upgrade y que el long-polling esté rechazado. Falta la prueba en AWS, a cargo del equipo de AWS.)*
+  *Acepta:* una conexión ociosa 5 minutos sigue viva en AWS. *(Nginx ya tenía el upgrade y los 300 s; `smoke.sh` ahora verifica el upgrade y que el long-polling esté rechazado, corrido OK en local el 2026-10-14. Falta la prueba en AWS, a cargo del equipo de AWS.)*
 
 ## App
 
