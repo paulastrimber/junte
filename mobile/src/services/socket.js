@@ -19,7 +19,7 @@ export const SOCKET_PATH = '/api/v1/socket.io'
 export const ACK_TIMEOUT_MS = 8_000
 /** Errores de conexión seguidos a partir de los cuales el WebSocket se considera "no disponible". */
 export const MAX_CONSECUTIVE_FAILURES = 3
-/** Espera antes de volver a conectar cuando no se pudo renovar el token por falta de red. */
+/** Espera antes de volver a conectar cuando Socket.io no reintenta solo (refresh sin red, o el servidor rechazó la conexión). */
 export const AUTH_RETRY_DELAY_MS = 3_000
 
 const JOIN_ATTEMPTS = 2
@@ -158,6 +158,9 @@ export function createSocketService ({
       return
     }
     registerFailure()
+    // Si lo rechazó el servidor (p. ej. INTERNAL con la base caída), Socket.io no reintenta solo (`active` queda en
+    // false): sin esto el chat se quedaría sin tiempo real y sin llegar nunca al polling. Un error de red sí lo reintenta.
+    if (!current.active) reconnectLater(current)
   }
 
   function ensureSocket () {

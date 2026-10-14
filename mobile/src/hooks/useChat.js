@@ -8,6 +8,8 @@ import { MESSAGE_STATUS, createClientId, mergeMessages, mergeRecoveredPage, sort
 
 export const CHAT_STATUS = Object.freeze({ LOADING: 'loading', READY: 'ready', ERROR: 'error' })
 
+const isUnsent = (message) => message.status === MESSAGE_STATUS.PENDING || message.status === MESSAGE_STATUS.FAILED
+
 /** Cada cuánto se vuelve a pedir la primera página cuando el WebSocket no se puede sostener. */
 export const POLL_INTERVAL_MS = 5_000
 const PAGE_SIZE = 30
@@ -56,7 +58,8 @@ export function useChat (planId, { user, isActive = true }) {
 
   const load = useCallback(async () => {
     const generation = ++generationRef.current
-    setState(INITIAL_STATE)
+    // Un "Reintentar" no pierde lo que la persona escribió y todavía no se confirmó (solo de este plan).
+    setState((current) => ({ ...INITIAL_STATE, messages: current.messages.filter((message) => isUnsent(message) && message.planId === planId) }))
     try {
       const page = await listMessages(planId, { limit: PAGE_SIZE })
       if (generation !== generationRef.current) return

@@ -341,6 +341,19 @@ describe('useChat: enviar', () => {
     expect(result.current.messages.filter((item) => item.text === 'Hola')).toHaveLength(1)
   })
 
+  it('reload conserva los mensajes que no se pudieron mandar', async () => {
+    socketService.sendChatMessage.mockRejectedValue(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
+    sendMessage.mockRejectedValue(networkError())
+    const { result } = await setup()
+    await act(async () => result.current.send('Sin red'))
+
+    await act(async () => result.current.reload())
+
+    expect(result.current.status).toBe(CHAT_STATUS.READY)
+    expect(result.current.messages[0]).toMatchObject({ text: 'Sin red', status: 'failed' })
+    expect(texts(result)).toEqual(['Sin red', 'Mensaje 2', 'Mensaje 1'])
+  })
+
   it('retrySend vuelve a pendiente mientras reintenta', async () => {
     socketService.sendChatMessage.mockRejectedValueOnce(apiError(0, 'FORBIDDEN'))
     const retry = deferred()

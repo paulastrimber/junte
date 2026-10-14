@@ -8,6 +8,8 @@ function createFakeSocket (url, options) {
     url,
     options,
     connected: false,
+    // Como socket.io-client: true mientras el Manager reintenta solo; un rechazo del servidor lo deja en false.
+    active: true,
     emitted: [],
     on: jest.fn((event, handler) => { handlers.set(event, handler); return socket }),
     removeAllListeners: jest.fn(() => handlers.clear()),
@@ -18,7 +20,7 @@ function createFakeSocket (url, options) {
     fire: (event, ...args) => handlers.get(event)?.(...args),
     open: () => { socket.connected = true; socket.fire('connect') },
     drop: (reason = 'transport close') => { socket.connected = false; socket.fire('disconnect', reason) },
-    rejectWith: (code) => socket.fire('connect_error', Object.assign(new Error('rechazado'), { data: { code, message: 'Rechazado' } })),
+    rejectWith: (code) => { socket.active = false; return socket.fire('connect_error', Object.assign(new Error('rechazado'), { data: { code, message: 'Rechazado' } })) },
     failTransport: () => socket.fire('connect_error', new Error('websocket error')),
     // Contesta el último emit de ese evento.
     answer: (event, ...ackArgs) => socket.emitted.filter((item) => item.event === event).at(-1).ack(...ackArgs),
@@ -394,6 +396,42 @@ describe('token vencido', () => {
       await jest.advanceTimersByTimeAsync(3000)
 
       expect(current().connect).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('si el servidor rechaza la conexión por otro motivo (INTERNAL), vuelve a intentar más tarde y llega al polling', () => {
+    jest.useFakeTimers()
+    try {
+      const { service, current } = setup({ authRetryDelayMs: 3000, maxFailures: 2 })
+      service.subscribe('p1', jest.fn())
+
+      current().rejectWith('INTERNAL')
+      expect(service.getStatus()).toBe(SOCKET_STATUS.RECONNECTING)
+      expect(current().connect).not.toHaveBeenCalled()
+      jest.advanceTimersByTime(3000)
+      expect(current().connect).toHaveBeenCalledTimes(1)
+
+      current().rejectWith('INTERNAL')
+      expect(service.getStatus()).toBe(SOCKET_STATUS.UNAVAILABLE)
+      jest.advanceTimersByTime(3000)
+      expect(current().connect).toHaveBeenCalledTimes(2)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('un error de red no programa otro intento: lo reintenta Socket.io', () => {
+    jest.useFakeTimers()
+    try {
+      const { service, current } = setup({ authRetryDelayMs: 3000 })
+      service.subscribe('p1', jest.fn())
+
+      current().failTransport()
+      jest.advanceTimersByTime(10_000)
+
+      expect(current().connect).not.toHaveBeenCalled()
     } finally {
       jest.useRealTimers()
     }
