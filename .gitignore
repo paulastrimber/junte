@@ -15,3 +15,6 @@ dist/
 
 # Worktrees de agentes de Claude Code
 .claude/worktrees/
+
+# Copia de las skills para otros agentes (la fuente versionada es .claude/skills)
+.agents/

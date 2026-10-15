@@ -1,6 +1,7 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 
+import { Icon } from '../components/Icon.jsx'
 import { AUTH_STATUS } from '../contexts/AuthContext.jsx'
 import { useAuth } from '../hooks/useAuth.js'
 import CheckInScreen, { TEXTS as CHECK_IN_TEXTS } from '../screens/CheckInScreen.jsx'
@@ -16,6 +17,7 @@ import PlanScreen, { TEXTS as PLAN_TEXTS } from '../screens/PlanScreen.jsx'
 import ProfileScreen from '../screens/ProfileScreen.jsx'
 import RegisterScreen, { TEXTS as REGISTER_TEXTS } from '../screens/RegisterScreen.jsx'
 import RestoreErrorScreen from '../screens/RestoreErrorScreen.jsx'
+import { sizes, stackScreenOptions, tabScreenOptions, useTheme } from '../theme/index.js'
 import { ROUTES } from './routes.js'
 
 export { ROUTES }
@@ -25,13 +27,27 @@ export const TAB_TITLES = Object.freeze({ feed: 'Planes', myPlans: 'Mis planes',
 const Stack = createNativeStackNavigator()
 const Tabs = createBottomTabNavigator()
 
+// Encabezado nativo de cada stack con los colores y la tipografía del tema (cambia con el modo claro/oscuro).
+function useStackOptions () {
+  return stackScreenOptions(useTheme().colors)
+}
+
+// Ícono de cada tab: de contorno, y relleno en el tab activo.
+const TAB_ICONS = Object.freeze({
+  [ROUTES.FEED_TAB]: 'compass',
+  [ROUTES.MY_PLANS_TAB]: 'calendar',
+  [ROUTES.CREATE_TAB]: 'add-circle',
+  [ROUTES.PROFILE_TAB]: 'person'
+})
+
 // Dos stacks según la sesión: al iniciar o cerrar sesión se cambia de stack y las pantallas del otro
 // dejan de existir (no se puede volver atrás a una pantalla protegida).
 function AuthStack () {
   return (
-    <Stack.Navigator initialRouteName={ROUTES.LOGIN}>
-      <Stack.Screen name={ROUTES.LOGIN} component={LoginScreen} options={{ title: LOGIN_TEXTS.title }} />
-      <Stack.Screen name={ROUTES.REGISTER} component={RegisterScreen} options={{ title: REGISTER_TEXTS.title }} />
+    <Stack.Navigator screenOptions={useStackOptions()} initialRouteName={ROUTES.LOGIN}>
+      <Stack.Screen name={ROUTES.LOGIN} component={LoginScreen} options={{ title: LOGIN_TEXTS.title, headerShown: false }} />
+      {/* El título va en la pantalla, debajo de la marca: el encabezado queda solo con "volver". */}
+      <Stack.Screen name={ROUTES.REGISTER} component={RegisterScreen} options={{ title: REGISTER_TEXTS.title, headerTitle: '' }} />
     </Stack.Navigator>
   )
 }
@@ -52,7 +68,7 @@ function planScreens () {
 // Tab "Planes": el feed, el detalle de un plan, su edición (solo el creador) y la asistencia.
 function FeedStack () {
   return (
-    <Stack.Navigator initialRouteName={ROUTES.HOME}>
+    <Stack.Navigator screenOptions={useStackOptions()} initialRouteName={ROUTES.HOME}>
       <Stack.Screen name={ROUTES.HOME} component={HomeScreen} options={{ title: HOME_TEXTS.title }} />
       {planScreens()}
     </Stack.Navigator>
@@ -62,7 +78,7 @@ function FeedStack () {
 // Tab "Mis planes": los que creó y aquellos en los que está inscripto.
 function MyPlansStack () {
   return (
-    <Stack.Navigator initialRouteName={ROUTES.MY_PLANS}>
+    <Stack.Navigator screenOptions={useStackOptions()} initialRouteName={ROUTES.MY_PLANS}>
       <Stack.Screen name={ROUTES.MY_PLANS} component={MyPlansScreen} options={{ title: MY_PLANS_TEXTS.title }} />
       {planScreens()}
     </Stack.Navigator>
@@ -71,7 +87,7 @@ function MyPlansStack () {
 
 function CreateStack () {
   return (
-    <Stack.Navigator initialRouteName={ROUTES.CREATE_PLAN}>
+    <Stack.Navigator screenOptions={useStackOptions()} initialRouteName={ROUTES.CREATE_PLAN}>
       <Stack.Screen name={ROUTES.CREATE_PLAN} component={CreatePlanScreen} options={{ title: CREATE_TEXTS.createTitle }} />
     </Stack.Navigator>
   )
@@ -79,25 +95,24 @@ function CreateStack () {
 
 function ProfileStack () {
   return (
-    <Stack.Navigator initialRouteName={ROUTES.PROFILE}>
+    <Stack.Navigator screenOptions={useStackOptions()} initialRouteName={ROUTES.PROFILE}>
       <Stack.Screen name={ROUTES.PROFILE} component={ProfileScreen} options={{ title: 'Mi perfil' }} />
       <Stack.Screen name={ROUTES.HEALTH} component={HealthScreen} options={{ title: HEALTH_TEXTS.title }} />
     </Stack.Navigator>
   )
 }
 
-// Solo texto en la barra: la app no incluye una librería de íconos.
-const TAB_OPTIONS = Object.freeze({
-  headerShown: false,
-  tabBarIconStyle: { display: 'none' },
-  tabBarLabelStyle: { fontSize: 13, fontWeight: '600' },
-  tabBarLabelPosition: 'beside-icon'
-})
-
-// La app con sesión: cuatro tabs, cada uno con su propio stack (su encabezado y su "volver").
+// La app con sesión: cuatro tabs (ícono y texto), cada uno con su propio stack (su encabezado y su "volver").
 function AppTabs () {
+  const { colors } = useTheme()
+  const screenOptions = ({ route }) => ({
+    ...tabScreenOptions(colors),
+    tabBarIcon: ({ focused }) => (
+      <Icon name={focused ? TAB_ICONS[route.name] : `${TAB_ICONS[route.name]}-outline`} size={sizes.iconLg} color={focused ? 'primary' : 'textMuted'} />
+    )
+  })
   return (
-    <Tabs.Navigator initialRouteName={ROUTES.FEED_TAB} screenOptions={TAB_OPTIONS}>
+    <Tabs.Navigator initialRouteName={ROUTES.FEED_TAB} screenOptions={screenOptions}>
       <Tabs.Screen name={ROUTES.FEED_TAB} component={FeedStack} options={{ title: TAB_TITLES.feed }} />
       <Tabs.Screen name={ROUTES.MY_PLANS_TAB} component={MyPlansStack} options={{ title: TAB_TITLES.myPlans }} />
       <Tabs.Screen name={ROUTES.CREATE_TAB} component={CreateStack} options={{ title: TAB_TITLES.create }} />
@@ -109,7 +124,7 @@ function AppTabs () {
 // Primer ingreso: el onboarding se muestra hasta que la persona lo termina o lo deja para después ("Más tarde").
 function OnboardingStack () {
   return (
-    <Stack.Navigator initialRouteName={ROUTES.ONBOARDING}>
+    <Stack.Navigator screenOptions={useStackOptions()} initialRouteName={ROUTES.ONBOARDING}>
       <Stack.Screen name={ROUTES.ONBOARDING} component={OnboardingScreen} options={{ title: 'Bienvenido a junte', headerBackVisible: false }} />
     </Stack.Navigator>
   )
