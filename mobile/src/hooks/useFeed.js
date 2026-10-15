@@ -5,6 +5,7 @@ import { getFeed } from '../services/api/feed.js'
 import { listPlans } from '../services/api/plans.js'
 import { readBusySlots } from '../services/calendar.js'
 import { LOCATION_STATUS, getCurrentCoordinates } from '../services/location.js'
+import { connectivity, isTransportFailure, readCache } from '../services/offline/index.js'
 import { toApiFilters } from './useFeedFilters.js'
 
 export const FEED_STATUS = Object.freeze({ LOADING: 'loading', READY: 'ready', ERROR: 'error' })
@@ -23,7 +24,8 @@ const INITIAL = Object.freeze({
   locationStatus: null,
   isRefreshing: false,
   isLoadingMore: false,
-  loadMoreError: null
+  loadMoreError: null,
+  savedAt: null
 })
 
 /**
@@ -32,6 +34,8 @@ const INITIAL = Object.freeze({
  * Primera página: pide la ubicación; si la hay, lee las franjas ocupadas del calendario (si hay permiso) y consulta
  * POST /feed (cerca y por recomendación). Sin ubicación degrada a GET /plans (por fecha). Las páginas siguientes
  * repiten exactamente la misma consulta con el cursor (el back rechaza un cursor de otra búsqueda).
+ * Sin conexión muestra la última primera página guardada con los mismos filtros (`savedAt`, sin "cargar más"). Solo se
+ * guardan los planes que ya mostraba la pantalla: ni la posición ni el calendario.
  * @param {{ query: object, radiusKm: number }} params  De `useFeedFilters`.
  */
 export function useFeed ({ query, radiusKm }) {
@@ -49,9 +53,22 @@ export function useFeed ({ query, radiusKm }) {
   const loadFirstPage = useCallback(async ({ isRefreshing = false } = {}) => {
     const generation = ++generationRef.current
     const isCurrent = () => generation === generationRef.current
+    const cacheKey = `feed:${radiusKm}:${filtersKey}`
     setState((current) => (isRefreshing
       ? { ...current, isRefreshing: true, loadMoreError: null }
       : { ...INITIAL }))
+
+    /** La última primera página guardada con estos filtros, o null. */
+    async function showCached () {
+      const cached = await readCache.load(cacheKey)
+      if (!cached || !isCurrent()) return Boolean(cached)
+      const { items, mode, locationStatus } = cached.data
+      requestRef.current = null
+      setState({ ...INITIAL, status: FEED_STATUS.READY, items, mode, locationStatus, savedAt: cached.savedAt })
+      return true
+    }
+
+    if (!isRefreshing && !connectivity.isOnline() && await showCached()) return
 
     try {
       const filters = toApiFilters(JSON.parse(filtersKey))
@@ -73,9 +90,13 @@ export function useFeed ({ query, radiusKm }) {
       if (!isCurrent()) return
       requestRef.current = request
       setState({ ...INITIAL, status: FEED_STATUS.READY, items: page.items, nextCursor: page.nextCursor, mode: request.mode, locationStatus: location.status })
+      readCache.save(cacheKey, { items: page.items, mode: request.mode, locationStatus: location.status })
     } catch (failure) {
       if (!isCurrent()) return
       const error = toApiError(failure)
+      // Un refresco que falla conserva lo que ya se veía (abajo); solo la primera carga recurre a lo guardado.
+      if (!isRefreshing && isTransportFailure(error) && await showCached()) return
+      if (!isCurrent()) return
       // Si falla un refresco se conserva lo que ya se veía; si falla la primera carga, pantalla de error.
       setState((current) => (isRefreshing && current.status === FEED_STATUS.READY
         ? { ...current, isRefreshing: false, loadMoreError: error }

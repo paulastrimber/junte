@@ -5,17 +5,22 @@ import { Platform } from 'react-native'
 import * as authApi from './api/auth.js'
 import { ApiError } from './api/errors.js'
 import * as usersApi from './api/users.js'
+import { isTransportFailure, readCache } from './offline/index.js'
 import { createTokenStorage } from './tokenStorage.js'
 
 const UNAUTHORIZED = 401
+
+const NO_PROFILE_CACHE = Object.freeze({ save: async () => {}, load: async () => null })
 
 /**
  * @param {object} deps
  * @param {ReturnType<typeof createTokenStorage>} deps.tokenStorage
  * @param {{ register: Function, login: Function, refresh: Function, logout: Function, logoutAll: Function, getMe: Function }} deps.api
  * @param {string} [deps.deviceLabel]  Etiqueta de la sesión en el servidor ("android", "ios").
+ * @param {{ save: (user: object) => Promise<void>, load: () => Promise<object | null> }} [deps.profileCache]
+ *   Último perfil propio guardado en el teléfono: permite abrir la app sin conexión (S6-MOB-01).
  */
-export function createAuthService ({ tokenStorage, api, deviceLabel }) {
+export function createAuthService ({ tokenStorage, api, deviceLabel, profileCache = NO_PROFILE_CACHE }) {
   const expiredListeners = new Set()
   const endedListeners = new Set()
   let refreshInFlight = null
@@ -27,6 +32,7 @@ export function createAuthService ({ tokenStorage, api, deviceLabel }) {
 
   async function storeSession ({ user, accessToken, refreshToken }) {
     await tokenStorage.save({ accessToken, refreshToken })
+    profileCache.save(user)
     return user
   }
 
@@ -71,20 +77,33 @@ export function createAuthService ({ tokenStorage, api, deviceLabel }) {
 
     /**
      * Al abrir la app: si hay sesión guardada, trae el perfil (el cliente HTTP renueva el token si venció).
+     * Sin conexión, entra con el último perfil guardado: la app muestra lo que tenía guardado y manda lo pendiente
+     * cuando vuelva la red (el servidor sigue decidiendo si la sesión vale).
      * @returns {Promise<object | null>} usuario, o null si no hay sesión o ya no sirve.
-     * @throws {ApiError} si no se pudo verificar (p. ej. sin conexión): los tokens se conservan.
+     * @throws {ApiError} si no se pudo verificar y no hay perfil guardado: los tokens se conservan.
      */
     async restore () {
       if (!await tokenStorage.load()) return null
       try {
-        return await api.getMe()
+        const user = await api.getMe()
+        profileCache.save(user)
+        return user
       } catch (error) {
         if (error?.status === UNAUTHORIZED) {
           await tokenStorage.clear()
           return null
         }
+        if (isTransportFailure(error)) {
+          const cached = await profileCache.load()
+          if (cached) return cached
+        }
         throw error
       }
+    },
+
+    /** Guarda el perfil propio actualizado (p. ej. después de editarlo) para poder abrir la app sin conexión. */
+    rememberUser (user) {
+      if (user) profileCache.save(user)
     },
 
     /** Cierra la sesión de este dispositivo. La local se borra aunque el servidor no responda. */
@@ -133,5 +152,9 @@ export function createAuthService ({ tokenStorage, api, deviceLabel }) {
 export const authService = createAuthService({
   tokenStorage: createTokenStorage(),
   api: { ...authApi, getMe: usersApi.getMe },
-  deviceLabel: Platform.OS
+  deviceLabel: Platform.OS,
+  profileCache: {
+    save: (user) => readCache.save('me', user),
+    load: async () => (await readCache.load('me'))?.data ?? null
+  }
 })

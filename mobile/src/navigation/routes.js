@@ -18,6 +18,10 @@ export const ROUTES = Object.freeze({
   CHECK_IN: 'CheckIn',
   // Chat del plan (solo creador y anotados), también desde el detalle de un plan
   CHAT: 'Chat',
+  // Reportar un plan, un usuario o un mensaje (desde el detalle de un plan o el chat)
+  REPORT: 'Report',
+  // Lo que se hizo sin conexión y espera para enviarse (desde el aviso de conexión de cada pantalla)
+  PENDING_ACTIONS: 'PendingActions',
   // Tab "Mis planes"
   MY_PLANS: 'MyPlans',
   // Tab "Crear"

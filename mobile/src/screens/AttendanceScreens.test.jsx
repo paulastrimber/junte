@@ -281,7 +281,7 @@ describe('MyPlansScreen', () => {
     await render(<MyPlansScreen navigation={navigation} />)
     expect(screen.getByText(MY_PLANS.loading)).toBeOnTheScreen()
 
-    await act(async () => pending.reject(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR)))
+    await act(async () => pending.reject(apiError(500, 'INTERNAL')))
     expect(await screen.findByText(MY_PLANS.errorTitle)).toBeOnTheScreen()
 
     await fireEvent.press(button(MY_PLANS.retry))

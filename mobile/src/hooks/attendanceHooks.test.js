@@ -13,6 +13,7 @@ import { useMyStats } from './useMyStats.js'
 import { LIST_STATUS } from './usePagedList.js'
 import { useParticipants } from './useParticipants.js'
 import { PLAN_ACTION, usePlanActions } from './usePlanActions.js'
+import { outbox } from '../services/offline/index.js'
 import { QR_STATUS, usePlanQr } from './usePlanQr.js'
 
 jest.mock('../services/api/checkins.js', () => ({ checkIn: jest.fn(), createPlanQr: jest.fn() }))
@@ -86,13 +87,47 @@ describe('usePlanActions', () => {
     expect(result.current.error.message).toBe('El plan ya terminó o ya estaba cancelado.')
   })
 
-  it('un error de red usa el mensaje general', async () => {
+  it('sin red, darse de baja queda pendiente en la cola: no se da por hecho ni se muestra como error', async () => {
+    await outbox.clear()
     leavePlan.mockRejectedValue(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
+    const onChanged = jest.fn()
+    const { result } = await renderHook(() => usePlanActions('p1', { onChanged, planTitle: 'Fútbol' }))
+
+    await act(async () => { expect(await result.current.leave()).toBe('queued') })
+
+    expect(result.current.error).toBeNull()
+    expect(onChanged).not.toHaveBeenCalled()
+    await waitFor(() => expect(result.current.queued.leave).toMatchObject({ type: 'leave', status: 'pending', payload: { planId: 'p1', planTitle: 'Fútbol' } }))
+    expect(result.current.queued.isWaiting).toBe(true)
+
+    // Cuando vuelve la red se manda sola y la pantalla vuelve a pedir el plan.
+    leavePlan.mockResolvedValue(undefined)
+    await act(async () => outbox.flush())
+    expect(onChanged).toHaveBeenCalled()
+    await waitFor(() => expect(result.current.queued.leave).toBeNull())
+  })
+
+  it('un error de red en algo que no se encola (cerrar inscripciones) usa el mensaje general', async () => {
+    updatePlan.mockRejectedValue(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
     const { result } = await renderHook(() => usePlanActions('p1', { onChanged: jest.fn() }))
 
-    await act(async () => { await result.current.leave() })
+    await act(async () => { await result.current.closeSignUps() })
 
     expect(result.current.error.message).toMatch(/conexión/)
+  })
+
+  it('si al sincronizar el plan se llenó (409), queda el motivo hasta que la persona lo descarta', async () => {
+    await outbox.clear()
+    joinPlan.mockRejectedValueOnce(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR)).mockRejectedValueOnce(apiError(409, 'PLAN_FULL'))
+    const { result } = await renderHook(() => usePlanActions('p1', { onChanged: jest.fn() }))
+
+    await act(async () => { await result.current.join() })
+    await act(async () => outbox.flush())
+
+    await waitFor(() => expect(result.current.queued.join).toMatchObject({ status: 'failed', error: { code: 'PLAN_FULL' } }))
+    expect(result.current.queued.isWaiting).toBe(false)
+    await act(async () => result.current.discardQueued(result.current.queued.join.id))
+    await waitFor(() => expect(result.current.queued.join).toBeNull())
   })
 
   it('cerrar, reabrir y cancelar mandan el status que corresponde', async () => {

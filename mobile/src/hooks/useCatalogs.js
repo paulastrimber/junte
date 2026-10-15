@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { getCatalogs } from '../services/api/catalogs.js'
+import { connectivity, readCache, readThrough } from '../services/offline/index.js'
 
 // Los catálogos cambian poco y son iguales para todos: se piden una vez por sesión de la app y se reutilizan entre pantallas.
+// Sin conexión se usa la última versión guardada en el teléfono (y se vuelven a pedir la próxima vez).
 let cached = null
 let inFlight = null
 
@@ -14,8 +16,12 @@ export function resetCatalogsCache () {
 
 function loadCatalogs () {
   if (cached) return Promise.resolve(cached)
-  inFlight ??= getCatalogs()
-    .then((catalog) => { cached = catalog; return catalog })
+  inFlight ??= readThrough({ key: 'catalogs', fetch: () => getCatalogs(), cache: readCache, connectivity })
+    .then(({ data, savedAt }) => {
+      // Lo que vino del teléfono no queda fijo en memoria: con conexión se vuelve a pedir.
+      if (!savedAt) cached = data
+      return data
+    })
     .finally(() => { inFlight = null })
   return inFlight
 }

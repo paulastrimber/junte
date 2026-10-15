@@ -77,7 +77,7 @@ export function createSocketService ({
   let attemptToken = null
   let hasRefreshed = false
   let retryTimer = null
-  /** planId → suscriptores `{ onMessage, onJoinError }`. */
+  /** planId → suscriptores `{ onMessage, onJoinError, onHidden }`. */
   const rooms = new Map()
   const statusListeners = new Set()
 
@@ -194,6 +194,10 @@ export function createSocketService ({
     current.on('chat:message', (message) => {
       rooms.get(message?.planId)?.forEach(({ onMessage }) => onMessage(message))
     })
+    // Moderación (S6): un admin ocultó un mensaje de la sala.
+    current.on('chat:hidden', (event) => {
+      rooms.get(event?.planId)?.forEach(({ onHidden }) => onHidden?.(event.messageId))
+    })
     return current
   }
 
@@ -218,10 +222,11 @@ export function createSocketService ({
      * @param {string} planId
      * @param {(message: object) => void} onMessage  Cada `chat:message` de la sala, incluidos los propios.
      * @param {(error: ApiError) => void} [onJoinError]  El servidor no dejó entrar a la sala (FORBIDDEN, NOT_FOUND…).
+     * @param {(messageId: string) => void} [onHidden]  Un admin ocultó un mensaje (`chat:hidden`).
      * @returns {() => void} dejar de escuchar; al soltar la última sala se cierra la conexión.
      */
-    subscribe (planId, onMessage, onJoinError) {
-      const entry = { onMessage, onJoinError }
+    subscribe (planId, onMessage, onJoinError, onHidden) {
+      const entry = { onMessage, onJoinError, onHidden }
       const isNewRoom = !rooms.has(planId)
       if (isNewRoom) rooms.set(planId, new Set())
       rooms.get(planId).add(entry)

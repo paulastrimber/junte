@@ -77,6 +77,9 @@ export default ({ config }) => ({
   },
   android: {
     package: APP_ID,
+    // La ubicación solo se usa con la app abierta (S6-MOB-04): aunque alguna librería la declare, el permiso de
+    // ubicación en segundo plano no entra al manifiesto.
+    blockedPermissions: ['android.permission.ACCESS_BACKGROUND_LOCATION'],
     adaptiveIcon: {
       backgroundColor: '#E6F4FE',
       foregroundImage: './assets/android-icon-foreground.png',
