@@ -142,6 +142,14 @@ Access log en JSON: `time`, `requestId`, `remoteAddr` (IP real), `method`, `path
 
 Estáticos servidos por Nginx; sus llamadas van a `/api/v1/admin/*` con un JWT de un usuario `role: admin`. La autorización la decide Express (`requireRole('admin')`), **no** Nginx. El token del panel se guarda solo en memoria (no en `localStorage`) para reducir el impacto de un XSS.
 
+**Implementación (S6-NG-01, `front-service/admin/`):** HTML, CSS y JavaScript sin build ni dependencias externas (`index.html`, `admin.css`, `app.js`, `api.js`, `dom.js`, `views/`).
+
+- **Login** con `POST /api/v1/auth/login` (zona estricta de rate limit) y comprobación del rol con `GET /admin/metrics`: una cuenta sin rol admin no entra (se cierra esa sesión). Access y refresh token solo en memoria; un 401 renovable hace **un** refresh y reintenta; si no se puede, vuelve al login. Recargar la página pide entrar de nuevo. "Cerrar sesión" llama a `POST /auth/logout`.
+- **Reportes:** pestañas Pendientes / Revisados / Descartados, con la vista previa de lo reportado y las acciones: ocultar o volver a mostrar el mensaje, suspender o reactivar la cuenta responsable (con confirmación) y marcar revisado / descartar.
+- **Métricas** y **Catálogos** (listar con buscador, editar nombre, orden, activa y campos propios; agregar opciones).
+- **Todo lo que viene de la API se inserta como texto** (`textContent`), nunca como HTML: un mensaje reportado no puede ejecutar nada en el panel.
+- **Cabeceras** (`snippets/admin-headers.conf`): CSP `default-src 'none'` con solo `script-src`, `style-src`, `connect-src` e `img-src` propios, `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Permissions-Policy` sin cámara/micrófono/ubicación y `Cache-Control: no-store`. Se repite `X-Request-Id` (un `add_header` en una location deja de heredar los del server). `smoke.sh` lo verifica.
+
 ## Entorno local
 
 `infra/docker-compose.dev.yml` monta `nginx.conf`, `conf.d/`, `snippets/`, `templates/` y `admin/` en la imagen oficial `nginx` (sin imagen propia). La red de compose tiene subred fija (`172.30.0.0/24`) y los contenedores toman IPs de `172.30.0.128/25`: ese rango es el "de confianza" (como el ALB en AWS). El tráfico que entra desde el host por el puerto publicado llega desde fuera de ese rango, así que el host es un cliente externo y su `X-Forwarded-For` se ignora.

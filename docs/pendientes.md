@@ -99,9 +99,7 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 **A definir al implementarlo:** duración y tamaño máximos del audio, formato (AAC/M4A), y si el link para compartir abre la app (deep link) o una página.
 
 ### Endpoints y métricas de administración
-**Problema:** `/admin` existe pero sus operaciones no.
-**Propuesta:** los marcados ❓ en [06-api.md](arquitectura/06-api.md#administración-requiere-role-admin). Métricas mínimas: planes creados, inscripciones, check-ins, reportes pendientes.
-**Bloquea:** S6.
+✅ **Decidido (2026-10-14, Domenico) e implementado en S6:** la propuesta de [06-api.md](arquitectura/06-api.md#administración-requiere-role-admin) (cola de reportes, resolverlos, ocultar mensajes, suspender y reactivar cuentas, métricas y CRUD de catálogos) **más una vista previa de lo reportado** en cada reporte (texto del mensaje, título del plan, nombre y email del usuario), para que el admin decida sin buscarlo a mano. Métricas: totales y últimos 7 días de usuarios, planes, inscripciones, check-ins, mensajes y reportes. Detalle y lo que se resolvió con la opción más chica en [I](#i-notas-del-sprint-6-admin-y-móvil).
 
 ### Redis
 **Problema:** "servicio Redis" sin definir: ElastiCache o EC2 propia, y con qué disponibilidad.
@@ -207,7 +205,7 @@ Lo que apareció al implementar auth y perfiles (S2) y queda para revisar con el
 - **Access token tras el logout:** sigue valiendo hasta 15 minutos (`authenticate` no mira la sesión). Alternativa: consultar la sesión en cada request (una lectura más).
 - **Refresh concurrente:** dos refresh simultáneos con el mismo token se tratan como reuso y cierran la sesión. La app hace un solo refresh en vuelo; el riesgo que queda es que la app se cierre entre que el servidor rota el token y que la app lo guarda en SecureStore (la próxima vez pedirá iniciar sesión).
 - **Sesiones:** `deviceLabel` es solo una etiqueta (`android`/`ios`); no hay endpoint para listar o cerrar una sesión puntual desde otro dispositivo.
-- **Suspender un usuario** (S6, `PATCH /admin/users/:id`) debe llamar a `authService.revokeAllSessions(userId)`; hoy login y refresh ya cierran sus sesiones, pero un access token vigente sigue valiendo hasta 15 minutos.
+- ✅ **Resuelto en S6.** **Suspender un usuario** (`PATCH /admin/users/:id`) llama a `authService.revokeAllSessions(userId)` y cierra sus sockets. (La nota decía que un access token vigente seguía valiendo 15 minutos: no era así, `authenticate` ya mira el `status` del usuario en cada request.)
 
 ### Fotos (S3) y lo que falta del lado de AWS
 - **Para el equipo de AWS (no se tocó `infra/`):** bucket privado con Block Public Access y variables `S3_BUCKET` y `AWS_REGION` en el entorno del back (obligatorias en producción). El rol IAM de la instancia necesita `s3:PutObject`, `s3:GetObject` y `s3:DeleteObject` sobre `users/*` y **`s3:ListBucket` sobre el bucket**: sin `ListBucket`, `HeadObject` de una clave inexistente devuelve 403 en lugar de 404 y el back lo trata como error 500. No hace falta CORS (la app es nativa).
@@ -393,3 +391,35 @@ Cómo se corre cada prueba: [pruebas en local](practicas/pruebas-en-local.md).
 - **Sin probar:** el teclado en pantalla (el simulador sin la app Simulator no lo muestra; mirarlo en un teléfono, sobre todo Android edge-to-edge) y una caída de red con "conexión rechazada": durante la prueba un Jenkins local en `127.0.0.1:8080` respondía 404 en lugar de Nginx caído (ver [puerto 8080 ocupado](practicas/pruebas-en-local.md#puerto-8080-ocupado-por-otro-servicio)). Ese camino lo cubren los tests unitarios.
 - **Visto en la prueba, sin cambios:** en el detalle del plan el botón "Chat del plan" queda debajo de la barra de pestañas hasta scrollear (es el comportamiento normal del scroll); mensajes seguidos de la misma persona repiten nombre y avatar; con el aviso de polling visible, el primer mensaje queda en parte debajo del aviso.
 
+## I. Notas del sprint 6: admin y móvil
+
+Decidido con Domenico el 2026-10-14: [endpoints y métricas de admin](#endpoints-y-métricas-de-administración) con vista previa; **suspender solo corta el acceso** (sesiones y sockets; sus planes e inscripciones quedan como están, así es reversible); **reportes con motivos fijos** (`spam`, `harassment`, `inappropriate`, `scam`, `other`) y sin duplicados pendientes; **cola offline para chat, reportes e inscripciones** (no crear/editar planes, perfil ni estados); **AsyncStorage + NetInfo** (funcionan en Expo Go); y **la infraestructura (S6-INF-01 a 04) queda para el equipo de AWS**, sin tocar `infra/`. Lo que quedó abierto o se resolvió con la opción más chica:
+
+### Reglas que se resolvieron con la opción más chica
+- **Resolver un reporte resuelve todos los pendientes sobre lo mismo** (de cualquier persona): la decisión es sobre el contenido. Uno resuelto se puede corregir (revisado ↔ descartado), nunca volver a pendiente. Alternativa: resolver de a uno.
+- **La vista previa se lee en el momento**, no es una copia del reporte: si el plan se editó después, el admin ve la versión nueva; si se borró la cuenta, `preview: null`. Alternativa: guardar una copia al reportar (más datos personales guardados).
+- **Reportar a un usuario** solo exige que la cuenta exista (no que compartan un plan): los IDs de usuario solo se conocen por las vistas públicas de la app.
+- **No se puede suspender a otra cuenta admin** desde el panel (primero se le quita el rol con el script) **ni a sí mismo**.
+- **Volver a mostrar un mensaje oculto no emite nada**: aparece al recargar el historial. Ocultarlo sí emite `chat:hidden` (`{ planId, messageId }`: se agregó `planId` al payload documentado).
+- **Catálogos por `id`**, no por `key` (06 decía `/:key`): la key de carreras y barrios solo es única dentro de su universidad o ciudad. La key y el "padre" no cambian; `department` de una ciudad también se puede editar. Se agregó el código `CATALOG_KEY_TAKEN` (409), que solo usa el panel.
+- **Contraseña de una cuenta admin creada por script:** mínimo 12 caracteres, por variable de entorno (`ADMIN_PASSWORD`), nunca como argumento. `demote` nunca deja la base sin una cuenta admin activa.
+- **Panel:** HTML/JS sin build y sin dependencias externas. La sesión vive solo en memoria. El login usa `deviceLabel: "panel-admin"` (cuenta como una de las 5 sesiones de esa cuenta).
+
+### App
+- **Qué se guarda:** la primera página del feed (por filtros y radio), detalles de planes (hasta 30), "Mis planes", la primera página de cada chat (hasta 20), catálogos y el propio perfil. Todo en AsyncStorage, sin cifrar (no hay tokens ni contraseñas; sí planes, mensajes y el perfil propio). Se borra al cerrar sesión o al vencerse. Alternativa si se quiere cifrar: guardar menos o usar una base cifrada.
+- **La app abre sin conexión** con el último perfil guardado (antes mostraba la pantalla de "no pudimos verificar tu sesión"). El servidor sigue decidiendo si la sesión vale cuando vuelve la red.
+- **Lo encolado nunca se da por hecho:** el detalle del plan dice "Inscripción pendiente… Todavía no estás inscripto" (con "Cancelar"), y un rechazo al sincronizar (p. ej. `PLAN_FULL`) queda con el motivo hasta "Entendido". La pantalla "Pendientes" (desde el aviso de conexión) lista todo con "Reintentar" y "Descartar".
+- **Cuándo se manda la cola:** al volver la conexión, al volver la app a primer plano, al reconectar el chat y en cada vuelta del polling del chat. Nunca con un timer propio ni en segundo plano. Límite: si NetInfo dice "conectado" pero el servidor no responde (p. ej. Nginx caído), lo pendiente espera al próximo de esos momentos (o a "Enviar ahora").
+- **Sin conexión no se ofrecen** el check-in ni el QR (dependen del momento y del lugar), con un aviso. Editar, cerrar, reabrir o cancelar un plan sin red da el error de conexión de siempre (no se encola).
+- **Reportar desde la app:** el plan y quien lo organiza (detalle), cualquier anotado (lista de anotados) y un mensaje de otra persona (pulsación larga en el chat). No se reporta nada propio.
+- **Segundo plano:** sin WebSocket ni polling del chat (se suelta la conexión y se recupera el historial al volver), el refresco automático del detalle no consulta al servidor, y `ACCESS_BACKGROUND_LOCATION` queda bloqueado en el manifiesto de Android.
+- **Dependencias nuevas:** `@react-native-async-storage/async-storage` 2.2 y `@react-native-community/netinfo` 12.0 (las versiones que elige `expo install` para el SDK 57).
+
+### Tests
+- **Timeouts en la primera corrida de jest de la app:** con todos los workers en paralelo, el primer test de varias pantallas superó los 5 s (pasó también en la línea de base, antes de los cambios de este sprint). Con `--maxWorkers=4` pasan todos (53 suites, 730 tests). Si se repite en CI, subir el timeout o limitar los workers.
+- Un `setupFilesAfterEnv` (`mobile/tests/setup.js`) vacía el AsyncStorage simulado antes de cada test.
+
+### Sin probar
+- **Nada de S6 se probó con docker compose:** Docker Desktop no arrancó en la máquina donde se hizo (se cae al iniciar porque no puede borrar un socket viejo en la carpeta `docker-secrets-engine` de AppData). Falta: `nginx -t`, `smoke.sh` (con los checks nuevos del panel) y `chat:hidden` entre dos instancias con Redis.
+- ✅ **El panel se probó en un navegador** (2026-10-14) contra el back real con MongoDB en memoria y las migraciones, servido con las mismas cabeceras que Nginx y `/api/v1` reescrito a `/internal` (un entorno temporal, fuera del repo): login, cuenta sin rol rechazada, cola con vista previa, ocultar y volver a mostrar, resolver, suspender (con confirmación), métricas, catálogos (buscar, editar, agregar, key repetida → 409 con código de seguimiento) y cerrar sesión. Sin violaciones de CSP; un mensaje y un nombre con HTML (`<script>`, `onerror`) se ven como texto.
+- **La app no se probó en un teléfono:** el modo avión (NetInfo real), la cola al volver la red, la pulsación larga y el aviso del chat, ni la app en segundo plano. Verificado con tests (jest) y lint.

@@ -107,6 +107,8 @@ Un **único registro por par** plan–usuario; una baja lo pasa a `cancelled` (c
 
 `reporterId` (del token), `targetType` (`user` \| `plan` \| `message`), `targetId`, `reason`, `description`, `status` (`pending` \| `reviewed` \| `dismissed`), `createdAt`.
 
+**➕ S6:** `reason` es uno de los motivos fijos `spam` \| `harassment` \| `inappropriate` \| `scam` \| `other`; `description` (opcional, obligatoria con `other`) tiene de 1 a 500 caracteres; `resolvedBy` (el admin) y `resolvedAt` se completan al resolverlo. Índice único **parcial** `{ reporterId, targetType, targetId }` solo para los `pending`: la misma persona no puede tener dos reportes pendientes sobre lo mismo (reportar otra vez devuelve el que existía); una vez resuelto, puede volver a reportarlo. Migración `20261014130000-reports-reasons-and-resolution` (sin backfill: no había reportes).
+
 ### `deviceTokens`
 
 `userId`, `token`, `platform` (`android` \| `ios`), `updatedAt`. Se eliminan los tokens que FCM informa como inválidos.
@@ -126,6 +128,7 @@ Un **único registro por par** plan–usuario; una baja lo pasa a `cancelled` (c
 | `messages` | `{ planId: 1, createdAt: -1, _id: -1 }` | Paginación estable del chat |
 | `messages` | `{ senderId: 1, clientId: 1 }` único, parcial (`clientId` string) | Un reintento de envío no duplica el mensaje (**➕ S5**) |
 | `reports` | `{ status: 1, createdAt: 1 }` | Cola de moderación |
+| `reports` | `{ reporterId: 1, targetType: 1, targetId: 1 }` único, parcial (`status: 'pending'`) | Un solo reporte pendiente por persona y objetivo (**➕ S6**) |
 | `deviceTokens` | `{ token: 1 }` único | Un registro por dispositivo |
 | `deviceTokens` | `{ userId: 1 }` | Enviar push a un usuario |
 | `sessions` | `{ sid: 1 }` único | Una sesión por `sid` (lo usa la rotación del refresh) |
