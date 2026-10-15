@@ -155,6 +155,20 @@ export function createParticipationRepository (ParticipationModel) {
       }
       const docs = await ParticipationModel.find({ $and: clauses }).sort({ joinedAt: 1, _id: 1 }).limit(limit).lean()
       return docs.map(toEntity)
+    },
+
+    /**
+     * Para las métricas del panel. `joinedSince` cuenta las inscripciones (o reactivaciones) desde esa fecha que
+     * siguen activas.
+     * @param {{ since: Date }} params
+     * @returns {Promise<{ active: number, joinedSince: number }>}
+     */
+    async countMetrics ({ since }) {
+      const [active, joinedSince] = await Promise.all([
+        ParticipationModel.countDocuments({ status: 'active' }),
+        ParticipationModel.countDocuments({ status: 'active', joinedAt: { $gte: since } })
+      ])
+      return { active, joinedSince }
     }
   }
 }

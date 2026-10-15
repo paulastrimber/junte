@@ -9,6 +9,7 @@ import { objectIdField, z } from '../../shared/validation.js'
 const messagesCursorSchema = z.strictObject({ c: cursorInstantField, i: objectIdField })
 
 const notMember = () => errors.forbidden('Solo quienes están anotados y quien creó el plan pueden usar el chat')
+const messageNotFound = () => errors.notFound('No encontramos ese mensaje')
 
 /**
  * @typedef {{ message: import('./message.repository.js').MessageEntity, sender: object | null }} MessageWithSender
@@ -47,6 +48,25 @@ export function createMessageService ({ plans, participationRepo, messageRepo, u
 
   return {
     requireMember,
+
+    /**
+     * Un mensaje que el usuario puede leer: visible y de un chat del que es parte. Si no, 404 (no se revela que existe).
+     * Lo usan los reportes (S6).
+     * @param {{ messageId: string, userId: string }} params  `userId` sale del token.
+     * @returns {Promise<import('./message.repository.js').MessageEntity>}
+     * @throws {import('../../shared/errors.js').AppError} NOT_FOUND
+     */
+    async requireReadable ({ messageId, userId }) {
+      const message = await messageRepo.findById(messageId)
+      if (!message || message.status !== 'visible') throw messageNotFound()
+      try {
+        await requireMember({ planId: message.planId, userId })
+      } catch (err) {
+        if (err?.code === 'FORBIDDEN' || err?.code === 'NOT_FOUND') throw messageNotFound()
+        throw err
+      }
+      return message
+    },
 
     /**
      * Historial del chat, del más nuevo al más viejo. Solo mensajes visibles.

@@ -4,6 +4,8 @@ export {
 } from './catalog.model.js'
 export { createCatalogRepository } from './catalog.repository.js'
 export { createCatalogService } from './catalog.service.js'
+export { createCatalogAdminService, serializeCatalogRow } from './catalog.admin.js'
+export { ADMIN_CATALOGS, CATALOG_BODIES } from './catalog.admin.validators.js'
 export { createCatalogController } from './catalog.controller.js'
 export { createCatalogRoutes } from './catalog.routes.js'
 export { buildPublicCatalog, checkInterestReferences, checkProfileReferences } from './catalog.rules.js'

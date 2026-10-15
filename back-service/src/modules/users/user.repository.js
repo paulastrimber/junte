@@ -130,6 +130,32 @@ export function createUserRepository (UserModel) {
       return result.matchedCount === 1
     },
 
+    /**
+     * Suspende o reactiva una cuenta (solo el panel de administración; campo solo-backend).
+     * @param {string} id
+     * @param {'active' | 'suspended'} status
+     * @returns {Promise<UserEntity | null>} null si no existe.
+     */
+    async setStatus (id, status) {
+      if (!mongoose.isValidObjectId(id)) return null
+      const doc = await UserModel.findByIdAndUpdate(id, { $set: { status } }, { returnDocument: 'after', runValidators: true }).lean()
+      return doc ? toEntity(doc) : null
+    },
+
+    /**
+     * Para las métricas del panel.
+     * @param {{ since: Date }} params
+     * @returns {Promise<{ total: number, createdSince: number, suspended: number }>}
+     */
+    async countMetrics ({ since }) {
+      const [total, createdSince, suspended] = await Promise.all([
+        UserModel.countDocuments({}),
+        UserModel.countDocuments({ createdAt: { $gte: since } }),
+        UserModel.countDocuments({ status: 'suspended' })
+      ])
+      return { total, createdSince, suspended }
+    },
+
     /** @returns {Promise<UserEntity | null>} */
     async setPhotoKey (id, photoKey) {
       if (!mongoose.isValidObjectId(id)) return null

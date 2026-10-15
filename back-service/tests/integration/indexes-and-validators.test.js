@@ -79,6 +79,29 @@ describe('messages: idempotencia por clientId', () => {
   })
 })
 
+describe('reports: motivos fijos y un solo pendiente por persona y objetivo', () => {
+  const REPORTER_ID = new mongoose.Types.ObjectId()
+  const TARGET_ID = new mongoose.Types.ObjectId()
+  const report = (overrides) => ({ reporterId: REPORTER_ID, targetType: 'plan', targetId: TARGET_ID, reason: 'spam', status: 'pending', ...overrides })
+
+  it('rechaza un segundo reporte pendiente de la misma persona sobre lo mismo', async () => {
+    await raw('reports').insertOne(report())
+
+    await expect(raw('reports').insertOne(report({ reason: 'scam' }))).rejects.toMatchObject({ code: 11000 })
+  })
+
+  it('los resueltos no compiten (índice parcial): se puede volver a reportar', async () => {
+    await raw('reports').insertMany([report({ status: 'reviewed' }), report({ status: 'dismissed' }), report()])
+
+    expect(await raw('reports').countDocuments()).toBe(3)
+  })
+
+  it('rechaza un motivo fuera de la lista y una descripción de más de 500', async () => {
+    await expect(raw('reports').insertOne(report({ reason: 'no-me-gusta' }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('reports').insertOne(report({ description: 'x'.repeat(501) }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+})
+
 describe('validadores $jsonSchema (sin pasar por Mongoose)', () => {
   it('rechaza participantCount mayor que capacity', async () => {
     const plan = await makePlan({ capacity: 2 })
