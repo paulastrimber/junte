@@ -12,10 +12,11 @@ import { SectionHeader } from '../components/SectionHeader.jsx'
 import { Text } from '../components/Text.jsx'
 import { CHECK_IN_STATUS, useCheckIn } from '../hooks/useCheckIn.js'
 import { QR_STATUS, usePlanQr } from '../hooks/usePlanQr.js'
+import { SCREEN_TITLES } from '../navigation/titles.js'
 import { createThemedStyles, palettes, radius, spacing } from '../theme/index.js'
 
 export const TEXTS = Object.freeze({
-  title: 'QR de asistencia',
+  title: SCREEN_TITLES.planQr,
   loading: 'Generando el QR…',
   errorTitle: 'No pudimos mostrar el QR',
   hint: 'Mostrales este QR a quienes llegan para que registren su asistencia. Se renueva solo cada poco más de un minuto: no sirve una foto. La pantalla queda encendida mientras lo mostrás.',

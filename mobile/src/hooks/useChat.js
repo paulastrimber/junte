@@ -93,7 +93,10 @@ export function useChat (planId, { user, isActive = true }) {
       if (generation !== generationRef.current) return
       setState((current) => {
         const { messages, isReplaced } = mergeRecoveredPage(current.messages, page)
-        return { ...current, messages, nextCursor: isReplaced ? page.nextCursor : current.nextCursor }
+        const nextCursor = isReplaced ? page.nextCursor : current.nextCursor
+        // Sin nada nuevo (lo normal en cada tick del polling) se devuelve el mismo estado: React no vuelve a pintar.
+        if (messages === current.messages && nextCursor === current.nextCursor) return current
+        return { ...current, messages, nextCursor }
       })
     } catch (failure) {
       if (generation !== generationRef.current) return
@@ -106,7 +109,10 @@ export function useChat (planId, { user, isActive = true }) {
     const stopStatus = socketService.onStatusChange(setSocketStatus)
     const unsubscribe = socketService.subscribe(
       planId,
-      (message) => setState((current) => ({ ...current, messages: mergeMessages(current.messages, [message]) })),
+      (message) => setState((current) => {
+        const messages = mergeMessages(current.messages, [message])
+        return messages === current.messages ? current : { ...current, messages }
+      }),
       (failure) => {
         if (ACCESS_LOST.has(failure?.code)) setState((current) => ({ ...current, status: CHAT_STATUS.ERROR, error: chatError(failure) }))
       }

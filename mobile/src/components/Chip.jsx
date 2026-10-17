@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Pressable } from 'react-native'
 
 import { borders, createThemedStyles, motion, radius, sizes, spacing, useTheme } from '../theme/index.js'
@@ -13,13 +14,15 @@ const HIT_SLOP = Object.freeze({ top: (sizes.touch - sizes.touchSmall) / 2, bott
  * opción marcada de un `checkbox` lleva una tilde. Lo usan `ChipGroup` e `InterestPicker`.
  * @param {object} props
  * @param {string} props.label  Texto visible y nombre accesible.
+ * @param {string | number} [props.value]  Lo que recibe `onPress`: así quien arma muchos chips (65 intereses) pasa la
+ *   misma función a todos y el `memo` evita volver a pintar los que no cambiaron.
  * @param {boolean} props.selected
- * @param {() => void} props.onPress
+ * @param {(value?: string | number) => void} props.onPress
  * @param {'checkbox' | 'radio'} [props.role]  `checkbox`: se pueden marcar varias; `radio`: una sola del grupo.
  * @param {boolean} [props.disabled]
  * @param {string} [props.icon]  Nombre de Ionicons, antes del texto (se reemplaza por la tilde si está marcada).
  */
-export function Chip ({ label, selected, onPress, role = 'checkbox', disabled = false, icon }) {
+export const Chip = memo(function Chip ({ label, value, selected, onPress, role = 'checkbox', disabled = false, icon }) {
   const styles = useStyles()
   const { colors } = useTheme()
   const leading = selected && role === 'checkbox' ? 'checkmark' : icon
@@ -33,7 +36,7 @@ export function Chip ({ label, selected, onPress, role = 'checkbox', disabled = 
       android_ripple={{ color: colors.ripple }}
       onPress={() => {
         selectionFeedback()
-        onPress()
+        onPress(value)
       }}
       style={({ pressed }) => [styles.chip, selected && styles.selected, pressed && styles.pressed, disabled && styles.disabled]}
     >
@@ -41,7 +44,7 @@ export function Chip ({ label, selected, onPress, role = 'checkbox', disabled = 
       <Text variant='label' color={selected ? 'onPrimary' : 'text'}>{label}</Text>
     </Pressable>
   )
-}
+})
 
 const useStyles = createThemedStyles(({ colors }) => ({
   chip: {

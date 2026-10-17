@@ -380,7 +380,7 @@ describe('navegación', () => {
   // BUG-QA-1: un refresco "silencioso" del detalle (al volver del chat, del QR o del check-in) que falla por red
   // reemplaza todo el plan por la pantalla de error, aunque el plan ya se estaba viendo. En el feed y en Mis planes un
   // refresco fallido conserva los datos (`refreshError`). Esperado: el plan sigue a la vista.
-  it.failing('si el refresco al volver al plan falla por red, el plan sigue a la vista', async () => {
+  it('si el refresco al volver al plan falla por red, el plan sigue a la vista', async () => {
     // El primero (al entrar) responde; el refresco al volver, sin red. (Una función: el handler del beforeEach se pisa.)
     let calls = 0
     api.onGet('/plans/p1').reply(() => (++calls === 1 ? [200, plan({ myParticipation: joined() })] : Promise.reject(Object.assign(new Error('Network Error'), { isAxiosError: true, code: 'ERR_NETWORK' }))))

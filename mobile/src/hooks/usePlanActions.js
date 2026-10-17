@@ -12,7 +12,7 @@ const MESSAGES = Object.freeze({
   [PLAN_ACTION.JOIN]: {
     PLAN_FULL: 'El plan se llenó: ya no quedan lugares.',
     PLAN_CLOSED: 'Este plan ya no admite inscripciones.',
-    ALREADY_JOINED: 'Ya estabas inscripto en este plan.',
+    ALREADY_JOINED: 'Ya tenías tu lugar en este plan.',
     NOT_FOUND: 'Este plan ya no está disponible.'
   },
   [PLAN_ACTION.LEAVE]: {

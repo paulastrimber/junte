@@ -1,7 +1,22 @@
+import { useState } from 'react'
 import { Image, View } from 'react-native'
 
 import { createThemedStyles, fonts, sizes } from '../theme/index.js'
+import { isSameSignedFile } from '../utils/url.js'
 import { Text } from './Text.jsx'
+
+// El back firma la URL de la foto otra vez en cada respuesta. Si la nueva apunta al mismo archivo se sigue usando la
+// que ya se cargó: `Image` cachea por URL completa y, con otra firma, la volvería a descargar y parpadearía. Si esa
+// carga falló (por ejemplo, venció la firma) se pasa a la más reciente.
+function useStablePhotoUri (photoUrl) {
+  const [shown, setShown] = useState({ uri: photoUrl ?? null, hasFailed: false })
+  const latest = photoUrl ?? null
+  if (shown.uri !== latest && (!isSameSignedFile(shown.uri, latest) || shown.hasFailed)) {
+    setShown({ uri: latest, hasFailed: false })
+  }
+  const handleError = () => setShown((current) => (current.hasFailed ? current : { ...current, hasFailed: true }))
+  return { uri: shown.uri, handleError }
+}
 
 /**
  * Foto de perfil (URL firmada de lectura) o la inicial si todavía no hay foto.
@@ -14,12 +29,13 @@ import { Text } from './Text.jsx'
  */
 export function Avatar ({ photoUrl, name, size = sizes.avatarLg, accessibilityLabel, decorative = false }) {
   const styles = useStyles()
+  const photo = useStablePhotoUri(photoUrl)
   const circle = { width: size, height: size, borderRadius: size / 2 }
   const a11y = decorative
     ? { accessible: false, accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' }
     : { accessible: true, accessibilityRole: 'image' }
-  if (photoUrl) {
-    return <Image {...a11y} accessibilityLabel={decorative ? undefined : accessibilityLabel ?? 'Foto de perfil'} source={{ uri: photoUrl }} style={[styles.image, circle]} />
+  if (photo.uri) {
+    return <Image {...a11y} accessibilityLabel={decorative ? undefined : accessibilityLabel ?? 'Foto de perfil'} source={{ uri: photo.uri }} onError={photo.handleError} style={[styles.image, circle]} />
   }
   const initial = (name ?? '?').trim().charAt(0).toUpperCase() || '?'
   const fontSize = Math.round(size * 0.42)

@@ -89,7 +89,7 @@ const dayText = (date) => `${WEEKDAYS[date.getDay()]} ${pad(date.getDate())}/${p
 const timeText = (date) => `${pad(date.getHours())}:${pad(date.getMinutes())}`
 
 /**
- * Inscriptos: "3 de 10", o solo la cantidad si el cupo es ilimitado.
+ * Inscripciones: "3 de 10", o solo la cantidad si el cupo es ilimitado.
  * @param {{ participantCount: number, capacity: number | null }} plan
  */
 export function formatJoined ({ participantCount, capacity }) {

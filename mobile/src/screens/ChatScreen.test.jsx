@@ -121,7 +121,7 @@ describe('ChatScreen: estados', () => {
 
     await renderChat()
 
-    expect(await screen.findByText('Solo quienes están anotados y quien creó el plan pueden usar el chat.')).toBeOnTheScreen()
+    expect(await screen.findByText('Solo quienes se inscribieron y quien creó el plan pueden usar el chat.')).toBeOnTheScreen()
     expect(screen.queryByLabelText(TEXTS.inputLabel)).not.toBeOnTheScreen()
   })
 
@@ -245,7 +245,7 @@ describe('ChatScreen: enviar', () => {
     await fireEvent.press(sendButton())
 
     expect(await screen.findByText(TEXTS.errorTitle)).toBeOnTheScreen()
-    expect(screen.getByText('Solo quienes están anotados y quien creó el plan pueden usar el chat.')).toBeOnTheScreen()
+    expect(screen.getByText('Solo quienes se inscribieron y quien creó el plan pueden usar el chat.')).toBeOnTheScreen()
     expect(screen.queryByText(`${TEXTS.notSent} · ${TEXTS.retrySend}`)).not.toBeOnTheScreen()
   })
 

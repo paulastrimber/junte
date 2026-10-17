@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
+import { AppState } from 'react-native'
 
 import { createPlanQr } from '../services/api/checkins.js'
-import { qrRefreshDelay } from '../utils/attendance.js'
+import { isQrRefreshDue, qrRefreshDelay } from '../utils/attendance.js'
 import { toViewError } from '../utils/errorMessages.js'
 
 export const QR_STATUS = Object.freeze({
@@ -26,6 +27,8 @@ const LOADING_STATE = Object.freeze({ status: QR_STATUS.LOADING, qrToken: null, 
 /**
  * QR de asistencia para la pantalla del creador. Pide uno al entrar y lo renueva solo un poco antes de que venza
  * (cada QR dura alrededor de un minuto y medio; al renovarlo, el anterior sigue valiendo unos segundos). Al salir de la pantalla deja de pedir.
+ * Al volver de segundo plano con un QR que ya tendría que haberse renovado, lo oculta y pide otro enseguida: si no,
+ * se mostraría uno vencido hasta que corra el timer atrasado.
  * @param {string} planId
  */
 export function usePlanQr (planId) {
@@ -35,13 +38,17 @@ export function usePlanQr (planId) {
   useEffect(() => {
     const controller = new AbortController()
     let timer = null
+    // Vencimiento del QR que se está mostrando (null mientras se pide uno o si no hay).
+    let shownExpiresAt = null
 
     // No rechaza nunca: toda falla termina en un estado que la pantalla sabe pintar.
     async function load () {
+      shownExpiresAt = null
       try {
         const { qrToken, expiresAt } = await createPlanQr(planId, { signal: controller.signal })
         if (controller.signal.aborted) return
         setState({ status: QR_STATUS.READY, qrToken, expiresAt, error: null })
+        shownExpiresAt = expiresAt
         timer = setTimeout(load, qrRefreshDelay(expiresAt))
       } catch (failure) {
         if (controller.signal.aborted) return
@@ -56,9 +63,16 @@ export function usePlanQr (planId) {
     }
 
     load()
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next !== 'active' || !shownExpiresAt || !isQrRefreshDue(shownExpiresAt)) return
+      clearTimeout(timer)
+      setState(LOADING_STATE)
+      load()
+    })
     return () => {
       controller.abort()
       clearTimeout(timer)
+      subscription.remove()
     }
   }, [planId, attempt])
 

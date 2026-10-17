@@ -27,9 +27,13 @@ export function usePagedList (fetchPage, { enabled = true } = {}) {
   // `loadMore` lee el estado más reciente sin recrearse en cada render (FlatList lo llama desde onEndReached).
   const stateRef = useRef(state)
   useEffect(() => { stateRef.current = state }, [state])
+  // Guarda sincrónica de "cargar más": `stateRef` se actualiza recién después del commit, y dos `onEndReached`
+  // seguidos antes de eso harían dos requests con el mismo cursor.
+  const isLoadingMoreRef = useRef(false)
 
   const loadFirstPage = useCallback(async ({ isRefreshing = false } = {}) => {
     const generation = ++generationRef.current
+    isLoadingMoreRef.current = false
     setState((current) => (isRefreshing && current.status === LIST_STATUS.READY
       ? { ...current, isRefreshing: true, refreshError: null, loadMoreError: null }
       : stateFor(LIST_STATUS.LOADING)))
@@ -56,9 +60,10 @@ export function usePagedList (fetchPage, { enabled = true } = {}) {
 
   const loadMore = useCallback(async () => {
     const current = stateRef.current
-    if (current.status !== LIST_STATUS.READY || !current.nextCursor || current.isLoadingMore || current.isRefreshing) return
+    if (current.status !== LIST_STATUS.READY || !current.nextCursor || current.isRefreshing || isLoadingMoreRef.current) return
 
     const generation = generationRef.current
+    isLoadingMoreRef.current = true
     setState((previous) => ({ ...previous, isLoadingMore: true, loadMoreError: null }))
     try {
       const page = await fetchPage(current.nextCursor)
@@ -72,10 +77,15 @@ export function usePagedList (fetchPage, { enabled = true } = {}) {
     } catch (failure) {
       if (generation !== generationRef.current) return
       setState((previous) => ({ ...previous, isLoadingMore: false, loadMoreError: toViewError(failure) }))
+    } finally {
+      if (generation === generationRef.current) isLoadingMoreRef.current = false
     }
   }, [fetchPage])
 
-  const refresh = useCallback(() => loadFirstPage({ isRefreshing: true }), [loadFirstPage])
+  // Sin permiso para verla (`enabled: false`) no hay nada que refrescar.
+  const refresh = useCallback(async () => {
+    if (enabled) await loadFirstPage({ isRefreshing: true })
+  }, [enabled, loadFirstPage])
   const retry = useCallback(() => loadFirstPage(), [loadFirstPage])
 
   return { ...state, hasMore: state.nextCursor !== null, loadMore, refresh, retry }

@@ -18,7 +18,7 @@ import { createThemedStyles, radius, spacing } from '../theme/index.js'
 import { MAX_INTERESTS, RECOMMENDED_INTERESTS } from '../utils/catalog.js'
 
 export const TEXTS = Object.freeze({
-  title: 'Bienvenido a junte',
+  title: 'Te damos la bienvenida a junte',
   progress: (step, total) => `Paso ${step} de ${total}`,
   aboutHint: 'Todo es opcional: podés saltar este paso y completarlo después desde tu perfil.',
   birthDate: 'Fecha de nacimiento',

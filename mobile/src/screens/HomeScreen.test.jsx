@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, within } from '@testing-library/react-native'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react-native'
 
 import { CATALOG, COMPLETE_USER, SignedIn, createFakeAuthService, renderWithAuth } from '../../tests/helpers/auth.jsx'
 import { deferred } from '../../tests/helpers/deferred.js'
@@ -298,9 +298,29 @@ describe('HomeScreen (feed)', () => {
       expect(screen.getByRole('button', { name: TEXTS.filtersActive(4) })).toBeOnTheScreen()
       // Cada toque vuelve a pedir el feed, pero reutiliza la ubicación: el GPS se consultó una sola vez.
       expect(getCurrentCoordinates).toHaveBeenCalledTimes(1)
-      expect(lastFeedBody()).toEqual({
+      // La consulta sale cuando se dejan de tocar filtros (FILTERS_DEBOUNCE_MS).
+      await waitFor(() => expect(lastFeedBody()).toEqual({
         availability: 'available', near: NEAR, radiusKm: 2, limit: 20, priceRanges: ['free', 'low'], interests: ['cine'], to: expect.any(String)
-      })
+      }))
+    })
+
+    it('mientras recarga por un filtro, la lista sigue montada con los planes de antes', async () => {
+      withLocation()
+      const next = deferred()
+      getFeed.mockResolvedValueOnce(page([plan('a')])).mockReturnValueOnce(next.promise)
+      await renderHome()
+      await screen.findByText('Plan a')
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.filters }))
+
+      await fireEvent.press(screen.getByRole('checkbox', { name: 'Gratis' }))
+      await fireEvent.press(screen.getByRole('button', { name: FILTERS.apply }))
+
+      expect(await screen.findByLabelText(TEXTS.reloading)).toBeOnTheScreen()
+      expect(screen.getByTestId('feed-list')).toBeOnTheScreen()
+      expect(screen.getByText('Plan a')).toBeOnTheScreen()
+      await act(async () => next.resolve(page([plan('b')])))
+      expect(await screen.findByText('Plan b')).toBeOnTheScreen()
+      expect(screen.queryByLabelText(TEXTS.reloading)).toBeNull()
     })
 
     it('"Limpiar filtros" vuelve al feed sin filtros', async () => {

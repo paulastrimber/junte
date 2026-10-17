@@ -26,13 +26,14 @@ export const TEXTS = Object.freeze({
   notFoundTitle: 'Este plan no está disponible',
   notFoundMessage: 'Puede que se haya cancelado, que ya haya terminado o que el enlace no sea correcto.',
   errorTitle: 'No pudimos cargar el plan.',
+  refreshError: 'No pudimos actualizar el plan.',
   retry: 'Reintentar',
   back: 'Volver',
   when: 'Cuándo',
   where: 'Dónde',
   price: 'Costo',
   spots: 'Cupo',
-  joined: 'Inscriptos',
+  joined: 'Inscripciones',
   activities: 'Tipo de actividad',
   about: 'Descripción',
   creator: 'Organiza',
@@ -43,8 +44,8 @@ export const TEXTS = Object.freeze({
   leave: 'Darme de baja',
   confirmLeave: 'Sí, darme de baja',
   confirmLeaveHint: 'Si te das de baja, tu lugar lo puede ocupar otra persona.',
-  keepJoined: 'Seguir inscripto',
-  joinedNotice: 'Estás inscripto en este plan.',
+  keepJoined: 'Seguir en el plan',
+  joinedNotice: 'Ya tenés tu lugar en este plan.',
   checkIn: 'Registrar mi asistencia',
   checkedIn: 'Ya registraste tu asistencia.',
   noShow: 'No registraste tu asistencia a este plan.',
@@ -59,7 +60,7 @@ export const TEXTS = Object.freeze({
   keepPlan: 'No cancelar',
   participants: 'Quiénes van',
   participantsLoading: 'Cargando la lista…',
-  participantsEmpty: 'Todavía no hay nadie anotado.',
+  participantsEmpty: 'Todavía no se inscribió nadie.',
   participantsError: 'No pudimos cargar la lista.',
   participantsMore: 'Ver más',
   statusLabels: { closed: 'Inscripciones cerradas', cancelled: 'Plan cancelado', completed: 'Plan finalizado' }
@@ -128,7 +129,7 @@ export default function PlanScreen ({ navigation, route }) {
   // `version` cambia cuando se vuelve de editar: fuerza a pedir el plan otra vez.
   const { planId, version = 0 } = route.params
   const detail = usePlanDetail(planId, { version, navigation })
-  const { status, plan, error, reload, can, activities, actions, participants, confirmation } = detail
+  const { status, plan, error, refreshError, reload, can, activities, actions, participants, confirmation } = detail
   const { join, closeSignUps, reopenSignUps } = actions
   const { askCancel, askLeave, confirm, dismiss } = confirmation
 
@@ -157,6 +158,8 @@ export default function PlanScreen ({ navigation, route }) {
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.group}>
         <Text variant='title' accessibilityRole='header'>{plan.title}</Text>
+        {/* Falló un refresco: se sigue viendo el plan de antes, con el aviso. */}
+        <ErrorBanner title={TEXTS.refreshError} error={refreshError} />
         {statusLabel ? <Notice tone={plan.status === 'cancelled' ? 'danger' : 'warning'} message={statusLabel} /> : null}
         {plan.isFull ? <Notice tone='warning' icon='lock-closed-outline' message={TEXTS.full} /> : null}
       </View>

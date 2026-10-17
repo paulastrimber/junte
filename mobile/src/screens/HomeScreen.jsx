@@ -25,6 +25,7 @@ export const TEXTS = Object.freeze({
   filters: 'Filtros',
   filtersActive: (count) => `Filtros, ${count} ${count === 1 ? 'activo' : 'activos'}`,
   loading: 'Buscando planes…',
+  reloading: 'Actualizando los planes con los filtros…',
   errorTitle: 'No pudimos cargar los planes.',
   retry: 'Reintentar',
   emptyTitle: 'No hay planes para mostrar',
@@ -64,6 +65,7 @@ export default function HomeScreen ({ navigation }) {
   const { setValue, toggleInterest, togglePriceRange, reset } = filters
 
   const openPlan = useCallback((planId) => navigation.navigate(ROUTES.PLAN, { planId }), [navigation])
+  const closeFilters = useCallback(() => setAreFiltersOpen(false), [])
   const renderPlan = useCallback(({ item }) => (
     <PlanCard
       id={item.id}
@@ -98,6 +100,9 @@ export default function HomeScreen ({ navigation }) {
           onPress={() => setAreFiltersOpen(true)}
         />
       </View>
+      {feed.isReloading
+        ? <ActivityIndicator accessibilityLabel={TEXTS.reloading} accessibilityLiveRegion='polite' color={colors.primary} style={styles.start} />
+        : null}
       {isFullSection ? <Notice tone='info' icon='lock-closed-outline' message={TEXTS.fullHint} /> : null}
       {feed.locationNotice ? <Notice tone='warning' icon='location-outline' message={LOCATION_TEXTS[feed.locationNotice]} /> : null}
       {feed.refreshError
@@ -175,7 +180,7 @@ export default function HomeScreen ({ navigation }) {
 
       <FeedFilters
         visible={areFiltersOpen}
-        onClose={() => setAreFiltersOpen(false)}
+        onClose={closeFilters}
         values={filters.values}
         priceRangeOptions={filters.priceRangeOptions}
         interestCategories={filters.interestCategories}

@@ -98,7 +98,7 @@ describe('PlanScreen: inscripción, asistencia y estado', () => {
     it.each([
       ['PLAN_FULL', 'El plan se llenó: ya no quedan lugares.'],
       ['PLAN_CLOSED', 'Este plan ya no admite inscripciones.'],
-      ['ALREADY_JOINED', 'Ya estabas inscripto en este plan.']
+      ['ALREADY_JOINED', 'Ya tenías tu lugar en este plan.']
     ])('%s: explica el motivo y vuelve a pedir el plan', async (code, message) => {
       getPlan.mockResolvedValueOnce(plan()).mockResolvedValue(plan({ isFull: true, availableSpots: 0, participantCount: 10 }))
       joinPlan.mockRejectedValue(new ApiError({ status: 409, code, message: 'mensaje del servidor' }))

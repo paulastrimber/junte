@@ -63,7 +63,7 @@ describe('ChipGroup', () => {
 
   // BUG-QA-4: los segmentos del control segmentado miden 40 (`touchSmall`) y, a diferencia de Chip y del Button `sm`,
   // no completan el área táctil hasta 48 con `hitSlop`.
-  it.failing('cada segmento del control segmentado mide al menos 48 de alto contando el hitSlop', async () => {
+  it('cada segmento del control segmentado mide al menos 48 de alto contando el hitSlop', async () => {
     await render(<ChipGroup label='Qué planes ver' options={OPTIONS} selected={['available']} onSelect={jest.fn()} variant='segmented' />)
 
     for (const segment of screen.getAllByRole('radio')) expect(touchHeight(segment)).toBeGreaterThanOrEqual(sizes.touch)

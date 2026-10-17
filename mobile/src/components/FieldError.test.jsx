@@ -50,7 +50,7 @@ describe('FormField', () => {
 
   // BUG-QA-5: al enfocar un campo con error, el lector de pantalla lee solo la etiqueta (y la ayuda): el error queda
   // en otro elemento y no se asocia al campo. Lo esperable es que el error sea parte de lo que se anuncia del campo.
-  it.failing('el error forma parte de lo que el lector anuncia al enfocar el campo', async () => {
+  it('el error forma parte de lo que el lector anuncia al enfocar el campo', async () => {
     await render(<FormField label='Título' error='El título necesita al menos 3 caracteres.' value='' onChangeText={jest.fn()} />)
 
     const input = screen.getByLabelText(/Título/)
@@ -70,7 +70,7 @@ describe('ErrorBanner', () => {
   // BUG-QA-6: el banner pone `accessibilityRole='alert'` en una View que no es un elemento accesible (sin
   // `accessible` ni `accessibilityLiveRegion`): el lector no lo trata como alerta y un error que aparece solo (un
   // refresco fallido, "cargar más") no se anuncia. Lo esperable: un elemento accesible con rol alerta y su texto.
-  it.failing('se anuncia como alerta con el título y el mensaje', async () => {
+  it('se anuncia como alerta con el título y el mensaje', async () => {
     await render(<ErrorBanner title='No pudimos actualizar los planes.' error={{ code: 'NETWORK_ERROR', message: 'Revisá tu conexión.', requestId: null }} />)
 
     expect(screen.getByRole('alert')).toHaveTextContent(/No pudimos actualizar los planes\..*Revisá tu conexión\./)

@@ -1,4 +1,5 @@
 // Funciones puras del chat: ids de idempotencia, fusión de mensajes y formato de la hora.
+import { isSameSignedFile } from './url.js'
 
 /** Estado de un mensaje en la app. Los que vienen del servidor siempre están `sent`. */
 export const MESSAGE_STATUS = Object.freeze({ SENT: 'sent', PENDING: 'pending', FAILED: 'failed' })
@@ -34,25 +35,48 @@ export function sortMessages (messages) {
   })
 }
 
+// Quien escribió es el mismo si solo cambió la firma de la URL de su foto (el back la firma de nuevo en cada respuesta).
+function isSameSender (a, b) {
+  if (a === b) return true
+  if (!a || !b) return false
+  return a.id === b.id && a.name === b.name && a.reputation === b.reputation && isSameSignedFile(a.photoUrl, b.photoUrl)
+}
+
+// Un mensaje que volvió a llegar sin cambios (por el polling o al reconectar) conserva el objeto que ya estaba: así
+// la fila memoizada no se vuelve a pintar y el avatar no se vuelve a descargar por una URL firmada nueva.
+function isSameServerMessage (saved, incoming) {
+  if (saved.status !== MESSAGE_STATUS.SENT) return false
+  return Object.keys(incoming).every((key) => (key === 'sender'
+    ? isSameSender(saved.sender, incoming.sender)
+    : key === 'status' || Object.is(saved[key], incoming[key])))
+}
+
 /**
  * Suma mensajes del servidor a la lista, sin duplicar: uno con el mismo `id` reemplaza al que ya estaba, y uno con
- * el `clientId` de un envío propio sin confirmar (pendiente o fallido) lo reemplaza.
- * @param {object[]} current
+ * el `clientId` de un envío propio sin confirmar (pendiente o fallido) lo reemplaza. Lo que llega igual a lo que ya
+ * había no se toca y, si no cambió nada, devuelve la misma lista (`current`).
+ * @param {object[]} current  Ordenada como la devuelve esta función.
  * @param {object[]} incoming  Mensajes tal como los devuelve el servidor.
- * @returns {object[]} lista nueva, del más nuevo al más viejo.
+ * @returns {object[]} lista del más nuevo al más viejo.
  */
 export function mergeMessages (current, incoming) {
   const merged = [...current]
+  let hasChanges = false
   for (const message of incoming) {
-    const saved = { ...message, status: MESSAGE_STATUS.SENT }
-    let index = merged.findIndex((item) => item.id === saved.id)
-    if (index === -1 && saved.clientId) {
-      index = merged.findIndex((item) => isUnsent(item) && item.clientId === saved.clientId)
+    let index = merged.findIndex((item) => item.id === message.id)
+    if (index === -1 && message.clientId) {
+      index = merged.findIndex((item) => isUnsent(item) && item.clientId === message.clientId)
     }
+    const previous = index === -1 ? null : merged[index]
+    if (previous && isSameServerMessage(previous, message)) continue
+    // Si solo cambió la firma de la foto se conserva el `sender` anterior (misma imagen, misma URL para `Image`).
+    const sender = previous && isSameSender(previous.sender, message.sender) ? previous.sender : message.sender
+    const saved = { ...message, sender, status: MESSAGE_STATUS.SENT }
     if (index === -1) merged.push(saved)
     else merged[index] = saved
+    hasChanges = true
   }
-  return sortMessages(merged)
+  return hasChanges ? sortMessages(merged) : current
 }
 
 /**

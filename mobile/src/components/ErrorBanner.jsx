@@ -12,7 +12,9 @@ import { Text } from './Text.jsx'
 export function ErrorBanner ({ error, message = error?.message, requestId = error?.requestId, title }) {
   if (!message) return null
   return (
-    <Notice tone='danger' title={title} message={message} accessibilityRole='alert'>
+    // `accessible`: el aviso es UN elemento con rol de alerta (título y mensaje juntos); si no, el lector no lo trata
+    // como alerta. `accessibilityLiveRegion` lo anuncia en Android cuando aparece solo (un refresco o "cargar más").
+    <Notice tone='danger' title={title} message={message} accessible accessibilityRole='alert' accessibilityLiveRegion='polite'>
       {/* El requestId sirve para rastrear la falla en los logs; solo se muestra en desarrollo. */}
       {__DEV__ && requestId ? <Text variant='caption' color='textMuted' selectable>requestId: {requestId}</Text> : null}
     </Notice>

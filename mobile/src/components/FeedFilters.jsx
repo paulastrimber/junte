@@ -1,4 +1,4 @@
-import { useContext } from 'react'
+import { memo, useCallback, useContext, useMemo } from 'react'
 import { Modal, Platform, ScrollView, View } from 'react-native'
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context'
 
@@ -36,12 +36,15 @@ const RADIUS_CHOICES = RADIUS_OPTIONS_KM.map((km) => ({ key: km, label: radiusLa
  * @param {(key: string) => void} props.onTogglePriceRange
  * @param {() => void} props.onReset
  */
-export function FeedFilters ({ visible, onClose, values, priceRangeOptions, interestCategories, onChange, onToggleInterest, onTogglePriceRange, onReset }) {
+// `memo`: Home se vuelve a pintar con cada cambio del feed y el panel tiene ~65 chips; solo se pinta si cambian sus props.
+export const FeedFilters = memo(function FeedFilters ({ visible, onClose, values, priceRangeOptions, interestCategories, onChange, onToggleInterest, onTogglePriceRange, onReset }) {
   const styles = useStyles()
   // Fuera de un navegador (tests de un componente suelto) no hay proveedor de áreas seguras.
   const insets = useContext(SafeAreaInsetsContext)
   const isSheet = Platform.OS === 'ios'
-  const priceChoices = priceRangeOptions.map((range) => ({ key: range.key, label: priceRangeLabel(range) }))
+  const priceChoices = useMemo(() => priceRangeOptions.map((range) => ({ key: range.key, label: priceRangeLabel(range) })), [priceRangeOptions])
+  const selectRadius = useCallback((km) => onChange('radiusKm', km), [onChange])
+  const selectDate = useCallback((key) => onChange('datePreset', key), [onChange])
   return (
     <Modal
       visible={visible}
@@ -55,11 +58,11 @@ export function FeedFilters ({ visible, onClose, values, priceRangeOptions, inte
           <Text variant='title' accessibilityRole='header'>{TEXTS.title}</Text>
 
           <View style={styles.section}>
-            <ChipGroup label={TEXTS.radius} options={RADIUS_CHOICES} selected={[values.radiusKm]} onSelect={(km) => onChange('radiusKm', km)} />
+            <ChipGroup label={TEXTS.radius} options={RADIUS_CHOICES} selected={[values.radiusKm]} onSelect={selectRadius} />
             <Text variant='caption' color='textMuted'>{TEXTS.radiusHint}</Text>
           </View>
 
-          <ChipGroup label={TEXTS.date} options={DATE_PRESETS} selected={[values.datePreset]} onSelect={(key) => onChange('datePreset', key)} />
+          <ChipGroup label={TEXTS.date} options={DATE_PRESETS} selected={[values.datePreset]} onSelect={selectDate} />
 
           {priceChoices.length > 0
             ? <ChipGroup label={TEXTS.price} options={priceChoices} selected={values.priceRanges} onSelect={onTogglePriceRange} multiple />
@@ -81,7 +84,7 @@ export function FeedFilters ({ visible, onClose, values, priceRangeOptions, inte
       </View>
     </Modal>
   )
-}
+})
 
 const useStyles = createThemedStyles(({ colors }) => ({
   container: { flex: 1, backgroundColor: colors.background },

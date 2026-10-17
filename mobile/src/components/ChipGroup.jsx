@@ -5,6 +5,9 @@ import { Chip } from './Chip.jsx'
 import { selectionFeedback } from './haptics.js'
 import { Text } from './Text.jsx'
 
+// El segmento mide 40 de alto: el área táctil se completa hasta 48 por fuera, como en `Chip`.
+const SEGMENT_HIT_SLOP = Object.freeze({ top: (sizes.touch - sizes.touchSmall) / 2, bottom: (sizes.touch - sizes.touchSmall) / 2 })
+
 /**
  * Grupo de opciones como chips. Con `multiple` se pueden marcar varias (checkbox); si no, una sola (radio).
  * Presentacional: no sabe qué significan las opciones.
@@ -32,9 +35,10 @@ export function ChipGroup ({ label, options, selected, onSelect, multiple = fals
               <Chip
                 key={option.key}
                 label={option.label}
+                value={option.key}
                 role={multiple ? 'checkbox' : 'radio'}
                 selected={selected.includes(option.key)}
-                onPress={() => onSelect(option.key)}
+                onPress={onSelect}
               />
             ))}
           </View>
@@ -57,6 +61,7 @@ function Segmented ({ options, selected, onSelect }) {
             accessibilityRole='radio'
             accessibilityLabel={option.label}
             accessibilityState={{ checked: isSelected }}
+            hitSlop={SEGMENT_HIT_SLOP}
             android_ripple={{ color: colors.ripple }}
             onPress={() => {
               selectionFeedback()

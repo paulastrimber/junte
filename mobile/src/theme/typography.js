@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons'
 // Un import por peso (no desde la raíz del paquete): así el binario lleva solo los cinco archivos que se usan.
 import { PlusJakartaSans_400Regular as Regular } from '@expo-google-fonts/plus-jakarta-sans/400Regular'
 import { PlusJakartaSans_500Medium as Medium } from '@expo-google-fonts/plus-jakarta-sans/500Medium'
@@ -5,8 +6,12 @@ import { PlusJakartaSans_600SemiBold as SemiBold } from '@expo-google-fonts/plus
 import { PlusJakartaSans_700Bold as Bold } from '@expo-google-fonts/plus-jakarta-sans/700Bold'
 import { PlusJakartaSans_800ExtraBold as ExtraBold } from '@expo-google-fonts/plus-jakarta-sans/800ExtraBold'
 
-/** Archivos de fuente que `App` carga al arrancar (un archivo por peso). */
+/**
+ * Archivos de fuente que `App` carga al arrancar: uno por peso y la de los íconos. `@expo/vector-icons` carga Ionicons
+ * recién cuando se pinta el primer ícono, y la barra de tabs aparecía un instante sin íconos.
+ */
 export const fontAssets = Object.freeze({
+  ...Ionicons.font,
   PlusJakartaSans_400Regular: Regular,
   PlusJakartaSans_500Medium: Medium,
   PlusJakartaSans_600SemiBold: SemiBold,

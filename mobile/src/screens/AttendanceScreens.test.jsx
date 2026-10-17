@@ -1,5 +1,6 @@
 import { Camera } from 'expo-camera'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native'
+import { AppState } from 'react-native'
 
 import { COMPLETE_USER, SignedIn, createFakeAuthService, renderWithAuth, CATALOG } from '../../tests/helpers/auth.jsx'
 import { deferred } from '../../tests/helpers/deferred.js'
@@ -37,6 +38,8 @@ const apiError = (status, code, message) => new ApiError({ status, code, message
 beforeEach(() => {
   jest.resetAllMocks()
   navigation.addListener.mockImplementation(() => () => {})
+  // `resetAllMocks` también le borra la implementación al mock de AppState de React Native.
+  AppState.addEventListener.mockImplementation(() => ({ remove: jest.fn() }))
 })
 
 describe('CheckInScreen', () => {

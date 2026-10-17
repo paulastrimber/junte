@@ -1,7 +1,7 @@
 // Qué texto mostrar para cada `code` de error. La app DECIDE según `code` (nunca según `message`); el
 // `message` del servidor es el respaldo cuando el código no tiene un texto propio acá.
 import { toApiError } from '../services/api/client.js'
-import { CLIENT_ERROR_CODES, isApiError } from '../services/api/errors.js'
+import { CLIENT_ERROR_CODES, defaultMessageFor, isApiError } from '../services/api/errors.js'
 
 const MESSAGES = Object.freeze({
   EMAIL_TAKEN: 'Ya existe una cuenta con ese email.',
@@ -18,12 +18,13 @@ const MESSAGES = Object.freeze({
 
 /** Textos del chat: el mismo `code` (FORBIDDEN, NOT_FOUND…) significa otra cosa que en el resto de la app. */
 export const CHAT_ERROR_MESSAGES = Object.freeze({
-  FORBIDDEN: 'Solo quienes están anotados y quien creó el plan pueden usar el chat.',
+  FORBIDDEN: 'Solo quienes se inscribieron y quien creó el plan pueden usar el chat.',
   NOT_FOUND: 'Este plan no está disponible.',
   VALIDATION_ERROR: 'El mensaje no es válido: tiene que tener entre 1 y 2000 caracteres.'
 })
 
-const GENERIC = 'Ocurrió un error inesperado. Probá de nuevo.'
+// Un solo texto genérico en toda la app: el mismo que usa el ApiError cuando no hay otro.
+const GENERIC = defaultMessageFor(CLIENT_ERROR_CODES.UNKNOWN_ERROR)
 
 /**
  * @param {unknown} error
@@ -49,8 +50,10 @@ export function messageForError (error, overrides = {}) {
  */
 export function toViewError (error, overrides = {}) {
   const apiError = toApiError(error)
-  // Un error que no vino de la API (de programación) usa el texto genérico, no el del ApiError que lo envuelve.
-  const message = isApiError(error) ? messageForError(apiError, overrides) : GENERIC
+  // Un error de programación (ni ApiError ni de axios: `toApiError` lo deja como UNKNOWN_ERROR) usa el texto genérico,
+  // sin exponer su mensaje interno. Un error de axios crudo (sin el interceptor) se explica igual que su ApiError.
+  const isProgrammingError = !isApiError(error) && apiError.code === CLIENT_ERROR_CODES.UNKNOWN_ERROR
+  const message = isProgrammingError ? GENERIC : messageForError(apiError, overrides)
   return { code: apiError.code, message, requestId: apiError.requestId ?? null }
 }
 

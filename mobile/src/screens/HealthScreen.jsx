@@ -7,13 +7,14 @@ import { Notice } from '../components/Notice.jsx'
 import { Screen } from '../components/Screen.jsx'
 import { Text } from '../components/Text.jsx'
 import { HEALTH_VIEW_STATUS, useHealth } from '../hooks/useHealth.js'
+import { SCREEN_TITLES } from '../navigation/titles.js'
 import { spacing } from '../theme/index.js'
 
 // Pantalla de diagnóstico (S1-MOB-02): verifica que la app llega a la API del entorno.
 // Muestra code y requestId siempre (también fuera de desarrollo) porque su único fin es rastrear fallas en los logs.
 
 export const TEXTS = Object.freeze({
-  title: 'Estado del servidor',
+  title: SCREEN_TITLES.health,
   loading: 'Consultando el servidor…',
   ok: 'Todo funciona: la API responde.',
   degraded: 'El servidor responde, pero algún servicio interno no está disponible.',

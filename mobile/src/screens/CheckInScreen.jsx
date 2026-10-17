@@ -11,10 +11,11 @@ import { QrScanner } from '../components/QrScanner.jsx'
 import { Text } from '../components/Text.jsx'
 import { CAMERA_PERMISSION, useCameraPermission } from '../hooks/useCameraPermission.js'
 import { CHECK_IN_STATUS, useCheckIn } from '../hooks/useCheckIn.js'
+import { SCREEN_TITLES } from '../navigation/titles.js'
 import { createThemedStyles, sizes, spacing } from '../theme/index.js'
 
 export const TEXTS = Object.freeze({
-  title: 'Registrar asistencia',
+  title: SCREEN_TITLES.checkIn,
   askingCamera: 'Pidiendo permiso para usar la cámara…',
   cameraDenied: 'Para escanear el QR necesitamos la cámara. Dale permiso a junte desde los ajustes del teléfono.',
   retryCamera: 'Probar de nuevo',

@@ -64,7 +64,7 @@ describe('toViewError (S6-MOB-05)', () => {
     // BUG-QA-2: `toViewError` documenta que acepta "un error de axios", pero si recibe uno crudo (de un cliente sin el
     // interceptor, p. ej. la subida a S3 o un service nuevo) devuelve `code: NETWORK_ERROR` con el texto GENÉRICO:
     // el code y el mensaje se contradicen. Esperado: el mismo texto que con el ApiError equivalente.
-    it.failing('un error de axios crudo (sin pasar por el interceptor) da el mismo texto que el ApiError equivalente', () => {
+    it('un error de axios crudo (sin pasar por el interceptor) da el mismo texto que el ApiError equivalente', () => {
       const raw = new AxiosError('Network Error', AxiosError.ERR_NETWORK)
 
       expect(toViewError(raw)).toEqual({ code: CLIENT_ERROR_CODES.NETWORK_ERROR, message: NETWORK_TEXT, requestId: null })

@@ -7,7 +7,7 @@ import { useParticipants } from './useParticipants.js'
 import { usePlan } from './usePlan.js'
 import { PLAN_ACTION, usePlanActions } from './usePlanActions.js'
 import { usePlanAutoRefresh } from './usePlanAutoRefresh.js'
-import { useRefreshOnFocus } from './useScreenFocus.js'
+import { useRefreshOnFocus, useScreenFocus } from './useScreenFocus.js'
 
 // Acciones que se confirman antes de mandarse: cancelar no se puede deshacer y, al darse de baja, el lugar liberado
 // lo puede ocupar otra persona.
@@ -17,31 +17,33 @@ const CONFIRMABLE = Object.freeze([PLAN_ACTION.CANCEL, PLAN_ACTION.LEAVE])
  * Controller del detalle de un plan: el plan, lo que el usuario puede hacer, las acciones, la lista de anotados y la
  * confirmación de las acciones que no tienen vuelta atrás. La pantalla solo pinta lo que devuelve.
  *
- * Cada cambio confirmado por el servidor vuelve a pedir el plan (sin pasar por "cargando") y la lista de anotados.
- * También se refresca al volver a la pantalla (del QR, del check-in), cuando llega el próximo momento que cambia lo
- * que se puede hacer y cuando la app vuelve a primer plano.
+ * Cada cambio confirmado por el servidor vuelve a pedir el plan y la lista de anotados, los dos sin pasar por
+ * "cargando" (lo que se ve queda a la vista hasta que llega lo nuevo). También se refresca al volver a la pantalla (del
+ * QR, del check-in), cuando llega el próximo momento que cambia lo que se puede hacer (solo el plan) y cuando la app
+ * vuelve de segundo plano con el detalle a la vista.
  * @param {string} planId
  * @param {object} options
  * @param {number} [options.version]  Cambia al volver de editar el plan: lo pide otra vez desde "cargando".
  * @param {{ addListener: (event: string, handler: () => void) => () => void }} options.navigation
  */
 export function usePlanDetail (planId, { version = 0, navigation }) {
-  const { status, plan, error, reload, refresh } = usePlan(planId, version)
+  const { status, plan, error, refreshError, reload, refresh } = usePlan(planId, version)
   const { catalog } = useCatalogs()
 
-  const [changes, setChanges] = useState(0)
+  const can = useMemo(() => (plan ? planActions(plan) : null), [plan])
+  const participants = useParticipants(planId, { enabled: Boolean(can?.canSeeParticipants) })
+  const refreshParticipants = participants.refresh
   const onChanged = useCallback(() => {
-    setChanges((value) => value + 1)
     refresh()
-  }, [refresh])
+    refreshParticipants()
+  }, [refresh, refreshParticipants])
 
   const actions = usePlanActions(planId, { onChanged })
-  const can = useMemo(() => (plan ? planActions(plan) : null), [plan])
-  const participants = useParticipants(planId, { enabled: Boolean(can?.canSeeParticipants), version: changes })
   const activities = useMemo(() => (plan ? interestNames(plan.interests, catalog) : []), [plan, catalog])
 
   useRefreshOnFocus(navigation, onChanged)
-  usePlanAutoRefresh(plan, refresh)
+  const isFocused = useScreenFocus(navigation)
+  usePlanAutoRefresh(plan, refresh, { isFocused, onForeground: onChanged })
 
   // Qué acción espera confirmación (`PLAN_ACTION.CANCEL` o `PLAN_ACTION.LEAVE`), o null.
   const [confirming, setConfirming] = useState(null)
@@ -63,6 +65,7 @@ export function usePlanDetail (planId, { version = 0, navigation }) {
     status,
     plan,
     error,
+    refreshError,
     reload,
     can,
     activities,

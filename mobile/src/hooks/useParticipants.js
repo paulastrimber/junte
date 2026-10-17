@@ -7,16 +7,15 @@ const PAGE_SIZE = 20
 
 /**
  * Anotados de un plan (nombre, foto y reputación). Solo los ven los participantes activos y el creador: con
- * `enabled: false` no se pide nada. `version` cambia cuando cambió la lista (alguien se inscribió o se dio de baja).
+ * `enabled: false` no se pide nada. Cuando cambió la lista (alguien se inscribió o se dio de baja) se llama a
+ * `refresh`, que la vuelve a pedir sin vaciarla ni pasar por "cargando".
  * @param {string} planId
- * @param {{ enabled: boolean, version?: number }} options
+ * @param {{ enabled: boolean }} options
  */
-export function useParticipants (planId, { enabled, version = 0 }) {
+export function useParticipants (planId, { enabled }) {
   const fetchPage = useCallback(
     (cursor) => listParticipants(planId, { limit: PAGE_SIZE, ...(cursor ? { cursor } : {}) }),
-    // `version` no se usa adentro: está para volver a pedir la lista cuando cambia.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [planId, version]
+    [planId]
   )
   return usePagedList(fetchPage, { enabled })
 }

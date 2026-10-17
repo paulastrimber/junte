@@ -35,7 +35,7 @@ export const TEXTS = Object.freeze({
   statusLabels: { closed: 'Inscripciones cerradas', cancelled: 'Cancelado', completed: 'Finalizado' },
   checkedIn: 'Asististe',
   noShow: 'No asististe',
-  joined: 'Inscripto',
+  joined: 'Inscripción activa',
   findPlans: 'Buscar planes',
   createPlan: 'Crear un plan'
 })

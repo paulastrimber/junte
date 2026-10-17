@@ -24,7 +24,8 @@ export function FormField ({ label, error, icon, hint, onFocus, onBlur, multilin
         {icon ? <Icon name={icon} color={isFocused ? 'primary' : 'textMuted'} /> : null}
         <TextInput
           accessibilityLabel={label}
-          accessibilityHint={hint}
+          // Con error, el lector lo anuncia junto con el campo (la ayuda no se ve mientras hay error).
+          accessibilityHint={error || hint}
           style={[styles.input, multiline && styles.multiline, style]}
           placeholderTextColor={colors.textMuted}
           selectionColor={colors.primary}

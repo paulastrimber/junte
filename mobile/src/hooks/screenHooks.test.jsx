@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native'
 
 import { COMPLETE_USER, createFakeAuthService } from '../../tests/helpers/auth.jsx'
+import { deferred } from '../../tests/helpers/deferred.js'
 import { AuthProvider } from '../contexts/AuthContext.jsx'
 import { getCatalogs } from '../services/api/catalogs.js'
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
@@ -225,5 +226,32 @@ describe('usePlanDetail', () => {
     await navigation.emit('focus')
     await waitFor(() => expect(getPlan).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(listParticipants).toHaveBeenCalledTimes(2))
+  })
+
+  it('al volver a la pantalla, los anotados siguen a la vista mientras llega la lista nueva (no vuelven a "cargando")', async () => {
+    getPlan.mockResolvedValue(plan())
+    const again = deferred()
+    listParticipants.mockResolvedValueOnce({ items: [{ id: 'u3', name: 'Ana' }], nextCursor: null }).mockReturnValueOnce(again.promise)
+    const { result, navigation } = await renderDetail()
+    await waitFor(() => expect(result.current.participants.status).toBe('ready'))
+    await navigation.emit('focus')
+
+    await navigation.emit('focus')
+    await waitFor(() => expect(listParticipants).toHaveBeenCalledTimes(2))
+
+    expect(result.current.participants).toMatchObject({ status: 'ready', items: [{ id: 'u3', name: 'Ana' }] })
+    await act(async () => again.resolve({ items: [], nextCursor: null }))
+    expect(result.current.participants.items).toEqual([])
+  })
+
+  it('si falla un refresco (sin red), el plan sigue a la vista con refreshError', async () => {
+    getPlan.mockResolvedValueOnce(plan()).mockRejectedValueOnce(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
+    const { result, navigation } = await renderDetail()
+    await navigation.emit('focus')
+
+    await navigation.emit('focus')
+    await waitFor(() => expect(result.current.refreshError).toMatchObject({ code: CLIENT_ERROR_CODES.NETWORK_ERROR }))
+
+    expect(result.current).toMatchObject({ status: 'ready', plan: { id: 'p1' } })
   })
 })

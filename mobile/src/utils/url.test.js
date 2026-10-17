@@ -1,4 +1,4 @@
-import { originOf } from './url.js'
+import { isSameSignedFile, originOf, withoutSignature } from './url.js'
 
 describe('originOf', () => {
   it.each([
@@ -13,5 +13,20 @@ describe('originOf', () => {
 
   it.each(['', 'api.junte.app/api/v1', 'ftp://x.test/a', '/api/v1', null, undefined])('rechaza %j', (url) => {
     expect(() => originOf(url)).toThrow(/URL http\(s\)/)
+  })
+})
+
+describe('withoutSignature e isSameSignedFile', () => {
+  it('saca la query (firma y vencimiento) de una URL firmada', () => {
+    expect(withoutSignature('https://b.s3.amazonaws.com/users/u1/a.jpg?X-Amz-Signature=x#y')).toBe('https://b.s3.amazonaws.com/users/u1/a.jpg')
+    expect(withoutSignature(null)).toBeNull()
+    expect(withoutSignature('')).toBeNull()
+  })
+
+  it('compara por archivo, no por firma', () => {
+    expect(isSameSignedFile('https://b.test/a.jpg?s=1', 'https://b.test/a.jpg?s=2')).toBe(true)
+    expect(isSameSignedFile('https://b.test/a.jpg?s=1', 'https://b.test/b.jpg?s=1')).toBe(false)
+    expect(isSameSignedFile(null, undefined)).toBe(true)
+    expect(isSameSignedFile(null, 'https://b.test/a.jpg')).toBe(false)
   })
 })

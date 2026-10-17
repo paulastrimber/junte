@@ -71,6 +71,43 @@ describe('mergeMessages', () => {
   })
 })
 
+describe('mergeMessages: identidad de lo que no cambió', () => {
+  const photo = (signature) => `https://bucket.s3.amazonaws.com/users/u1/foto.jpg?X-Amz-Expires=600&X-Amz-Signature=${signature}`
+  const withPhoto = (id, createdAt, signature) => message(id, createdAt, { sender: { id: 'u1', name: 'Ana', photoUrl: photo(signature) } })
+
+  it('si llegan los mismos mensajes devuelve la misma lista', () => {
+    const current = mergeMessages([], [message('m2', '2026-10-14T10:01:00Z'), message('m1', '2026-10-14T10:00:00Z')])
+
+    expect(mergeMessages(current, [message('m1', '2026-10-14T10:00:00Z'), message('m2', '2026-10-14T10:01:00Z')])).toBe(current)
+  })
+
+  it('si solo cambió la firma de la foto conserva los objetos (y la URL que ya se cargó)', () => {
+    const current = mergeMessages([], [withPhoto('m1', '2026-10-14T10:00:00Z', 'a')])
+
+    const merged = mergeMessages(current, [withPhoto('m1', '2026-10-14T10:00:00Z', 'b')])
+
+    expect(merged).toBe(current)
+    expect(merged[0].sender.photoUrl).toBe(photo('a'))
+  })
+
+  it('con un mensaje nuevo conserva los objetos de los que no cambiaron', () => {
+    const current = mergeMessages([], [withPhoto('m1', '2026-10-14T10:00:00Z', 'a')])
+
+    const merged = mergeMessages(current, [withPhoto('m2', '2026-10-14T10:01:00Z', 'b'), withPhoto('m1', '2026-10-14T10:00:00Z', 'b')])
+
+    expect(ids(merged)).toEqual(['m2', 'm1'])
+    expect(merged[1]).toBe(current[0])
+  })
+
+  it('si cambió algo del mensaje o la foto es otra, lo reemplaza', () => {
+    const current = mergeMessages([], [withPhoto('m1', '2026-10-14T10:00:00Z', 'a')])
+    const otherPhoto = { ...withPhoto('m1', '2026-10-14T10:00:00Z', 'a'), sender: { id: 'u1', name: 'Ana', photoUrl: 'https://bucket.s3.amazonaws.com/users/u1/otra.jpg?X-Amz-Signature=c' } }
+
+    expect(mergeMessages(current, [{ ...withPhoto('m1', '2026-10-14T10:00:00Z', 'a'), text: 'editado' }])[0].text).toBe('editado')
+    expect(mergeMessages(current, [otherPhoto])[0].sender.photoUrl).toContain('otra.jpg')
+  })
+})
+
 describe('mergeRecoveredPage', () => {
   it('con mensajes en común solo suma los que faltaban', () => {
     const current = [sent('m2', '2026-10-14T10:02:00Z'), sent('m1', '2026-10-14T10:01:00Z')]

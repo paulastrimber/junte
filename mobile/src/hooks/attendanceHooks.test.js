@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native'
+import { AppState } from 'react-native'
 
 import { deferred } from '../../tests/helpers/deferred.js'
 import { checkIn, createPlanQr } from '../services/api/checkins.js'
@@ -27,7 +28,11 @@ jest.mock('../services/location.js', () => ({
 const HERE = { status: LOCATION_STATUS.GRANTED, latitude: -34.9, longitude: -56.16, accuracyMeters: 12 }
 const apiError = (status, code, message) => new ApiError({ status, code, message, requestId: 'r1' })
 
-beforeEach(() => jest.resetAllMocks())
+beforeEach(() => {
+  jest.resetAllMocks()
+  // `resetAllMocks` también le borra la implementación al mock de AppState de React Native.
+  AppState.addEventListener.mockImplementation(() => ({ remove: jest.fn() }))
+})
 
 describe('usePlanActions', () => {
   it('inscribirse: mientras espera queda pendiente; al confirmar el servidor avisa con onChanged', async () => {
@@ -139,6 +144,44 @@ describe('usePlanQr', () => {
 
     await act(async () => jest.advanceTimersByTime(200))
     expect(createPlanQr).toHaveBeenCalledTimes(2)
+  })
+
+  it('al volver de segundo plano con el QR ya vencido, lo oculta y pide otro sin esperar al timer', async () => {
+    let onAppState
+    AppState.addEventListener.mockImplementation((_event, listener) => {
+      onAppState = listener
+      return { remove: jest.fn() }
+    })
+    const next = deferred()
+    createPlanQr.mockResolvedValueOnce(qr(1)).mockReturnValueOnce(next.promise)
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+
+    // En segundo plano los timers no corrieron, pero el reloj sí: el QR ya venció.
+    jest.setSystemTime(new Date(NOW.getTime() + 120_000))
+    await act(async () => onAppState('active'))
+
+    expect(createPlanQr).toHaveBeenCalledTimes(2)
+    expect(result.current).toMatchObject({ status: QR_STATUS.LOADING, qrToken: null })
+    await act(async () => next.resolve(qr(2, 210)))
+    expect(result.current.qrToken).toBe('p1.token-2')
+  })
+
+  it('al volver a primer plano con el QR vigente no pide otro', async () => {
+    let onAppState
+    AppState.addEventListener.mockImplementation((_event, listener) => {
+      onAppState = listener
+      return { remove: jest.fn() }
+    })
+
+    createPlanQr.mockResolvedValue(qr(1))
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+
+    await act(async () => onAppState('active'))
+
+    expect(createPlanQr).toHaveBeenCalledTimes(1)
+    expect(result.current.qrToken).toBe('p1.token-1')
   })
 
   it('al salir de la pantalla deja de pedir', async () => {
@@ -256,7 +299,7 @@ describe('useCheckIn', () => {
     ['QR_INVALID', 403, /QR actual/, true],
     ['CHECKIN_WINDOW_CLOSED', 409, /Fuera de horario/, false],
     ['ALREADY_CHECKED_IN', 409, /Ya habías registrado/, false],
-    ['FORBIDDEN', 403, /inscripto/, false]
+    ['FORBIDDEN', 403, /inscribite/, false]
   ])('%s: explica el rechazo', async (code, status, message, canRetry) => {
     getPreciseLocation.mockResolvedValue(HERE)
     checkIn.mockRejectedValue(apiError(status, code, 'texto del servidor'))
@@ -351,6 +394,22 @@ describe('useMyPlans (lista paginada)', () => {
     expect(result.current.items).toEqual([{ id: 'a' }, { id: 'b' }])
   })
 
+  it('dos loadMore en el mismo instante (onEndReached repetido antes del commit) hacen una sola request', async () => {
+    const second = deferred()
+    listMyPlans.mockResolvedValueOnce(page(['a'], 'c1')).mockReturnValueOnce(second.promise)
+    const { result } = await renderHook(() => useMyPlans({ role: 'joined', when: 'upcoming' }))
+    await waitFor(() => expect(result.current.status).toBe(LIST_STATUS.READY))
+
+    await act(async () => {
+      result.current.loadMore()
+      result.current.loadMore()
+    })
+    await act(async () => second.resolve(page(['b'])))
+
+    expect(listMyPlans).toHaveBeenCalledTimes(2)
+    expect(result.current.items.map((item) => item.id)).toEqual(['a', 'b'])
+  })
+
   it('sin más páginas, loadMore no pide nada', async () => {
     listMyPlans.mockResolvedValue(page(['a']))
     const { result } = await renderHook(() => useMyPlans({ role: 'joined', when: 'upcoming' }))
@@ -375,14 +434,26 @@ describe('useParticipants', () => {
     expect(listParticipants).toHaveBeenCalledWith('p1', { limit: 20 })
   })
 
-  it('cuando cambia la versión (alguien se anotó o se bajó) la pide de nuevo', async () => {
-    listParticipants.mockResolvedValue({ items: [], nextCursor: null })
-    const { rerender } = await renderHook((props) => useParticipants('p1', props), { initialProps: { enabled: true, version: 0 } })
-    await waitFor(() => expect(listParticipants).toHaveBeenCalledTimes(1))
+  it('refresh (alguien se anotó o se bajó) la pide de nuevo sin vaciarla ni pasar por "cargando"', async () => {
+    const again = deferred()
+    listParticipants.mockResolvedValueOnce({ items: [{ id: 'u1' }], nextCursor: null }).mockReturnValueOnce(again.promise)
+    const { result } = await renderHook((props) => useParticipants('p1', props), { initialProps: { enabled: true } })
+    await waitFor(() => expect(result.current.status).toBe(LIST_STATUS.READY))
 
-    await rerender({ enabled: true, version: 1 })
+    await act(async () => { result.current.refresh() })
+    expect(result.current).toMatchObject({ status: LIST_STATUS.READY, isRefreshing: true, items: [{ id: 'u1' }] })
 
-    await waitFor(() => expect(listParticipants).toHaveBeenCalledTimes(2))
+    await act(async () => again.resolve({ items: [{ id: 'u1' }, { id: 'u2' }], nextCursor: null }))
+    expect(result.current.items).toHaveLength(2)
+  })
+
+  it('sin permiso para verla, refresh no pide nada', async () => {
+    const { result } = await renderHook(() => useParticipants('p1', { enabled: false }))
+
+    await act(async () => result.current.refresh())
+
+    expect(listParticipants).not.toHaveBeenCalled()
+    expect(result.current.status).toBe(LIST_STATUS.IDLE)
   })
 })
 

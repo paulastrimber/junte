@@ -32,7 +32,7 @@ const MESSAGES = Object.freeze({
   CHECKIN_WINDOW_CLOSED: 'Fuera de horario: la asistencia se registra desde 15 minutos antes de que empiece el plan y por un tiempo limitado.',
   ALREADY_CHECKED_IN: 'Ya habías registrado tu asistencia a este plan.',
   PLAN_CLOSED: 'El plan está cancelado o ya terminó.',
-  FORBIDDEN: 'Tenés que estar inscripto en el plan para registrar tu asistencia.',
+  FORBIDDEN: 'Para registrar tu asistencia, primero inscribite en el plan.',
   NOT_FOUND: 'Este plan ya no está disponible.',
   [CHECK_IN_LOCAL_ERRORS.LOCATION_DENIED]: 'Para registrar tu asistencia necesitamos tu ubicación. Dale permiso a junte desde los ajustes del teléfono y probá de nuevo.',
   [CHECK_IN_LOCAL_ERRORS.LOCATION_UNAVAILABLE]: 'No pudimos obtener tu ubicación. Activá el GPS, salí al aire libre y probá de nuevo.'

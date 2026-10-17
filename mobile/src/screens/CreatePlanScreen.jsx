@@ -16,12 +16,13 @@ import { Text } from '../components/Text.jsx'
 import { usePlacePicker } from '../hooks/usePlacePicker.js'
 import { usePlanForm } from '../hooks/usePlanForm.js'
 import { ROUTES } from '../navigation/routes.js'
+import { SCREEN_TITLES } from '../navigation/titles.js'
 import { spacing, useTheme } from '../theme/index.js'
 import { PLAN_LIMITS, defaultEndsAt } from '../utils/plans.js'
 
 export const TEXTS = Object.freeze({
-  createTitle: 'Crear plan',
-  editTitle: 'Editar plan',
+  createTitle: SCREEN_TITLES.createPlan,
+  editTitle: SCREEN_TITLES.editPlan,
   incompleteTitle: 'Completá tu perfil para crear planes',
   incompleteMessage: 'Necesitás tu nombre, tu fecha de nacimiento y al menos un interés.',
   goToProfile: 'Ir a mi perfil',
