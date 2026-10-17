@@ -56,7 +56,7 @@ describe('useCatalogs', () => {
 
     const { result } = await renderHook(() => useCatalogs())
     await waitFor(() => expect(result.current.status).toBe(CATALOG_STATUS.ERROR))
-    expect(result.current.error).toBe(error)
+    expect(result.current.error).toEqual({ code: CLIENT_ERROR_CODES.NETWORK_ERROR, message: 'No pudimos conectarnos con el servidor. Revisá tu conexión.', requestId: null })
 
     await act(async () => result.current.retry())
 

@@ -1,10 +1,9 @@
 import { useCallback, useRef, useState } from 'react'
 
 import { checkIn } from '../services/api/checkins.js'
-import { toApiError } from '../services/api/client.js'
 import { LOCATION_STATUS, getPreciseLocation } from '../services/location.js'
 import { looksLikeQrToken } from '../utils/attendance.js'
-import { messageForError } from '../utils/errorMessages.js'
+import { toViewError } from '../utils/errorMessages.js'
 
 export const CHECK_IN_STATUS = Object.freeze({
   IDLE: 'idle',
@@ -44,12 +43,14 @@ const FINAL_CODES = new Set(['ALREADY_CHECKED_IN', 'PLAN_CLOSED', 'FORBIDDEN', '
 
 const IDLE = Object.freeze({ status: CHECK_IN_STATUS.IDLE, result: null, error: null })
 
-/** Estado de rechazo: por un `code` local, o por el error que devolvió el servidor. */
-const rejected = (code, error) => ({
-  status: CHECK_IN_STATUS.ERROR,
-  result: null,
-  error: { code, message: error ? messageForError(error, MESSAGES) : MESSAGES[code], requestId: error?.requestId, canRetry: !FINAL_CODES.has(code) }
-})
+/**
+ * Estado de rechazo: por un `code` local, o por la falla que devolvió el servidor. El error es un `ViewError` más
+ * `canRetry` (si tiene sentido volver a escanear).
+ */
+function rejected (code, failure) {
+  const error = failure ? toViewError(failure, MESSAGES) : { code, message: MESSAGES[code], requestId: null }
+  return { status: CHECK_IN_STATUS.ERROR, result: null, error: { ...error, canRetry: !FINAL_CODES.has(error.code) } }
+}
 
 /**
  * Registra la asistencia a un plan: toma la ubicación (con su precisión) y la manda junto con el QR leído.
@@ -68,8 +69,8 @@ export function useCheckIn (planId) {
   const submit = useCallback(async ({ qrToken } = {}) => {
     if (busyRef.current) return false
     busyRef.current = true
-    const fail = (code, error) => {
-      setState(rejected(code, error))
+    const fail = (code, failure) => {
+      setState(rejected(code, failure))
       return false
     }
     try {
@@ -86,8 +87,7 @@ export function useCheckIn (planId) {
       setState({ status: CHECK_IN_STATUS.DONE, result, error: null })
       return true
     } catch (failure) {
-      const error = toApiError(failure)
-      return fail(error.code, error)
+      return fail(null, failure)
     } finally {
       busyRef.current = false
     }

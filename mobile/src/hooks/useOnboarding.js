@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import * as usersApi from '../services/api/users.js'
-import { fieldErrorsFrom, messageForError } from '../utils/errorMessages.js'
+import { fieldErrorsFrom, toViewError } from '../utils/errorMessages.js'
 import { validateBirthDate } from '../utils/validation.js'
 import { useAuth } from './useAuth.js'
 import { useCatalogs } from './useCatalogs.js'
@@ -61,7 +61,7 @@ export function useOnboarding () {
     } catch (error) {
       const fields = fieldErrorsFrom(error)
       if (Object.keys(fields).length > 0) setErrors(fields)
-      else setFormError({ message: messageForError(error), requestId: error?.requestId ?? null })
+      else setFormError(toViewError(error))
       return false
     } finally {
       setIsSaving(false)
@@ -118,6 +118,7 @@ export function useOnboarding () {
     isLast,
     values: draft.values,
     options: draft.options,
+    dependents: draft.dependents,
     age: draft.age,
     catalogStatus: catalogs.status,
     retryCatalogs: catalogs.retry,

@@ -2,6 +2,7 @@ import { memo } from 'react'
 import { Pressable, View } from 'react-native'
 
 import { borders, createThemedStyles, motion, radius, sizes, spacing } from '../theme/index.js'
+import { FULL_SPOTS_LABEL } from '../utils/plans.js'
 import { Badge } from './Badge.jsx'
 import { Icon } from './Icon.jsx'
 import { Text } from './Text.jsx'
@@ -25,13 +26,18 @@ import { Text } from './Text.jsx'
  *   etiqueta del cupo; por defecto `danger` si está lleno y `primary` si no. En "Mis planes" sirve para el estado
  *   ("Asististe" → `success`, "Cancelado" → `danger`).
  * @param {(id: string) => void} props.onPress
+ * El nombre accesible dice todo lo que se ve (también la distancia) y, si está lleno, "Lleno": el candado y el
+ * color solos no alcanzan.
  */
 export const PlanCard = memo(function PlanCard ({ id, title, schedule, place, distance, price, spots, isFull = false, isFree = false, spotsTone, onPress }) {
   const styles = useStyles()
+  const where = distance ? `${place}, ${distance}` : place
+  // "Lleno" solo si el texto del cupo no lo dice ya (en el feed `spots` es "Lleno"; en Mis planes, el estado).
+  const fullLabel = isFull && spots !== FULL_SPOTS_LABEL ? `. ${FULL_SPOTS_LABEL}` : ''
   return (
     <Pressable
       accessibilityRole='button'
-      accessibilityLabel={`${title}. ${schedule}. ${place}. ${price}. ${spots}`}
+      accessibilityLabel={`${title}. ${schedule}. ${where}. ${price}. ${spots}${fullLabel}`}
       accessibilityHint='Abre el detalle del plan'
       onPress={() => onPress(id)}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}

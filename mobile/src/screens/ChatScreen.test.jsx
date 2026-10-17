@@ -16,6 +16,9 @@ jest.mock('../services/socket.js', () => ({
 
 const ME = { id: COMPLETE_USER.id, name: COMPLETE_USER.name, photoUrl: null, reputation: 0 }
 const BETO = { id: 'u2', name: 'Beto', photoUrl: null, reputation: 1 }
+// Mensajes de HOY a las 10:n: así la hora se muestra sola ('10:01'), sin la fecha, cualquier día que corra el
+// test. El formato de "otro día" ya lo cubre utils/chat.test.js con un `now` fijo.
+const TODAY = new Date()
 const message = (n, extra = {}) => ({
   id: `m${n}`,
   planId: 'p1',
@@ -23,7 +26,7 @@ const message = (n, extra = {}) => ({
   type: 'text',
   text: `Mensaje ${n}`,
   clientId: null,
-  createdAt: new Date(2026, 9, 14, 10, n).toISOString(),
+  createdAt: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 10, n).toISOString(),
   ...extra
 })
 const apiError = (status, code) => new ApiError({ status, code, requestId: 'r1' })
@@ -89,6 +92,8 @@ describe('ChatScreen: estados', () => {
     expect(screen.queryByText(ME.name)).not.toBeOnTheScreen()
     expect(screen.getByText('10:01')).toBeOnTheScreen()
     expect(screen.getByText('10:02')).toBeOnTheScreen()
+    // La foto de cada burbuja es decorativa (el nombre ya está escrito): el lector no repite "Sin foto de perfil".
+    expect(screen.queryAllByLabelText(/foto de perfil/i)).toHaveLength(0)
   })
 
   it('un mensaje de un tipo que la app no conoce no rompe la lista', async () => {

@@ -6,6 +6,12 @@ import { Button } from './Button.jsx'
 import { LoadingState } from './LoadingState.jsx'
 import { Notice } from './Notice.jsx'
 
+export const TEXTS = Object.freeze({
+  loading: 'Cargando opciones…',
+  error: 'No pudimos cargar las opciones.',
+  retry: 'Reintentar'
+})
+
 /**
  * Muestra el contenido cuando los catálogos están cargados; mientras tanto, cargando o el error con "Reintentar".
  * Es un bloque dentro de un formulario: el error no ocupa la pantalla.
@@ -13,11 +19,11 @@ import { Notice } from './Notice.jsx'
  */
 export function CatalogGate ({ status, onRetry, children }) {
   if (status === CATALOG_STATUS.READY) return children
-  if (status === CATALOG_STATUS.LOADING) return <LoadingState label='Cargando opciones…' />
+  if (status === CATALOG_STATUS.LOADING) return <LoadingState label={TEXTS.loading} />
   return (
     <View style={styles.box}>
-      <Notice tone='danger' icon='cloud-offline-outline' message='No pudimos cargar las opciones.' accessibilityRole='alert'>
-        <Button title='Reintentar' variant='secondary' size='sm' icon='refresh-outline' onPress={onRetry} style={styles.retry} />
+      <Notice tone='danger' icon='cloud-offline-outline' message={TEXTS.error} accessibilityRole='alert'>
+        <Button title={TEXTS.retry} variant='secondary' size='sm' icon='refresh-outline' onPress={onRetry} style={styles.retry} />
       </Notice>
     </View>
   )

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { getMe } from '../services/api/users.js'
+import { toViewError } from '../utils/errorMessages.js'
 
 /**
  * Reputación y ausencias propias, pedidas al servidor (`GET /users/me`): solo el back las escribe y cambian sin que la
@@ -18,8 +19,13 @@ export function useMyStats (user) {
       .then((me) => {
         if (isCurrent) setStats({ reputation: me.reputation, noShowCount: me.noShowCount ?? null })
       })
-      // Dato secundario de la pantalla: sin conexión se queda con lo que ya tenía.
-      .catch(() => {})
+      // Dato secundario de la pantalla: si falla se queda con lo que ya tenía, sin mostrar un error. Se deja rastro
+      // en desarrollo (solo `code` y `requestId`: nunca el body).
+      .catch((failure) => {
+        if (!__DEV__) return
+        const { code, requestId } = toViewError(failure)
+        console.warn('useMyStats: no se pudieron actualizar las estadísticas', { code, requestId })
+      })
     return () => { isCurrent = false }
   }, [attempt])
 

@@ -190,7 +190,9 @@ describe('ProfileScreen', () => {
 
       expect(screen.getByRole('button', { name: TEXTS.career })).toBeDisabled()
       expect(screen.getByRole('button', { name: TEXTS.neighborhood })).toBeDisabled()
-      expect(screen.getByText(TEXTS.careerHint)).toBeOnTheScreen()
+      // Los mismos textos que en el onboarding (StudyFields).
+      expect(screen.getByText(TEXTS.careerHintNoUniversity)).toBeOnTheScreen()
+      expect(screen.getByText(TEXTS.neighborhoodHintNoCity)).toBeOnTheScreen()
     })
 
     it('elegir la fecha de nacimiento manda YYYY-MM-DD', async () => {

@@ -1,23 +1,32 @@
-import { StyleSheet, Text, View } from 'react-native'
+import { View } from 'react-native'
 
 import { Avatar } from '../components/Avatar.jsx'
 import { Button } from '../components/Button.jsx'
+import { Card } from '../components/Card.jsx'
+import { CatalogGate } from '../components/CatalogGate.jsx'
 import { DateField } from '../components/DateField.jsx'
 import { ErrorBanner } from '../components/ErrorBanner.jsx'
+import { FieldError } from '../components/FieldError.jsx'
 import { FormField } from '../components/FormField.jsx'
-import { CatalogGate } from '../components/CatalogGate.jsx'
+import { Icon } from '../components/Icon.jsx'
 import { InterestPicker } from '../components/InterestPicker.jsx'
+import { Notice } from '../components/Notice.jsx'
 import { Screen } from '../components/Screen.jsx'
-import { SelectField } from '../components/SelectField.jsx'
+import { SectionHeader } from '../components/SectionHeader.jsx'
+import { STUDY_TEXTS, StudyFields } from '../components/StudyFields.jsx'
+import { Text } from '../components/Text.jsx'
 import { useAuth } from '../hooks/useAuth.js'
 import { useMyStats } from '../hooks/useMyStats.js'
 import { useProfileForm } from '../hooks/useProfileForm.js'
 import { useProfilePhoto } from '../hooks/useProfilePhoto.js'
 import { useSessionActions } from '../hooks/useSessionActions.js'
+import { ROUTES } from '../navigation/routes.js'
+import { borders, createThemedStyles, sizes, spacing } from '../theme/index.js'
 import { formatNoShows, formatReputation } from '../utils/attendance.js'
 import { MAX_INTERESTS } from '../utils/catalog.js'
 
 export const TEXTS = Object.freeze({
+  title: 'Mi perfil',
   incomplete: 'Completá tu nombre, fecha de nacimiento y al menos un interés para poder crear planes.',
   email: 'Email',
   age: 'Edad',
@@ -26,12 +35,7 @@ export const TEXTS = Object.freeze({
   reputationHint: 'Sumás 1 punto cada vez que registrás tu asistencia a un plan. Las ausencias solo las ves vos.',
   name: 'Nombre',
   birthDate: 'Fecha de nacimiento',
-  university: 'Universidad',
-  career: 'Carrera',
-  city: 'Ciudad',
-  neighborhood: 'Barrio',
-  careerHint: 'Elegí primero una universidad con carreras.',
-  neighborhoodHint: 'Elegí primero una ciudad con barrios.',
+  ...STUDY_TEXTS,
   interests: `Intereses (hasta ${MAX_INTERESTS})`,
   changePhoto: 'Cambiar foto',
   uploadingPhoto: 'Subiendo foto…',
@@ -43,6 +47,7 @@ export const TEXTS = Object.freeze({
 })
 
 export default function ProfileScreen ({ navigation }) {
+  const styles = useStyles()
   const { user } = useAuth()
   const form = useProfileForm()
   const photo = useProfilePhoto()
@@ -50,7 +55,7 @@ export default function ProfileScreen ({ navigation }) {
   const stats = useMyStats(user)
   // Los manejadores se pasan como identificadores sueltos (regla react/jsx-handler-names).
   const { choosePhoto } = photo
-  const { toggleInterest, submit: saveProfile, retryCatalogs } = form
+  const { setValue, toggleInterest, submit: saveProfile, retryCatalogs } = form
   const { signOut, signOutAll } = session
 
   return (
@@ -60,22 +65,37 @@ export default function ProfileScreen ({ navigation }) {
         <Button
           title={photo.isUploading ? TEXTS.uploadingPhoto : TEXTS.changePhoto}
           variant='secondary'
+          size='sm'
+          icon='camera-outline'
           loading={photo.isUploading}
           onPress={choosePhoto}
         />
-        <ErrorBanner message={photo.error} />
       </View>
+      <ErrorBanner error={photo.error} />
 
-      {!user.profileComplete ? <ErrorBanner message={TEXTS.incomplete} /> : null}
+      {/* Falta completar el perfil: es una invitación, no un error. */}
+      {!user.profileComplete ? <Notice tone='info' icon='person-circle-outline' message={TEXTS.incomplete} /> : null}
 
-      <Text style={styles.readonly}>{TEXTS.email}: {user.email}</Text>
-      {user.age !== null ? <Text style={styles.readonly}>{TEXTS.age}: {user.age}</Text> : null}
+      <Card variant='outlined'>
+        <View style={styles.readonly}>
+          <Icon name='mail-outline' size={sizes.iconSm} color='textMuted' />
+          <Text variant='label' selectable style={styles.flex}>{TEXTS.email}: {user.email}</Text>
+        </View>
+        {user.age !== null
+          ? (
+            <View style={styles.readonly}>
+              <Icon name='gift-outline' size={sizes.iconSm} color='textMuted' />
+              <Text variant='label' style={styles.flex}>{TEXTS.age}: {user.age}</Text>
+            </View>
+            )
+          : null}
+      </Card>
 
-      <View style={styles.stats}>
-        <Text style={styles.readonly}>{TEXTS.reputation}: {formatReputation(stats.reputation)}</Text>
-        {stats.noShowCount !== null ? <Text style={styles.readonly}>{TEXTS.noShows}: {formatNoShows(stats.noShowCount)}</Text> : null}
-        <Text style={styles.hint}>{TEXTS.reputationHint}</Text>
-      </View>
+      <Card variant='tinted'>
+        <Text variant='bodyStrong' color='onPrimarySoft'>{TEXTS.reputation}: {formatReputation(stats.reputation)}</Text>
+        {stats.noShowCount !== null ? <Text variant='label' color='onPrimarySoft'>{TEXTS.noShows}: {formatNoShows(stats.noShowCount)}</Text> : null}
+        <Text variant='caption' color='onPrimarySoft'>{TEXTS.reputationHint}</Text>
+      </Card>
 
       <FormField
         label={TEXTS.name}
@@ -92,58 +112,33 @@ export default function ProfileScreen ({ navigation }) {
         error={form.errors.birthDate}
       />
       <CatalogGate status={form.catalogStatus} onRetry={retryCatalogs}>
-        <View style={styles.group}>
-          <SelectField label={TEXTS.university} value={form.values.university} options={form.options.universities} onChange={(key) => form.setValue('university', key)} error={form.errors.university} />
-          <SelectField
-            label={TEXTS.career}
-            value={form.values.career}
-            options={form.options.careers}
-            allowOther={form.options.careers.length > 0}
-            disabled={form.options.careers.length === 0}
-            hint={form.options.careers.length === 0 ? TEXTS.careerHint : undefined}
-            onChange={(key) => form.setValue('career', key)}
-            error={form.errors.career}
-          />
-          <SelectField label={TEXTS.city} value={form.values.city} options={form.options.cities} onChange={(key) => form.setValue('city', key)} error={form.errors.city} />
-          <SelectField
-            label={TEXTS.neighborhood}
-            value={form.values.neighborhood}
-            options={form.options.neighborhoods}
-            allowOther={form.options.neighborhoods.length > 0}
-            disabled={form.options.neighborhoods.length === 0}
-            hint={form.options.neighborhoods.length === 0 ? TEXTS.neighborhoodHint : undefined}
-            onChange={(key) => form.setValue('neighborhood', key)}
-            error={form.errors.neighborhood}
-          />
-        </View>
+        <StudyFields values={form.values} options={form.options} dependents={form.dependents} errors={form.errors} onChange={setValue} />
 
-        <Text style={styles.sectionLabel}>{TEXTS.interests}</Text>
-        <InterestPicker categories={form.options.interestCategories} selected={form.values.interests} onToggle={toggleInterest} />
-        {form.errors.interests ? <Text style={styles.error}>{form.errors.interests}</Text> : null}
+        <View style={styles.section}>
+          <SectionHeader title={TEXTS.interests} />
+          <InterestPicker categories={form.options.interestCategories} selected={form.values.interests} onToggle={toggleInterest} />
+          <FieldError message={form.errors.interests} />
+        </View>
       </CatalogGate>
 
-      <ErrorBanner message={form.formError?.message} requestId={form.formError?.requestId} />
-      {form.justSaved ? <Text style={styles.saved} accessibilityLiveRegion='polite'>{TEXTS.saved}</Text> : null}
+      <ErrorBanner error={form.formError} />
+      {form.justSaved ? <Notice tone='success' message={TEXTS.saved} accessibilityLiveRegion='polite' /> : null}
       <Button title={TEXTS.save} onPress={saveProfile} loading={form.isSaving} disabled={!form.isDirty} />
 
       <View style={styles.footer}>
-        <Button title={TEXTS.health} variant='secondary' onPress={() => navigation.navigate('Health')} />
-        <Button title={TEXTS.signOut} variant='secondary' disabled={session.isWorking} onPress={signOut} />
+        <Button title={TEXTS.health} variant='ghost' icon='pulse-outline' onPress={() => navigation.navigate(ROUTES.HEALTH)} />
+        <Button title={TEXTS.signOut} variant='ghost' icon='log-out-outline' disabled={session.isWorking} onPress={signOut} />
         <Button title={TEXTS.signOutAll} variant='danger' disabled={session.isWorking} onPress={signOutAll} />
-        <ErrorBanner message={session.error} />
+        <ErrorBanner error={session.error} />
       </View>
     </Screen>
   )
 }
 
-const styles = StyleSheet.create({
-  header: { alignItems: 'center', gap: 12 },
-  group: { gap: 16 },
-  readonly: { fontSize: 14, color: '#444' },
-  stats: { gap: 4, padding: 12, borderRadius: 8, backgroundColor: '#f3f6ff' },
-  hint: { fontSize: 12, color: '#666' },
-  sectionLabel: { fontSize: 14, fontWeight: '600', color: '#222' },
-  error: { color: '#b42318', fontSize: 13 },
-  saved: { color: '#1b7f3b' },
-  footer: { gap: 12, marginTop: 16 }
-})
+const useStyles = createThemedStyles(({ colors }) => ({
+  header: { alignItems: 'center', gap: spacing.md },
+  readonly: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  flex: { flex: 1 },
+  section: { gap: spacing.sm },
+  footer: { gap: spacing.sm, marginTop: spacing.lg, paddingTop: spacing.lg, borderTopWidth: borders.thin, borderTopColor: colors.border }
+}))

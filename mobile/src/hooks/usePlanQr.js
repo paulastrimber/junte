@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { createPlanQr } from '../services/api/checkins.js'
-import { toApiError } from '../services/api/client.js'
 import { qrRefreshDelay } from '../utils/attendance.js'
-import { messageForError } from '../utils/errorMessages.js'
+import { toViewError } from '../utils/errorMessages.js'
 
 export const QR_STATUS = Object.freeze({
   LOADING: 'loading',
@@ -46,12 +45,12 @@ export function usePlanQr (planId) {
         timer = setTimeout(load, qrRefreshDelay(expiresAt))
       } catch (failure) {
         if (controller.signal.aborted) return
-        const error = toApiError(failure)
+        const error = toViewError(failure, MESSAGES)
         setState({
           status: UNAVAILABLE_CODES.has(error.code) ? QR_STATUS.UNAVAILABLE : QR_STATUS.ERROR,
           qrToken: null,
           expiresAt: null,
-          error: { message: messageForError(error, MESSAGES), requestId: error.requestId, code: error.code }
+          error
         })
       }
     }

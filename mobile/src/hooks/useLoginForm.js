@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
-import { messageForError } from '../utils/errorMessages.js'
+import { toViewError } from '../utils/errorMessages.js'
 import { validateEmail, validatePassword } from '../utils/validation.js'
 import { useAuth } from './useAuth.js'
 
@@ -8,8 +8,8 @@ import { useAuth } from './useAuth.js'
  * Estado y envío del formulario de login: validación local, errores por `code` y estado de carga.
  * @returns {{
  *   values: { email: string, password: string }, setValue: (field: string, value: string) => void,
- *   errors: Record<string, string>, formError: { message: string, requestId: string | null } | null,
- *   notice: string | null, isSubmitting: boolean, submit: () => Promise<void>
+ *   errors: Record<string, string>, formError: import('../utils/errorMessages.js').ViewError | null,
+ *   notice: import('../utils/errorMessages.js').ViewError | null, isSubmitting: boolean, submit: () => Promise<void>
  * }}
  */
 export function useLoginForm () {
@@ -18,6 +18,8 @@ export function useLoginForm () {
   const [errors, setErrors] = useState({})
   const [formError, setFormError] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // Si la sesión terminó sola (refresh rechazado, cuenta suspendida) se explica por qué se llegó acá.
+  const notice = useMemo(() => (sessionEndedBy ? toViewError(sessionEndedBy) : null), [sessionEndedBy])
 
   function setValue (field, value) {
     setValues((current) => ({ ...current, [field]: value }))
@@ -40,7 +42,7 @@ export function useLoginForm () {
     try {
       await signIn({ email: values.email.trim(), password: values.password })
     } catch (error) {
-      setFormError({ message: messageForError(error), requestId: error?.requestId ?? null })
+      setFormError(toViewError(error))
     } finally {
       setIsSubmitting(false)
     }
@@ -51,8 +53,7 @@ export function useLoginForm () {
     setValue,
     errors,
     formError,
-    // Si la sesión terminó sola (refresh rechazado, cuenta suspendida) se explica por qué se llegó acá.
-    notice: sessionEndedBy ? messageForError(sessionEndedBy) : null,
+    notice,
     isSubmitting,
     submit
   }

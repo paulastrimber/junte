@@ -1,19 +1,21 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, TextInput, View } from 'react-native'
 
 import { Avatar } from '../components/Avatar.jsx'
 import { Button } from '../components/Button.jsx'
 import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorBanner } from '../components/ErrorBanner.jsx'
+import { ErrorState } from '../components/ErrorState.jsx'
+import { tapFeedback } from '../components/haptics.js'
 import { Icon } from '../components/Icon.jsx'
 import { LoadingState } from '../components/LoadingState.jsx'
 import { Notice } from '../components/Notice.jsx'
 import { Text } from '../components/Text.jsx'
 import { CHAT_STATUS, POLL_INTERVAL_MS, useChat } from '../hooks/useChat.js'
 import { useAuth } from '../hooks/useAuth.js'
+import { useScreenFocus } from '../hooks/useScreenFocus.js'
 import { MAX_MESSAGE_LENGTH, MESSAGE_STATUS, formatMessageTime } from '../utils/chat.js'
-import { CHAT_ERROR_MESSAGES, messageForError } from '../utils/errorMessages.js'
-import { createThemedStyles, radius, sizes, spacing, typography, useTheme } from '../theme/index.js'
+import { borders, createThemedStyles, radius, sizes, spacing, typography, useTheme } from '../theme/index.js'
 
 export const TEXTS = Object.freeze({
   title: 'Chat del plan',
@@ -37,6 +39,8 @@ export const TEXTS = Object.freeze({
 
 // El contador aparece cerca del límite, no en cada mensaje.
 const COUNTER_FROM = 1800
+// El campo crece con el texto hasta unas 5 líneas; después scrollea adentro.
+const INPUT_MAX_HEIGHT = typography.body.lineHeight * 5 + spacing.md * 2
 
 const keyOf = (message) => message.clientId ?? message.id
 
@@ -45,6 +49,8 @@ const MessageRow = memo(function MessageRow ({ message, isOwn, onRetry }) {
   const styles = useStyles()
   const isPending = message.status === MESSAGE_STATUS.PENDING
   const isFailed = message.status === MESSAGE_STATUS.FAILED
+  // Por qué no se envió: `useChat` ya lo deja listo para pintar (ViewError con los textos del chat).
+  const sendError = message.error
   const bodyColor = isOwn ? 'onPrimary' : 'text'
   const metaColor = isOwn ? 'onPrimary' : 'textMuted'
   const name = message.sender?.name ?? ''
@@ -53,7 +59,8 @@ const MessageRow = memo(function MessageRow ({ message, isOwn, onRetry }) {
 
   return (
     <View style={[styles.row, isOwn && styles.rowOwn]}>
-      {isOwn ? null : <Avatar photoUrl={message.sender?.photoUrl} name={message.sender?.name} size={32} />}
+      {/* El nombre va escrito en la burbuja: la foto es decorativa para el lector de pantalla. */}
+      {isOwn ? null : <Avatar photoUrl={message.sender?.photoUrl} name={message.sender?.name} size={sizes.avatarSm} decorative />}
       <View style={styles.column}>
         <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther, isPending && styles.pending, isFailed && styles.bubbleFailed]}>
           {isOwn ? null : <Text variant='label' color='primary'>{name}</Text>}
@@ -75,7 +82,7 @@ const MessageRow = memo(function MessageRow ({ message, isOwn, onRetry }) {
                 <Icon name='refresh-outline' size={sizes.iconSm} color='danger' />
                 <Text variant='caption' color='danger'>{`${TEXTS.notSent} · ${TEXTS.retrySend}`}</Text>
               </Pressable>
-              <Text variant='caption' color='textMuted'>{messageForError(message.error, CHAT_ERROR_MESSAGES)}</Text>
+              <Text variant='caption' color='textMuted'>{sendError?.message}</Text>
             </View>
             )
           : null}
@@ -97,6 +104,7 @@ function Composer ({ onSend }) {
 
   function submit () {
     if (!canSend) return
+    tapFeedback()
     onSend(text)
     setText('')
     setInputKey((key) => key + 1)
@@ -136,25 +144,13 @@ function Composer ({ onSend }) {
   )
 }
 
-// Pantalla activa: solo entonces se hace polling (React Navigation avisa con focus / blur).
-function useIsFocused (navigation) {
-  const [isFocused, setIsFocused] = useState(true)
-  useEffect(() => {
-    const stopFocus = navigation.addListener('focus', () => setIsFocused(true))
-    const stopBlur = navigation.addListener('blur', () => setIsFocused(false))
-    return () => {
-      stopFocus()
-      stopBlur()
-    }
-  }, [navigation])
-  return isFocused
-}
-
 export default function ChatScreen ({ navigation, route }) {
   const { planId } = route.params
   const styles = useStyles()
+  const { colors } = useTheme()
   const { user } = useAuth()
-  const isFocused = useIsFocused(navigation)
+  // Pantalla activa: solo entonces se hace polling.
+  const isFocused = useScreenFocus(navigation)
   const chat = useChat(planId, { user, isActive: isFocused })
   const { loadOlder, retrySend, send, reload } = chat
   const userId = user?.id
@@ -174,14 +170,14 @@ export default function ChatScreen ({ navigation, route }) {
     if (chat.isLoadingOlder) {
       return (
         <View style={styles.footer}>
-          <ActivityIndicator accessibilityLabel={TEXTS.loadingOlder} />
+          <ActivityIndicator accessibilityLabel={TEXTS.loadingOlder} color={colors.primary} />
         </View>
       )
     }
     if (chat.loadOlderError) {
       return (
         <View style={styles.footer}>
-          <ErrorBanner message={`${TEXTS.loadOlderError} ${messageForError(chat.loadOlderError)}`} requestId={chat.loadOlderError.requestId} />
+          <ErrorBanner title={TEXTS.loadOlderError} error={chat.loadOlderError} />
           <Button title={TEXTS.retry} variant='secondary' size='sm' onPress={loadOlder} />
         </View>
       )
@@ -191,18 +187,10 @@ export default function ChatScreen ({ navigation, route }) {
 
   function body () {
     if (chat.status === CHAT_STATUS.LOADING) return <LoadingState label={TEXTS.loading} fill />
-    if (chat.status === CHAT_STATUS.ERROR) {
-      return (
-        <View style={styles.error}>
-          <Text variant='heading' center>{TEXTS.errorTitle}</Text>
-          <ErrorBanner message={messageForError(chat.error, CHAT_ERROR_MESSAGES)} requestId={chat.error?.requestId} />
-          <Button title={TEXTS.retry} onPress={reload} />
-        </View>
-      )
-    }
+    if (chat.status === CHAT_STATUS.ERROR) return <ErrorState title={TEXTS.errorTitle} error={chat.error} onRetry={reload} retryTitle={TEXTS.retry} fill />
     return (
       <>
-        {chat.isPolling ? <View style={styles.banner}><Notice tone='warning' message={TEXTS.polling} /></View> : null}
+        {chat.isPolling ? <View style={styles.banner}><Notice tone='warning' icon='cloud-offline-outline' message={TEXTS.polling} accessibilityLiveRegion='polite' /></View> : null}
         {chat.messages.length === 0
           // Una lista invertida también da vuelta su "vacío": por eso va aparte.
           ? <View style={styles.empty}><EmptyState icon='chatbubbles-outline' title={TEXTS.emptyTitle} message={TEXTS.emptyMessage} /></View>
@@ -240,34 +228,34 @@ const useStyles = createThemedStyles(({ colors }) => ({
   screen: { flex: 1, backgroundColor: colors.background },
   list: { padding: spacing.lg, gap: spacing.sm },
   empty: { flex: 1, justifyContent: 'center' },
-  error: { flex: 1, justifyContent: 'center', padding: spacing.xl, gap: spacing.md },
   banner: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
   footer: { paddingVertical: spacing.md, gap: spacing.sm },
 
   row: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, paddingRight: spacing.xxxl },
   rowOwn: { justifyContent: 'flex-end', paddingRight: 0, paddingLeft: spacing.xxxl },
   column: { flexShrink: 1, gap: spacing.xs },
-  bubble: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.lg, borderCurve: 'continuous', gap: 2 },
+  bubble: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.lg, borderCurve: 'continuous', gap: spacing.xxs },
   bubbleOwn: { backgroundColor: colors.primary, borderBottomRightRadius: radius.sm },
-  bubbleOther: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderBottomLeftRadius: radius.sm },
-  bubbleFailed: { borderWidth: 1.5, borderColor: colors.danger },
+  bubbleOther: { backgroundColor: colors.surface, borderWidth: borders.thin, borderColor: colors.border, borderBottomLeftRadius: radius.sm },
+  bubbleFailed: { borderWidth: borders.thick, borderColor: colors.danger },
   pending: { opacity: 0.6 },
   time: { alignSelf: 'flex-end' },
-  failed: { gap: 2 },
+  failed: { gap: spacing.xxs },
   failedOwn: { alignItems: 'flex-end' },
   retry: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: sizes.touchSmall },
 
-  composer: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, gap: spacing.xs, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },
+  composer: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, gap: spacing.xs, borderTopWidth: borders.thin, borderTopColor: colors.border, backgroundColor: colors.surface },
   counter: { alignSelf: 'flex-end' },
   composerRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm },
   input: {
     flex: 1,
     minHeight: sizes.input,
-    maxHeight: 132,
-    paddingHorizontal: spacing.md + 2,
+    maxHeight: INPUT_MAX_HEIGHT,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
-    borderWidth: 1.5,
-    borderColor: colors.border,
+    borderWidth: borders.thick,
+    // Borde de control (3:1), como el de `FormField`: el campo se tiene que ver aunque esté vacío.
+    borderColor: colors.borderStrong,
     borderRadius: radius.md,
     borderCurve: 'continuous',
     backgroundColor: colors.background,

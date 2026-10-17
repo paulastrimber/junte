@@ -1,5 +1,6 @@
 // Qué texto mostrar para cada `code` de error. La app DECIDE según `code` (nunca según `message`); el
 // `message` del servidor es el respaldo cuando el código no tiene un texto propio acá.
+import { toApiError } from '../services/api/client.js'
 import { CLIENT_ERROR_CODES, isApiError } from '../services/api/errors.js'
 
 const MESSAGES = Object.freeze({
@@ -33,6 +34,24 @@ const GENERIC = 'Ocurrió un error inesperado. Probá de nuevo.'
 export function messageForError (error, overrides = {}) {
   if (!isApiError(error)) return GENERIC
   return overrides[error.code] ?? MESSAGES[error.code] ?? (error.message || GENERIC)
+}
+
+/**
+ * Error listo para pintar: el contrato único entre hooks y screens. Toda falla que un hook expone pasa por acá, así
+ * la pantalla nunca decide textos ni pierde el `requestId`.
+ * @typedef {{ code: string, message: string, requestId: string | null }} ViewError
+ */
+
+/**
+ * @param {unknown} error  Lo que se atrapó en un `catch` (ApiError, error de axios o de programación).
+ * @param {Record<string, string>} [overrides]  Textos propios de la acción, por `code` (ver `messageForError`).
+ * @returns {ViewError}
+ */
+export function toViewError (error, overrides = {}) {
+  const apiError = toApiError(error)
+  // Un error que no vino de la API (de programación) usa el texto genérico, no el del ApiError que lo envuelve.
+  const message = isApiError(error) ? messageForError(apiError, overrides) : GENERIC
+  return { code: apiError.code, message, requestId: apiError.requestId ?? null }
 }
 
 /**

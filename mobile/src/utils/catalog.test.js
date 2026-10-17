@@ -1,5 +1,5 @@
 import {
-  MAX_INTERESTS, OTHER, careerOptions, cityOptions, labelFor, neighborhoodOptions, normalizeText, toggleInterest, universityOptions, visibleInterestCategories
+  DEPENDENT_REASON, MAX_INTERESTS, OTHER, careerOptions, cityOptions, dependentFieldState, interestNames, labelFor, neighborhoodOptions, normalizeText, toggleInterest, universityOptions, visibleInterestCategories
 } from './catalog.js'
 
 const catalog = {
@@ -86,5 +86,27 @@ describe('normalizeText', () => {
   it('ignora tildes y mayúsculas', () => {
     expect(normalizeText('Ingeniería en Informática')).toBe('ingenieria en informatica')
     expect(normalizeText(null)).toBe('')
+  })
+})
+
+describe('interestNames', () => {
+  it('traduce cada key a su nombre del catálogo, en el mismo orden', () => {
+    expect(interestNames(['cafe', 'futbol'], catalog)).toEqual(['Café', 'Fútbol'])
+  })
+
+  it('sin catálogo, o con una key que ya no existe, usa la key', () => {
+    expect(interestNames(['futbol'], null)).toEqual(['futbol'])
+    expect(interestNames(['futbol', 'ajedrez'], catalog)).toEqual(['Fútbol', 'ajedrez'])
+  })
+})
+
+describe('dependentFieldState (carrera según universidad, barrio según ciudad)', () => {
+  it.each([
+    ['sin elegir arriba', '', [], { disabled: true, reason: DEPENDENT_REASON.NO_PARENT }],
+    ['sin elegir arriba aunque haya opciones', '', [{ key: 'a' }], { disabled: true, reason: DEPENDENT_REASON.NO_PARENT }],
+    ['"Otra" o sin opciones en el catálogo', OTHER, [], { disabled: true, reason: DEPENDENT_REASON.NO_OPTIONS }],
+    ['con opciones', 'um', [{ key: 'economia' }], { disabled: false, reason: null }]
+  ])('%s', (_case, parent, options, expected) => {
+    expect(dependentFieldState(parent, options)).toEqual(expected)
   })
 })

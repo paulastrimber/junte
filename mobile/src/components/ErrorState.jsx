@@ -11,14 +11,16 @@ import { Text } from './Text.jsx'
  * seguir. Para errores de un formulario, que no reemplazan la pantalla, se usa `ErrorBanner`.
  * @param {object} props
  * @param {string} props.title  Qué falló, en una frase ("No pudimos cargar los planes.").
- * @param {string} [props.message]  Por qué y qué hacer (`messageForError(error)`).
- * @param {string} [props.requestId]  Solo se muestra en desarrollo.
+ * @param {import('../utils/errorMessages.js').ViewError | null} [props.error]  El error que expone el hook: da el
+ *   mensaje (por qué y qué hacer) y el `requestId`, que solo se muestra en desarrollo.
+ * @param {string} [props.message]  Texto suelto, si no hay `error`.
+ * @param {string} [props.requestId]
  * @param {() => void} [props.onRetry]
  * @param {string} [props.retryTitle]
  * @param {import('react').ReactNode} [props.children]  Algo más arriba del error (p. ej. los filtros del feed).
  * @param {boolean} [props.fill]  Ocupa toda la pantalla y centra el contenido.
  */
-export function ErrorState ({ title, message, requestId, onRetry, retryTitle = 'Reintentar', children, fill = false }) {
+export function ErrorState ({ title, error, message = error?.message, requestId = error?.requestId, onRetry, retryTitle = 'Reintentar', children, fill = false }) {
   const styles = useStyles()
   return (
     <View style={[styles.box, fill && styles.fill]}>

@@ -1,20 +1,24 @@
-import { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ScrollView, View } from 'react-native'
 
 import { Avatar } from '../components/Avatar.jsx'
 import { Button } from '../components/Button.jsx'
+import { Card } from '../components/Card.jsx'
+import { DetailRow } from '../components/DetailRow.jsx'
 import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorBanner } from '../components/ErrorBanner.jsx'
-import { useCatalogs } from '../hooks/useCatalogs.js'
+import { ErrorState } from '../components/ErrorState.jsx'
+import { LoadingState } from '../components/LoadingState.jsx'
+import { Notice } from '../components/Notice.jsx'
+import { SectionHeader } from '../components/SectionHeader.jsx'
+import { Text } from '../components/Text.jsx'
 import { LIST_STATUS } from '../hooks/usePagedList.js'
-import { useParticipants } from '../hooks/useParticipants.js'
-import { PLAN_STATUS, usePlan } from '../hooks/usePlan.js'
-import { PLAN_ACTION, usePlanActions } from '../hooks/usePlanActions.js'
-import { usePlanAutoRefresh } from '../hooks/usePlanAutoRefresh.js'
+import { PLAN_STATUS } from '../hooks/usePlan.js'
+import { PLAN_ACTION } from '../hooks/usePlanActions.js'
+import { usePlanDetail } from '../hooks/usePlanDetail.js'
 import { ROUTES } from '../navigation/routes.js'
-import { formatReputation, planActions } from '../utils/attendance.js'
-import { messageForError } from '../utils/errorMessages.js'
-import { formatPrice, formatSchedule, formatSpots } from '../utils/plans.js'
+import { borders, createThemedStyles, sizes, spacing } from '../theme/index.js'
+import { formatReputation } from '../utils/attendance.js'
+import { formatJoined, formatPrice, formatSchedule, formatSpots } from '../utils/plans.js'
 
 export const TEXTS = Object.freeze({
   title: 'Plan',
@@ -37,12 +41,16 @@ export const TEXTS = Object.freeze({
   full: 'Este plan está lleno: no admite más inscripciones.',
   join: 'Inscribirme',
   leave: 'Darme de baja',
+  confirmLeave: 'Sí, darme de baja',
+  confirmLeaveHint: 'Si te das de baja, tu lugar lo puede ocupar otra persona.',
+  keepJoined: 'Seguir inscripto',
   joinedNotice: 'Estás inscripto en este plan.',
   checkIn: 'Registrar mi asistencia',
   checkedIn: 'Ya registraste tu asistencia.',
   noShow: 'No registraste tu asistencia a este plan.',
   chat: 'Chat del plan',
   showQr: 'Mostrar QR de asistencia',
+  organizer: 'Organizás vos',
   closeSignUps: 'Cerrar inscripciones',
   reopenSignUps: 'Reabrir inscripciones',
   cancelPlan: 'Cancelar plan',
@@ -57,181 +65,177 @@ export const TEXTS = Object.freeze({
   statusLabels: { closed: 'Inscripciones cerradas', cancelled: 'Plan cancelado', completed: 'Plan finalizado' }
 })
 
-// Nombre de cada interés según el catálogo; si todavía no cargó (o ya no existe), la key.
-function interestNames (keys, catalog) {
-  const names = new Map((catalog?.interestCategories ?? []).flatMap((category) => category.interests).map(({ key, name }) => [key, name]))
-  return keys.map((key) => names.get(key) ?? key)
-}
+// Textos de cada confirmación (las acciones que no tienen vuelta atrás).
+const CONFIRM_TEXTS = Object.freeze({
+  [PLAN_ACTION.CANCEL]: { hint: TEXTS.confirmCancelHint, confirm: TEXTS.confirmCancel, dismiss: TEXTS.keepPlan },
+  [PLAN_ACTION.LEAVE]: { hint: TEXTS.confirmLeaveHint, confirm: TEXTS.confirmLeave, dismiss: TEXTS.keepJoined }
+})
 
-function Row ({ label, value }) {
+/** Lista de anotados: la ven quienes participan y quien organiza. Presentacional (los datos llegan por props). */
+function Participants ({ list, creatorId }) {
+  const styles = useStyles()
+  const { loadMore, retry } = list
   return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>{value}</Text>
+    <View style={styles.section}>
+      <SectionHeader title={TEXTS.participants} />
+      {list.status === LIST_STATUS.LOADING ? <LoadingState label={TEXTS.participantsLoading} /> : null}
+      {list.status === LIST_STATUS.ERROR
+        ? (
+          <>
+            <ErrorBanner title={TEXTS.participantsError} error={list.error} />
+            <Button title={TEXTS.retry} variant='secondary' size='sm' icon='refresh-outline' onPress={retry} style={styles.start} />
+          </>
+          )
+        : null}
+      {list.status === LIST_STATUS.READY && list.items.length === 0 ? <Text color='textMuted'>{TEXTS.participantsEmpty}</Text> : null}
+      {list.items.length > 0
+        ? (
+          <View>
+            {list.items.map((person, index) => (
+              <View key={person.id} style={[styles.person, index > 0 && styles.separated]}>
+                {/* El nombre ya está escrito al lado: la foto es decorativa para el lector de pantalla. */}
+                <Avatar photoUrl={person.photoUrl} name={person.name} size={sizes.avatarSm} decorative />
+                <Text variant='bodyStrong' style={styles.personName}>
+                  {person.id === creatorId ? `${person.name ?? ''} (${TEXTS.creator.toLowerCase()})` : person.name}
+                </Text>
+                <Text variant='caption' color='textMuted'>{formatReputation(person.reputation)}</Text>
+              </View>
+            ))}
+          </View>
+          )
+        : null}
+      <ErrorBanner error={list.loadMoreError} />
+      {list.hasMore ? <Button title={TEXTS.participantsMore} variant='secondary' size='sm' loading={list.isLoadingMore} onPress={loadMore} style={styles.start} /> : null}
     </View>
   )
 }
 
-/** Lista de anotados: la ven quienes participan y quien organiza. Presentacional (los datos llegan por props). */
-function Participants ({ list, creatorId }) {
-  const { loadMore, retry } = list
+/** Confirmación en línea de una acción que no tiene vuelta atrás. */
+function Confirmation ({ action, isBusy, isPending, onConfirm, onDismiss }) {
+  const styles = useStyles()
+  const texts = CONFIRM_TEXTS[action]
   return (
-    <View style={styles.block}>
-      <Text style={styles.rowLabel}>{TEXTS.participants}</Text>
-      {list.status === LIST_STATUS.LOADING ? <Text style={styles.muted}>{TEXTS.participantsLoading}</Text> : null}
-      {list.status === LIST_STATUS.ERROR
-        ? (
-          <>
-            <ErrorBanner message={`${TEXTS.participantsError} ${messageForError(list.error)}`} requestId={list.error?.requestId} />
-            <Button title={TEXTS.retry} variant='secondary' onPress={retry} />
-          </>
-          )
-        : null}
-      {list.status === LIST_STATUS.READY && list.items.length === 0 ? <Text style={styles.muted}>{TEXTS.participantsEmpty}</Text> : null}
-      {list.items.map((person) => (
-        <View key={person.id} style={styles.participant}>
-          <Text style={styles.rowValue}>{person.id === creatorId ? `${person.name ?? ''} (${TEXTS.creator.toLowerCase()})` : person.name}</Text>
-          <Text style={styles.muted}>{formatReputation(person.reputation)}</Text>
-        </View>
-      ))}
-      {list.loadMoreError ? <ErrorBanner message={messageForError(list.loadMoreError)} requestId={list.loadMoreError.requestId} /> : null}
-      {list.hasMore ? <Button title={TEXTS.participantsMore} variant='secondary' loading={list.isLoadingMore} onPress={loadMore} /> : null}
+    <View style={styles.group}>
+      <Notice tone='warning' message={texts.hint} accessibilityLiveRegion='polite' />
+      <Button title={texts.confirm} variant='danger' loading={isPending} disabled={isBusy} onPress={onConfirm} />
+      <Button title={texts.dismiss} variant='secondary' disabled={isBusy} onPress={onDismiss} />
     </View>
   )
 }
 
 export default function PlanScreen ({ navigation, route }) {
+  const styles = useStyles()
   // `version` cambia cuando se vuelve de editar: fuerza a pedir el plan otra vez.
   const { planId, version = 0 } = route.params
-  const { status, plan, error, reload, refresh } = usePlan(planId, version)
-  const { catalog } = useCatalogs()
-  // Cada cambio confirmado por el servidor vuelve a pedir el plan y la lista de anotados.
-  const [changes, setChanges] = useState(0)
-  const onChanged = useCallback(() => {
-    setChanges((value) => value + 1)
-    refresh()
-  }, [refresh])
-  const actions = usePlanActions(planId, { onChanged })
-  const { join, leave, closeSignUps, reopenSignUps, cancel } = actions
-  const [isConfirmingCancel, setIsConfirmingCancel] = useState(false)
-  const can = plan ? planActions(plan) : null
-  const participants = useParticipants(planId, { enabled: Boolean(can?.canSeeParticipants), version: changes })
+  const detail = usePlanDetail(planId, { version, navigation })
+  const { status, plan, error, reload, can, activities, actions, participants, confirmation } = detail
+  const { join, closeSignUps, reopenSignUps } = actions
+  const { askCancel, askLeave, confirm, dismiss } = confirmation
 
-  // Al volver del QR o del check-in el plan pudo cambiar (asistencia registrada).
-  useEffect(() => navigation.addListener('focus', onChanged), [navigation, onChanged])
-  // Y sin salir de la pantalla: cuando abre el horario de asistencia (aparece el botón) o la app vuelve a primer plano.
-  usePlanAutoRefresh(plan, refresh)
-
-  if (status === PLAN_STATUS.LOADING) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator accessibilityLabel={TEXTS.loading} />
-        <Text>{TEXTS.loading}</Text>
-      </View>
-    )
-  }
+  if (status === PLAN_STATUS.LOADING) return <LoadingState label={TEXTS.loading} fill />
 
   if (status === PLAN_STATUS.NOT_FOUND) {
-    return <EmptyState title={TEXTS.notFoundTitle} message={TEXTS.notFoundMessage} actionTitle={TEXTS.back} onAction={() => navigation.goBack()} />
-  }
-
-  if (status === PLAN_STATUS.ERROR) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.errorTitle}>{TEXTS.errorTitle}</Text>
-        <ErrorBanner message={messageForError(error)} requestId={error?.requestId} />
-        <Button title={TEXTS.retry} onPress={reload} />
-      </View>
+      <EmptyState
+        tone='danger'
+        icon='calendar-clear-outline'
+        title={TEXTS.notFoundTitle}
+        message={TEXTS.notFoundMessage}
+        actionTitle={TEXTS.back}
+        onAction={() => navigation.goBack()}
+        fill
+      />
     )
   }
 
+  if (status === PLAN_STATUS.ERROR) return <ErrorState title={TEXTS.errorTitle} error={error} onRetry={reload} fill />
+
   const statusLabel = TEXTS.statusLabels[plan.status]
+  const isPending = (action) => actions.pending === action
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <Text style={styles.title} accessibilityRole='header'>{plan.title}</Text>
-      {statusLabel ? <Text style={styles.notice}>{statusLabel}</Text> : null}
-      {plan.isFull ? <Text style={styles.notice}>{TEXTS.full}</Text> : null}
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <View style={styles.group}>
+        <Text variant='title' accessibilityRole='header'>{plan.title}</Text>
+        {statusLabel ? <Notice tone={plan.status === 'cancelled' ? 'danger' : 'warning'} message={statusLabel} /> : null}
+        {plan.isFull ? <Notice tone='warning' icon='lock-closed-outline' message={TEXTS.full} /> : null}
+      </View>
 
-      <Row label={TEXTS.when} value={formatSchedule(plan.startsAt, plan.endsAt)} />
-      <Row label={TEXTS.where} value={plan.location.label} />
-      <Row label={TEXTS.price} value={formatPrice(plan.price)} />
-      <Row label={TEXTS.spots} value={formatSpots(plan)} />
-      <Row label={TEXTS.joined} value={plan.capacity === null ? String(plan.participantCount) : `${plan.participantCount} de ${plan.capacity}`} />
-      <Row label={TEXTS.activities} value={interestNames(plan.interests, catalog).join(', ')} />
+      <Card style={styles.details}>
+        <DetailRow icon='calendar-outline' label={TEXTS.when} value={formatSchedule(plan.startsAt, plan.endsAt)} />
+        <DetailRow icon='location-outline' label={TEXTS.where} value={plan.location.label} />
+        <DetailRow icon='cash-outline' label={TEXTS.price} value={formatPrice(plan.price)} />
+        <DetailRow icon='people-outline' label={TEXTS.spots} value={formatSpots(plan)} />
+        <DetailRow icon='person-add-outline' label={TEXTS.joined} value={formatJoined(plan)} />
+        <DetailRow icon='pricetags-outline' label={TEXTS.activities} value={activities.join(', ')} />
+      </Card>
 
       {plan.description
         ? (
-          <View style={styles.block}>
-            <Text style={styles.rowLabel}>{TEXTS.about}</Text>
-            <Text style={styles.description}>{plan.description}</Text>
+          <View style={styles.group}>
+            <SectionHeader title={TEXTS.about} />
+            <Text selectable>{plan.description}</Text>
           </View>
           )
         : null}
 
       {plan.creator
         ? (
-          <View style={styles.creator}>
-            <Avatar photoUrl={plan.creator.photoUrl} name={plan.creator.name} />
-            <View>
-              <Text style={styles.rowLabel}>{TEXTS.creator}</Text>
-              <Text style={styles.rowValue}>{plan.isCreator ? `${plan.creator.name ?? ''} (${TEXTS.you})` : plan.creator.name}</Text>
-              <Text style={styles.muted}>{formatReputation(plan.creator.reputation ?? 0)}</Text>
+          <Card variant='outlined' style={styles.creator}>
+            <Avatar photoUrl={plan.creator.photoUrl} name={plan.creator.name} size={sizes.avatarMd} decorative />
+            <View style={styles.creatorText}>
+              <Text variant='caption' color='textMuted'>{TEXTS.creator}</Text>
+              <Text variant='bodyStrong'>{plan.isCreator ? `${plan.creator.name ?? ''} (${TEXTS.you})` : plan.creator.name}</Text>
+              <Text variant='caption' color='textMuted'>{formatReputation(plan.creator.reputation ?? 0)}</Text>
             </View>
-          </View>
+          </Card>
           )
         : null}
 
-      {can.isJoined && !can.hasCheckedIn && !can.wasNoShow ? <Text style={styles.success}>{TEXTS.joinedNotice}</Text> : null}
-      {can.hasCheckedIn ? <Text style={styles.success}>{TEXTS.checkedIn}</Text> : null}
-      {can.wasNoShow ? <Text style={styles.notice}>{TEXTS.noShow}</Text> : null}
+      <View style={styles.group}>
+        {can.isJoined && !can.hasCheckedIn && !can.wasNoShow ? <Notice tone='success' message={TEXTS.joinedNotice} accessibilityLiveRegion='polite' /> : null}
+        {can.hasCheckedIn ? <Notice tone='success' message={TEXTS.checkedIn} accessibilityLiveRegion='polite' /> : null}
+        {can.wasNoShow ? <Notice tone='warning' message={TEXTS.noShow} /> : null}
 
-      <ErrorBanner message={actions.error?.message} requestId={actions.error?.requestId} />
+        <ErrorBanner error={actions.error} />
 
-      {can.canJoin ? <Button title={TEXTS.join} loading={actions.pending === PLAN_ACTION.JOIN} disabled={actions.isBusy} onPress={join} /> : null}
-      {can.canCheckIn
-        ? <Button title={TEXTS.checkIn} onPress={() => navigation.navigate(ROUTES.CHECK_IN, { planId: plan.id })} />
-        : null}
-      {can.canShowQr
-        ? <Button title={TEXTS.showQr} onPress={() => navigation.navigate(ROUTES.PLAN_QR, { planId: plan.id, canCheckIn: can.canCreatorCheckIn })} />
-        : null}
-      {can.canLeave
-        ? <Button title={TEXTS.leave} variant='secondary' loading={actions.pending === PLAN_ACTION.LEAVE} disabled={actions.isBusy} onPress={leave} />
-        : null}
-
-      {can.canChat
-        ? <Button title={TEXTS.chat} variant='secondary' onPress={() => navigation.navigate(ROUTES.CHAT, { planId: plan.id, title: plan.title })} />
-        : null}
+        {can.canJoin ? <Button title={TEXTS.join} haptic loading={isPending(PLAN_ACTION.JOIN)} disabled={actions.isBusy} onPress={join} /> : null}
+        {can.canCheckIn
+          ? <Button title={TEXTS.checkIn} icon='qr-code-outline' onPress={() => navigation.navigate(ROUTES.CHECK_IN, { planId: plan.id })} />
+          : null}
+        {can.canShowQr
+          ? <Button title={TEXTS.showQr} icon='qr-code-outline' onPress={() => navigation.navigate(ROUTES.PLAN_QR, { planId: plan.id, canCheckIn: can.canCreatorCheckIn })} />
+          : null}
+        {can.canChat
+          ? <Button title={TEXTS.chat} variant='secondary' icon='chatbubbles-outline' onPress={() => navigation.navigate(ROUTES.CHAT, { planId: plan.id, title: plan.title })} />
+          : null}
+        {can.canLeave && confirmation.action !== PLAN_ACTION.LEAVE
+          ? <Button title={TEXTS.leave} variant='secondary' disabled={actions.isBusy} onPress={askLeave} />
+          : null}
+        {can.canLeave && confirmation.action === PLAN_ACTION.LEAVE
+          ? <Confirmation action={PLAN_ACTION.LEAVE} isBusy={actions.isBusy} isPending={isPending(PLAN_ACTION.LEAVE)} onConfirm={confirm} onDismiss={dismiss} />
+          : null}
+      </View>
 
       {can.canSeeParticipants ? <Participants list={participants} creatorId={plan.creator?.id} /> : null}
 
       {plan.isCreator
-        ? <Button title={TEXTS.edit} variant='secondary' onPress={() => navigation.navigate(ROUTES.EDIT_PLAN, { plan })} />
-        : null}
-      {can.canCloseSignUps
-        ? <Button title={TEXTS.closeSignUps} variant='secondary' loading={actions.pending === PLAN_ACTION.CLOSE} disabled={actions.isBusy} onPress={closeSignUps} />
-        : null}
-      {can.canReopenSignUps
-        ? <Button title={TEXTS.reopenSignUps} variant='secondary' loading={actions.pending === PLAN_ACTION.REOPEN} disabled={actions.isBusy} onPress={reopenSignUps} />
-        : null}
-      {can.canCancel && !isConfirmingCancel
-        ? <Button title={TEXTS.cancelPlan} variant='danger' disabled={actions.isBusy} onPress={() => setIsConfirmingCancel(true)} />
-        : null}
-      {can.canCancel && isConfirmingCancel
         ? (
-          <View style={styles.block}>
-            <Text style={styles.notice}>{TEXTS.confirmCancelHint}</Text>
-            <Button
-              title={TEXTS.confirmCancel}
-              variant='danger'
-              loading={actions.pending === PLAN_ACTION.CANCEL}
-              disabled={actions.isBusy}
-              onPress={async () => {
-                await cancel()
-                setIsConfirmingCancel(false)
-              }}
-            />
-            <Button title={TEXTS.keepPlan} variant='secondary' disabled={actions.isBusy} onPress={() => setIsConfirmingCancel(false)} />
+          <View style={styles.section}>
+            <SectionHeader title={TEXTS.organizer} />
+            <Button title={TEXTS.edit} variant='secondary' icon='create-outline' onPress={() => navigation.navigate(ROUTES.EDIT_PLAN, { plan })} />
+            {can.canCloseSignUps
+              ? <Button title={TEXTS.closeSignUps} variant='secondary' loading={isPending(PLAN_ACTION.CLOSE)} disabled={actions.isBusy} onPress={closeSignUps} />
+              : null}
+            {can.canReopenSignUps
+              ? <Button title={TEXTS.reopenSignUps} variant='secondary' loading={isPending(PLAN_ACTION.REOPEN)} disabled={actions.isBusy} onPress={reopenSignUps} />
+              : null}
+            {can.canCancel && confirmation.action !== PLAN_ACTION.CANCEL
+              ? <Button title={TEXTS.cancelPlan} variant='danger' disabled={actions.isBusy} onPress={askCancel} />
+              : null}
+            {can.canCancel && confirmation.action === PLAN_ACTION.CANCEL
+              ? <Confirmation action={PLAN_ACTION.CANCEL} isBusy={actions.isBusy} isPending={isPending(PLAN_ACTION.CANCEL)} onConfirm={confirm} onDismiss={dismiss} />
+              : null}
           </View>
           )
         : null}
@@ -239,19 +243,16 @@ export default function PlanScreen ({ navigation, route }) {
   )
 }
 
-const styles = StyleSheet.create({
-  center: { flex: 1, padding: 24, gap: 12, alignItems: 'stretch', justifyContent: 'center', backgroundColor: '#fff' },
-  content: { padding: 24, gap: 14, backgroundColor: '#fff' },
-  title: { fontSize: 24, fontWeight: '700', color: '#222' },
-  notice: { fontSize: 14, color: '#8a5a00', backgroundColor: '#fff6e0', padding: 10, borderRadius: 8 },
-  row: { gap: 2 },
-  rowLabel: { fontSize: 12, fontWeight: '600', color: '#666', textTransform: 'uppercase' },
-  rowValue: { fontSize: 16, color: '#222' },
-  block: { gap: 4 },
-  description: { fontSize: 15, color: '#333', lineHeight: 21 },
-  creator: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  success: { fontSize: 14, color: '#1b7f3b', backgroundColor: '#e8f6ec', padding: 10, borderRadius: 8 },
-  muted: { fontSize: 13, color: '#666' },
-  participant: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#eee' },
-  errorTitle: { fontSize: 16, fontWeight: '600', color: '#b42318' }
-})
+const useStyles = createThemedStyles(({ colors }) => ({
+  screen: { flex: 1, backgroundColor: colors.background },
+  content: { padding: spacing.xl, gap: spacing.xl },
+  group: { gap: spacing.sm },
+  section: { gap: spacing.md },
+  details: { gap: spacing.lg },
+  creator: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  creatorText: { flex: 1, gap: spacing.xxs },
+  person: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
+  separated: { borderTopWidth: borders.thin, borderTopColor: colors.border },
+  personName: { flex: 1 },
+  start: { alignSelf: 'flex-start' }
+}))

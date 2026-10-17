@@ -108,15 +108,17 @@ Todos aceptan `style` solo para ubicarlos (margen, flex), nunca para cambiar su 
 | `SectionHeader` | Título de sección dentro de la pantalla | `title`, `description`, `actionTitle` + `onAction` |
 | `Avatar` | Foto o inicial | `photoUrl`, `name`, `size` (`sizes.avatarSm` · `avatarMd` · `avatarLg`), `accessibilityLabel`, `decorative` |
 | `Notice` | Aviso dentro de la pantalla | `message`, `tone` (`info` · `success` · `warning` · `danger`), `title`, `icon`, `children` |
-| `ErrorBanner` | Error de un formulario o de una acción | `message`, `requestId` (solo en desarrollo) |
+| `ErrorBanner` | Error de un formulario, de una acción o de un refresco | `error` (el `ViewError` del hook) o `message` + `requestId` (solo en desarrollo), `title` |
+| `FieldError` | Error de un dato que no es un `FormField` (intereses, cupo ilimitado), con el mismo aspecto | `message` |
 | `LoadingState` | Cargando (indicador + qué se espera) | `label`, `fill` |
 | `Skeleton` / `PlanCardSkeleton` | Lugar del contenido mientras carga | `width`, `height`, `radius` / `label`, `count` |
 | `EmptyState` | Vacío o no disponible, con el punto lima | `title`, `message`, `icon`, `actionTitle` + `onAction`, `actionVariant`, `tone` (`brand` · `danger`), `fill` |
-| `ErrorState` | La pantalla (o un bloque) no se pudo cargar | `title`, `message`, `requestId`, `onRetry`, `retryTitle`, `children`, `fill` |
+| `ErrorState` | La pantalla (o un bloque) no se pudo cargar | `title`, `error` (o `message` + `requestId`), `onRetry`, `retryTitle`, `children`, `fill` |
 | `Screen` | Pantalla con formulario: scroll + teclado | `safeTop`, `footer` (acciones fijas abajo) |
 | `Wordmark` | El logo: "junte" con el punto lima | `size` |
 | `QrScanner` | Cámara que lee QR, con visor | `onScan`, `paused` |
 | `CatalogGate` | Espera a los catálogos | `status`, `onRetry`, `children` |
+| `StudyFields` | Universidad, carrera, ciudad y barrio (onboarding y perfil, mismos textos) | `values`, `options`, `dependents`, `errors`, `onChange` |
 
 Cuándo crear uno nuevo: cuando el mismo bloque aparece en **dos o más pantallas**, tiene un nombre claro y su API es más chica que su implementación. Mientras tanto, vive en la pantalla.
 

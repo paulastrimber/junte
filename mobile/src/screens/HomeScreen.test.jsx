@@ -73,7 +73,9 @@ describe('HomeScreen (feed)', () => {
 
       await renderHome()
 
-      expect(screen.getByText(TEXTS.loading)).toBeOnTheScreen()
+      // Esqueletos de tarjetas que anuncian qué se espera; los filtros siguen a mano.
+      expect(screen.getByRole('progressbar', { name: TEXTS.loading })).toBeOnTheScreen()
+      expect(screen.getByRole('radio', { name: TEXTS.available })).toBeOnTheScreen()
       await act(async () => pending.resolve(page([])))
     })
 
@@ -165,6 +167,16 @@ describe('HomeScreen (feed)', () => {
       expect(await screen.findByText(TEXTS.locationUnavailable)).toBeOnTheScreen()
       expect(screen.getByText(TEXTS.emptyByDate)).toBeOnTheScreen()
     })
+
+    it('vacío por fecha: invita a crear un plan y lleva al tab Crear', async () => {
+      withoutLocation()
+      listPlans.mockResolvedValue(page([]))
+      await renderHome()
+
+      await fireEvent.press(await screen.findByRole('button', { name: TEXTS.create }))
+
+      expect(navigation.navigate).toHaveBeenCalledWith('CreateTab')
+    })
   })
 
   describe('scroll infinito y pull-to-refresh', () => {
@@ -210,6 +222,29 @@ describe('HomeScreen (feed)', () => {
       expect(await screen.findByText('Plan z')).toBeOnTheScreen()
       expect(screen.queryByText('Plan a')).not.toBeOnTheScreen()
       expect(lastFeedBody()).not.toHaveProperty('cursor')
+      // El pull-to-refresh vuelve a pedir la ubicación (puede haberse movido).
+      expect(getCurrentCoordinates).toHaveBeenCalledTimes(2)
+    })
+
+    it('si falla el refresco conserva los planes, lo dice arriba y deja reintentar aunque no haya más páginas', async () => {
+      withLocation()
+      getFeed
+        .mockResolvedValueOnce(page([plan('a')]))
+        .mockRejectedValueOnce(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR }))
+        .mockResolvedValueOnce(page([plan('z')]))
+      await renderHome()
+      await screen.findByText('Plan a')
+
+      await act(async () => screen.getByTestId('feed-list').props.onRefresh())
+
+      expect(await screen.findByText(TEXTS.refreshError)).toBeOnTheScreen()
+      expect(screen.queryByText(TEXTS.loadMoreError)).not.toBeOnTheScreen()
+      expect(screen.getByText('Plan a')).toBeOnTheScreen()
+
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.retry }))
+
+      expect(await screen.findByText('Plan z')).toBeOnTheScreen()
+      expect(screen.queryByText(TEXTS.refreshError)).not.toBeOnTheScreen()
     })
   })
 
@@ -258,7 +293,11 @@ describe('HomeScreen (feed)', () => {
       await fireEvent.press(await screen.findByRole('checkbox', { name: 'Cine' }))
       await fireEvent.press(screen.getByRole('button', { name: FILTERS.apply }))
 
-      await screen.findByRole('button', { name: `${TEXTS.filters} (4)` })
+      // El título visible dice "Filtros (4)"; el lector de pantalla, "Filtros, 4 activos".
+      expect(await screen.findByText(`${TEXTS.filters} (4)`)).toBeOnTheScreen()
+      expect(screen.getByRole('button', { name: TEXTS.filtersActive(4) })).toBeOnTheScreen()
+      // Cada toque vuelve a pedir el feed, pero reutiliza la ubicación: el GPS se consultó una sola vez.
+      expect(getCurrentCoordinates).toHaveBeenCalledTimes(1)
       expect(lastFeedBody()).toEqual({
         availability: 'available', near: NEAR, radiusKm: 2, limit: 20, priceRanges: ['free', 'low'], interests: ['cine'], to: expect.any(String)
       })

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import * as usersApi from '../services/api/users.js'
-import { fieldErrorsFrom, messageForError } from '../utils/errorMessages.js'
+import { fieldErrorsFrom, toViewError } from '../utils/errorMessages.js'
 import { NAME_MAX, validateBirthDate, validateName } from '../utils/validation.js'
 import { useAuth } from './useAuth.js'
 import { useCatalogs } from './useCatalogs.js'
@@ -11,7 +11,7 @@ const FIELDS = ['name', 'birthDate', 'university', 'career', 'city', 'neighborho
 
 /**
  * Edición del perfil propio. Solo se manda lo que cambió (PUT /users/me admite cambios parciales).
- * La edad no se edita: la calcula el servidor desde la fecha de nacimiento.
+ * La edad no se edita: la calcula el servidor desde la fecha de nacimiento. `formError` es un `ViewError`.
  */
 export function useProfileForm () {
   const { user, setUser } = useAuth()
@@ -62,7 +62,7 @@ export function useProfileForm () {
     } catch (error) {
       const fields = fieldErrorsFrom(error)
       if (Object.keys(fields).length > 0) setErrors(fields)
-      else setFormError({ message: messageForError(error), requestId: error?.requestId ?? null })
+      else setFormError(toViewError(error))
     } finally {
       setIsSaving(false)
     }
@@ -71,6 +71,7 @@ export function useProfileForm () {
   return {
     values: draft.values,
     options: draft.options,
+    dependents: draft.dependents,
     catalogStatus: catalogs.status,
     retryCatalogs: catalogs.retry,
     setValue,

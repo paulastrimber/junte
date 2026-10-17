@@ -7,10 +7,10 @@ React Native con Expo + EAS Build. **Nunca accede a MongoDB ni recibe credencial
 | Rol | Pieza | Hace | Nunca hace |
 |-----|-------|------|-----------|
 | **View** | `screens/`, `components/` | Renderizan y emiten eventos | `fetch`/`axios`, leer tokens, lógica de negocio |
-| **Controller** | `hooks/` (`usePlan`, `usePlanActions`, `usePlanQr`, `useCheckIn`, `useMyPlans`) | Orquestan: llaman services, manejan loading/error, devuelven estado listo para pintar | Renderizar |
+| **Controller** | `hooks/` (`usePlanDetail`, `usePlanActions`, `usePlanQr`, `useCheckIn`, `useMyPlans`, `useFeed`…) | Orquestan: llaman services (también los del dispositivo: cámara, ubicación, calendario), manejan loading/error, devuelven estado listo para pintar | Renderizar |
 | **Model** | `services/` + `contexts/` | Cliente HTTP, Socket.io, auth/tokens, FCM, ubicación, persistencia offline; estado global mínimo | Conocer pantallas |
 
-Regla de oro: **una screen nunca llama a la API directamente**; siempre a través de un hook.
+Regla de oro: **una screen nunca llama a la API directamente**; siempre a través de un hook. Tampoco importa services del dispositivo (cámara, ubicación): el hook expone el dato ya resuelto (p. ej. `useFeed().locationNotice`, `useCameraPermission()`).
 
 ```
 screens ──▶ hooks ──▶ services ──▶ API
@@ -58,7 +58,15 @@ mobile/
 - Interceptor de request: agrega `Authorization: Bearer <access>` (salvo en las requests con `skipAuth: true`: register, login y refresh).
 - Interceptor de response ante 401 `TOKEN_EXPIRED`/`UNAUTHENTICATED`: **un solo refresh en vuelo** (las demás requests esperan esa promesa), reintenta una vez cada request. Una request lenta que falla después de que otra ya renovó el token solo se reintenta (no hace otro refresh). Si el refresh es rechazado (401) → se avisa a `AuthContext` y se vuelve al login; si falla por red, la sesión se conserva. `ACCOUNT_SUSPENDED` cierra la sesión sin intentar el refresh.
 - La sesión (token en memoria, refresh, aviso de sesión terminada) se registra con `configureApiAuth(authService.apiAuth)` al arrancar `App`.
-- Todo error se convierte en `ApiError { status, code, message, requestId }`. Las pantallas muestran `message` y, en desarrollo, el `requestId` para rastrear en logs.
+- Todo error se convierte en `ApiError { status, code, message, requestId }`.
+
+## Errores en la UI (hooks → screens)
+
+- **Todo hook expone sus errores como `ViewError`**: `{ code, message, requestId }` (en `useCheckIn`, más `canRetry`). Se arma con una sola función, `toViewError(error, overrides?)` de `utils/errorMessages.js`, que elige el texto por `code` (los textos propios de una acción, como los del chat o los de inscribirse, van como `overrides` en el hook) y usa el `message` del servidor cuando el `code` no tiene uno propio. Nunca un `string` suelto: se perdería el `requestId`.
+- **Una screen nunca elige textos de error** (no llama a `messageForError`): pasa el `ViewError` a `ErrorState` (la pantalla o el bloque no cargó), a `ErrorBanner` (falló una acción, un formulario, un refresco o "cargar más") o lo pinta tal cual.
+- `ErrorBanner` y `ErrorState` muestran el `requestId` solo en desarrollo (`__DEV__`). Excepción: la pantalla "Estado del servidor" muestra `code` y `requestId` siempre (es su propósito).
+- Los errores por campo siguen como `errors: Record<campo, string>` (de `fieldErrorsFrom`); el general del formulario es `formError: ViewError | null`. `CAPACITY_BELOW_PARTICIPANTS` se muestra en el campo del cupo con el texto del servidor.
+- Un error que se ignora a propósito (las estadísticas del perfil) se comenta y se loguea solo en desarrollo, con `code` y `requestId`.
 
 ## Onboarding y selectores
 
@@ -69,10 +77,12 @@ mobile/
 ## Navegación y pantallas de planes (S3)
 
 - Con sesión y onboarding hecho, la app son **tres tabs inferiores**, cada uno con su stack: **Planes** (feed → detalle → editar), **Crear** y **Perfil** (perfil → estado del servidor).
-- **HomeScreen (feed)**: `FlatList` con scroll infinito por `nextCursor`, pull-to-refresh y los cuatro estados. `useFeed` pide la ubicación; si la hay, lee las franjas ocupadas del calendario (si hay permiso) y consulta `POST /feed`; sin ubicación degrada a `GET /plans` (por fecha) y lo explica. Las páginas siguientes repiten exactamente la misma consulta con el cursor.
+- **HomeScreen (feed)**: `FlatList` con scroll infinito por `nextCursor`, pull-to-refresh y los cuatro estados. `useFeed` pide la ubicación; si la hay, lee las franjas ocupadas del calendario (si hay permiso) y consulta `POST /feed`; sin ubicación degrada a `GET /plans` (por fecha) y lo explica (`locationNotice`). Las páginas siguientes repiten exactamente la misma consulta con el cursor.
+- **Errores de una lista** (`useFeed`, `usePagedList`): `error` si falló la primera carga (pantalla de error con los filtros arriba), `refreshError` si falló un pull-to-refresh (se conservan los planes y se avisa arriba, con "Reintentar") y `loadMoreError` si falló una página siguiente (aviso al pie).
 - **Secciones "Con cupo" / "Llenos"**: el feed principal trae planes con lugar; los llenos van aparte (`availability=full`), se pueden abrir pero no admiten inscripción.
-- **Filtros** (`FeedFilters` + `useFeedFilters`): distancia máxima (0.5, 1, 2, 5, 10, 25 o 50 km; por defecto 10), fecha (hoy, 7 días, 30 días), costo (uno o varios rangos, que la app lee de `GET /plans/filters`) y tipo de actividad (intereses del catálogo). Son predefinidos: nunca se escribe una consulta.
-- **PlanScreen**: detalle con horario de inicio y fin, lugar, costo, cupo ("Sin límite de cupo" si es ilimitado), inscriptos y quién organiza. El creador ve "Editar plan".
+- **Filtros** (`FeedFilters` + `useFeedFilters`): distancia máxima (0.5, 1, 2, 5, 10, 25 o 50 km; por defecto 10), fecha (hoy, 7 días, 30 días), costo (uno o varios rangos, que la app lee de `GET /plans/filters`) y tipo de actividad (intereses del catálogo). Son predefinidos: nunca se escribe una consulta. Se aplican al instante; mientras se tocan, `useFeed` reutiliza la ubicación y las franjas del calendario de la última consulta (hasta 60 s), así cada toque no vuelve a pedir el GPS ni a leer el calendario. El pull-to-refresh y "Reintentar" las piden de nuevo.
+- **PlanScreen**: detalle con horario de inicio y fin, lugar, costo, cupo ("Sin límite de cupo" si es ilimitado), inscriptos y quién organiza. El creador ve "Editar plan". La orquesta `usePlanDetail` (plan, acciones, anotados, refrescos y confirmaciones): "Cancelar plan" y "Darme de baja" piden confirmación antes de mandarse (cancelar no se deshace; el lugar liberado lo puede ocupar otra persona).
+- **Volver a una pantalla**: `useRefreshOnFocus(navigation, refresh)` (en `hooks/useScreenFocus.js`) vuelve a pedir los datos en cada `focus` **salvo el primero**, que React Navigation emite al montar (si no, cada entrada pedía todo dos veces). Lo usan el detalle del plan y Mis planes. `useScreenFocus(navigation)` dice si la pantalla está en primer plano (el chat hace polling solo entonces).
 - **CreatePlanScreen** (crear y editar): `LocationPicker` (buscador de dirección + "Usar mi ubicación" + mapa de `react-native-maps` con un pin arrastrable), nombre del lugar, fecha y hora de inicio y de fin (`DateTimeField`), interruptor "Cupo ilimitado", costo e intereses. Al editar manda solo lo que cambió. Con el perfil incompleto, en lugar del formulario explica qué falta.
 - El mapa en Android necesita la clave de Google Maps (`GOOGLE_MAPS_ANDROID_API_KEY`), la única excepción a "nada secreto en el binario": ver [09-seguridad.md](09-seguridad.md#secretos). Requiere un **development build** (no funciona en Expo Go).
 
@@ -114,7 +124,7 @@ Pedirlos **en el momento en que se usan**, explicando para qué, y degradar con 
 - Layout con Flexbox (`flexDirection`, `justifyContent`, `alignItems`, `gap`), estilos con `StyleSheet.create`.
 - Listas largas con `FlatList` (nunca `map` dentro de un `ScrollView` para el feed o el chat).
 - Componentes de lista con `React.memo` y `keyExtractor` estable.
-- Toda pantalla contempla cuatro estados: **cargando, vacío, error, con datos**.
+- Toda pantalla contempla cuatro estados: **cargando, vacío, error, con datos**, siempre con los mismos componentes: `LoadingState` / `PlanCardSkeleton`, `EmptyState`, `ErrorState` (o `ErrorBanner` para una acción o un refresco) y `Notice` para avisos que no son errores.
 - Colores, tipografía, espaciado, componentes base y reglas de accesibilidad: [diseno-ui.md](../practicas/diseno-ui.md).
 
 ## Entornos (EAS)

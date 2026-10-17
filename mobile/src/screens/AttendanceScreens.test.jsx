@@ -279,25 +279,57 @@ describe('MyPlansScreen', () => {
     const pending = deferred()
     listMyPlans.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(page([plan()]))
     await render(<MyPlansScreen navigation={navigation} />)
-    expect(screen.getByText(MY_PLANS.loading)).toBeOnTheScreen()
+    expect(screen.getByRole('progressbar', { name: MY_PLANS.loading })).toBeOnTheScreen()
 
     await act(async () => pending.reject(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR)))
-    expect(await screen.findByText(MY_PLANS.errorTitle)).toBeOnTheScreen()
+    expect(await screen.findByRole('header', { name: MY_PLANS.errorTitle })).toBeOnTheScreen()
+    expect(screen.getByText(/No pudimos conectarnos/)).toBeOnTheScreen()
+    // Los selectores siguen arriba del error para poder cambiar de lista.
+    expect(screen.getByRole('radio', { name: 'Organizo' })).toBeOnTheScreen()
 
     await fireEvent.press(button(MY_PLANS.retry))
 
     expect(await screen.findByText('Fútbol 5 en Parque Rodó')).toBeOnTheScreen()
   })
 
-  it('al volver a la pestaña (foco) refresca la lista', async () => {
+  it('al entrar pide la lista una vez; al volver a la pestaña (foco) la refresca', async () => {
     listMyPlans.mockResolvedValue(page([plan()]))
     await render(<MyPlansScreen navigation={navigation} />)
     await screen.findByText('Fútbol 5 en Parque Rodó')
     const onFocus = navigation.addListener.mock.calls.filter(([event]) => event === 'focus').at(-1)[1]
 
+    // El `focus` del montaje no vuelve a pedir (antes la primera carga se hacía dos veces).
+    await act(async () => onFocus())
+    expect(listMyPlans).toHaveBeenCalledTimes(1)
+
     await act(async () => onFocus())
 
     await waitFor(() => expect(listMyPlans).toHaveBeenCalledTimes(2))
+  })
+
+  it('con datos, si falla el refresco los conserva y deja reintentar arriba', async () => {
+    listMyPlans.mockResolvedValueOnce(page([plan()])).mockRejectedValueOnce(apiError(500, 'INTERNAL')).mockResolvedValueOnce(page([plan({ title: 'Otro plan' })]))
+    await render(<MyPlansScreen navigation={navigation} />)
+    await screen.findByText('Fútbol 5 en Parque Rodó')
+
+    await act(async () => screen.getByTestId('my-plans-list').props.onRefresh())
+
+    expect(await screen.findByText(MY_PLANS.refreshError)).toBeOnTheScreen()
+    expect(screen.queryByText(MY_PLANS.loadMoreError)).not.toBeOnTheScreen()
+    expect(screen.getByText('Fútbol 5 en Parque Rodó')).toBeOnTheScreen()
+
+    await fireEvent.press(button(MY_PLANS.retry))
+
+    expect(await screen.findByText('Otro plan')).toBeOnTheScreen()
+  })
+
+  it('el vacío de "Voy · Próximos" lleva a buscar planes', async () => {
+    listMyPlans.mockResolvedValue(page([]))
+    await render(<MyPlansScreen navigation={navigation} />)
+
+    await fireEvent.press(await screen.findByRole('button', { name: MY_PLANS.findPlans }))
+
+    expect(navigation.navigate).toHaveBeenCalledWith('FeedTab')
   })
 })
 

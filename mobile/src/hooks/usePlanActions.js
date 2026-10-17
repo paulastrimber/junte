@@ -1,14 +1,13 @@
 import { useCallback, useRef, useState } from 'react'
 
-import { toApiError } from '../services/api/client.js'
 import { joinPlan, leavePlan } from '../services/api/participations.js'
 import { updatePlan } from '../services/api/plans.js'
-import { messageForError } from '../utils/errorMessages.js'
+import { toViewError } from '../utils/errorMessages.js'
 
 export const PLAN_ACTION = Object.freeze({ JOIN: 'join', LEAVE: 'leave', CLOSE: 'close', REOPEN: 'reopen', CANCEL: 'cancel' })
 
 // Qué se le dice al usuario según el `code` (la app decide por `code`, nunca por `message`). Lo que no figura acá
-// usa el texto general de `messageForError`.
+// usa el texto general (`toViewError`).
 const MESSAGES = Object.freeze({
   [PLAN_ACTION.JOIN]: {
     PLAN_FULL: 'El plan se llenó: ya no quedan lugares.',
@@ -47,8 +46,7 @@ export function usePlanActions (planId, { onChanged }) {
       onChanged()
       return true
     } catch (failure) {
-      const error = toApiError(failure)
-      setState({ pending: null, error: { message: messageForError(error, MESSAGES[action]), requestId: error.requestId, code: error.code } })
+      setState({ pending: null, error: toViewError(failure, MESSAGES[action]) })
       onChanged()
       return false
     } finally {

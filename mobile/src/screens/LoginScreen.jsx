@@ -1,12 +1,14 @@
-import { View } from 'react-native'
+import { StyleSheet, View } from 'react-native'
 
 import { Button } from '../components/Button.jsx'
 import { ErrorBanner } from '../components/ErrorBanner.jsx'
 import { FormField } from '../components/FormField.jsx'
+import { Notice } from '../components/Notice.jsx'
 import { Screen } from '../components/Screen.jsx'
 import { Text } from '../components/Text.jsx'
 import { Wordmark } from '../components/Wordmark.jsx'
 import { useLoginForm } from '../hooks/useLoginForm.js'
+import { ROUTES } from '../navigation/routes.js'
 import { spacing } from '../theme/index.js'
 
 export const TEXTS = Object.freeze({
@@ -30,7 +32,8 @@ export default function LoginScreen ({ navigation }) {
           <Text color='textMuted'>{TEXTS.subtitle}</Text>
         </View>
       </View>
-      <ErrorBanner message={notice} />
+      {/* La sesión terminó sola (venció, cuenta suspendida): es un aviso, no una falla de lo que hizo la persona. */}
+      {notice ? <Notice tone='warning' icon='time-outline' message={notice.message} accessibilityLiveRegion='polite' /> : null}
       <FormField
         label={TEXTS.email}
         icon='mail-outline'
@@ -58,16 +61,16 @@ export default function LoginScreen ({ navigation }) {
         editable={!isSubmitting}
         onSubmitEditing={submit}
       />
-      <ErrorBanner message={formError?.message} requestId={formError?.requestId} />
+      <ErrorBanner error={formError} />
       <View style={styles.actions}>
         <Button title={TEXTS.submit} onPress={submit} loading={isSubmitting} />
-        <Button title={TEXTS.register} variant='ghost' disabled={isSubmitting} onPress={() => navigation.navigate('Register')} />
+        <Button title={TEXTS.register} variant='ghost' disabled={isSubmitting} onPress={() => navigation.navigate(ROUTES.REGISTER)} />
       </View>
     </Screen>
   )
 }
 
-const styles = {
+const styles = StyleSheet.create({
   intro: { gap: spacing.xl, marginTop: spacing.xl, marginBottom: spacing.sm },
   actions: { gap: spacing.xs, marginTop: spacing.sm }
-}
+})

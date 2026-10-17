@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { toApiError } from '../services/api/client.js'
+import { toViewError } from '../utils/errorMessages.js'
 
 export const LIST_STATUS = Object.freeze({ IDLE: 'idle', LOADING: 'loading', READY: 'ready', ERROR: 'error' })
 
-const stateFor = (status) => ({ status, items: [], nextCursor: null, error: null, isRefreshing: false, isLoadingMore: false, loadMoreError: null })
+const stateFor = (status) => ({ status, items: [], nextCursor: null, error: null, isRefreshing: false, refreshError: null, isLoadingMore: false, loadMoreError: null })
 
 /**
  * Lista paginada por cursor (`{ items, nextCursor }`): primera página, "cargar más" y refresco.
@@ -12,6 +12,14 @@ const stateFor = (status) => ({ status, items: [], nextCursor: null, error: null
  * @param {(cursor: string | null) => Promise<{ items: object[], nextCursor: string | null }>} fetchPage
  *   Estable entre renders mientras la consulta sea la misma (`useCallback`): cuando cambia, se vuelve a pedir.
  * @param {{ enabled?: boolean }} [options]  Con `enabled: false` no pide nada (p. ej. sin permiso para verla).
+ * @returns {{
+ *   status: string, items: object[], hasMore: boolean, isRefreshing: boolean, isLoadingMore: boolean,
+ *   error: import('../utils/errorMessages.js').ViewError | null,
+ *   refreshError: import('../utils/errorMessages.js').ViewError | null,
+ *   loadMoreError: import('../utils/errorMessages.js').ViewError | null,
+ *   loadMore: () => Promise<void>, refresh: () => Promise<void>, retry: () => Promise<void>
+ * }} `error`: falló la primera carga; `refreshError`: falló un refresco (se conservan los datos);
+ *   `loadMoreError`: falló una página siguiente.
  */
 export function usePagedList (fetchPage, { enabled = true } = {}) {
   const [state, setState] = useState(() => stateFor(enabled ? LIST_STATUS.LOADING : LIST_STATUS.IDLE))
@@ -23,7 +31,7 @@ export function usePagedList (fetchPage, { enabled = true } = {}) {
   const loadFirstPage = useCallback(async ({ isRefreshing = false } = {}) => {
     const generation = ++generationRef.current
     setState((current) => (isRefreshing && current.status === LIST_STATUS.READY
-      ? { ...current, isRefreshing: true, loadMoreError: null }
+      ? { ...current, isRefreshing: true, refreshError: null, loadMoreError: null }
       : stateFor(LIST_STATUS.LOADING)))
     try {
       const page = await fetchPage(null)
@@ -31,10 +39,10 @@ export function usePagedList (fetchPage, { enabled = true } = {}) {
       setState({ ...stateFor(LIST_STATUS.READY), items: page.items, nextCursor: page.nextCursor })
     } catch (failure) {
       if (generation !== generationRef.current) return
-      const error = toApiError(failure)
+      const error = toViewError(failure)
       // Si falla un refresco se conserva lo que ya se veía; si falla la primera carga, estado de error.
       setState((current) => (isRefreshing && current.status === LIST_STATUS.READY
-        ? { ...current, isRefreshing: false, loadMoreError: error }
+        ? { ...current, isRefreshing: false, refreshError: error }
         : { ...stateFor(LIST_STATUS.ERROR), error }))
     }
   }, [fetchPage])
@@ -63,7 +71,7 @@ export function usePagedList (fetchPage, { enabled = true } = {}) {
       })
     } catch (failure) {
       if (generation !== generationRef.current) return
-      setState((previous) => ({ ...previous, isLoadingMore: false, loadMoreError: toApiError(failure) }))
+      setState((previous) => ({ ...previous, isLoadingMore: false, loadMoreError: toViewError(failure) }))
     }
   }, [fetchPage])
 

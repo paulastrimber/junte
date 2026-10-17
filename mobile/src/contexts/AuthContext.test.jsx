@@ -56,7 +56,7 @@ describe('AuthProvider', () => {
 
     const { result } = await setup(service)
     await waitFor(() => expect(result.current.status).toBe(AUTH_STATUS.RESTORE_ERROR))
-    expect(result.current.error).toBe(error)
+    expect(result.current.error).toEqual({ code: CLIENT_ERROR_CODES.NETWORK_ERROR, message: 'No pudimos conectarnos con el servidor. Revisá tu conexión.', requestId: null })
 
     await act(async () => { await result.current.retryRestore() })
 

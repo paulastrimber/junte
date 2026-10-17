@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native'
+import { useCallback, useState } from 'react'
+import { ActivityIndicator, FlatList, View } from 'react-native'
 
 import { Button } from '../components/Button.jsx'
 import { ChipGroup } from '../components/ChipGroup.jsx'
 import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorBanner } from '../components/ErrorBanner.jsx'
+import { ErrorState } from '../components/ErrorState.jsx'
 import { PlanCard } from '../components/PlanCard.jsx'
+import { PlanCardSkeleton } from '../components/Skeleton.jsx'
 import { MY_PLANS_ROLE, MY_PLANS_WHEN, useMyPlans } from '../hooks/useMyPlans.js'
 import { LIST_STATUS } from '../hooks/usePagedList.js'
+import { useRefreshOnFocus } from '../hooks/useScreenFocus.js'
 import { ROUTES } from '../navigation/routes.js'
-import { messageForError } from '../utils/errorMessages.js'
+import { createThemedStyles, spacing, useTheme } from '../theme/index.js'
 import { formatPrice, formatSchedule, formatSpots } from '../utils/plans.js'
 
 export const TEXTS = Object.freeze({
@@ -19,6 +22,7 @@ export const TEXTS = Object.freeze({
   loading: 'Cargando tus planes…',
   loadingMore: 'Cargando más planes…',
   errorTitle: 'No pudimos cargar tus planes.',
+  refreshError: 'No pudimos actualizar tus planes.',
   loadMoreError: 'No pudimos cargar más planes.',
   retry: 'Reintentar',
   emptyTitle: 'No hay planes para mostrar',
@@ -31,7 +35,15 @@ export const TEXTS = Object.freeze({
   statusLabels: { closed: 'Inscripciones cerradas', cancelled: 'Cancelado', completed: 'Finalizado' },
   checkedIn: 'Asististe',
   noShow: 'No asististe',
-  joined: 'Inscripto'
+  joined: 'Inscripto',
+  findPlans: 'Buscar planes',
+  createPlan: 'Crear un plan'
+})
+
+// Vacíos que tienen algo para hacer: a qué tab lleva la acción.
+const EMPTY_ACTIONS = Object.freeze({
+  'joined-upcoming': { title: TEXTS.findPlans, route: ROUTES.FEED_TAB, icon: 'compass-outline' },
+  'created-upcoming': { title: TEXTS.createPlan, route: ROUTES.CREATE_TAB, icon: 'add-circle-outline' }
 })
 
 const ROLES = Object.freeze([
@@ -46,55 +58,87 @@ const WHENS = Object.freeze([
 
 const keyOf = (plan) => plan.id
 
-/** Cupo o, si corresponde, el estado del plan y el del usuario en él ("Cancelado", "Asististe"…). */
+/**
+ * Cupo o, si corresponde, el estado del plan y el del usuario en él ("Cancelado", "Asististe"…), con el tono de la
+ * etiqueta: lo que salió bien en verde, lo que no en ámbar o rojo.
+ */
 function summaryOf (plan) {
   const parts = []
-  if (TEXTS.statusLabels[plan.status]) parts.push(TEXTS.statusLabels[plan.status])
+  let tone
+  if (TEXTS.statusLabels[plan.status]) {
+    parts.push(TEXTS.statusLabels[plan.status])
+    tone = plan.status === 'cancelled' ? 'danger' : 'neutral'
+  }
   const mine = plan.myParticipation
-  if (mine?.checkedInAt) parts.push(TEXTS.checkedIn)
-  else if (mine?.noShow) parts.push(TEXTS.noShow)
-  else if (mine?.status === 'active' && parts.length === 0) parts.push(TEXTS.joined)
-  return parts.length > 0 ? parts.join(' · ') : formatSpots(plan)
+  if (mine?.checkedInAt) {
+    parts.push(TEXTS.checkedIn)
+    tone = 'success'
+  } else if (mine?.noShow) {
+    parts.push(TEXTS.noShow)
+    tone = 'warning'
+  } else if (mine?.status === 'active' && parts.length === 0) {
+    parts.push(TEXTS.joined)
+    tone = 'primary'
+  }
+  return parts.length > 0 ? { text: parts.join(' · '), tone } : { text: formatSpots(plan), tone: undefined }
 }
 
 export default function MyPlansScreen ({ navigation }) {
+  const styles = useStyles()
+  const { colors } = useTheme()
   const [role, setRole] = useState(MY_PLANS_ROLE.JOINED)
   const [when, setWhen] = useState(MY_PLANS_WHEN.UPCOMING)
   const plans = useMyPlans({ role, when })
   const { loadMore, refresh, retry } = plans
 
-  // Al volver a la pestaña la lista pudo cambiar (inscripciones, bajas, asistencia).
-  useEffect(() => navigation.addListener('focus', refresh), [navigation, refresh])
+  // Al volver a la pestaña la lista pudo cambiar (inscripciones, bajas, asistencia). Al entrar ya la pide el hook.
+  useRefreshOnFocus(navigation, refresh)
 
   const openPlan = useCallback((planId) => navigation.navigate(ROUTES.PLAN, { planId }), [navigation])
 
-  const renderPlan = useCallback(({ item }) => (
-    <PlanCard
-      id={item.id}
-      title={item.title}
-      schedule={formatSchedule(item.startsAt, item.endsAt)}
-      place={item.location.label}
-      price={formatPrice(item.price)}
-      spots={summaryOf(item)}
-      isFull={item.status === 'cancelled' || Boolean(item.myParticipation?.noShow)}
-      onPress={openPlan}
-    />
-  ), [openPlan])
+  const renderPlan = useCallback(({ item }) => {
+    const summary = summaryOf(item)
+    return (
+      <PlanCard
+        id={item.id}
+        title={item.title}
+        schedule={formatSchedule(item.startsAt, item.endsAt)}
+        place={item.location.label}
+        price={formatPrice(item.price)}
+        spots={summary.text}
+        spotsTone={summary.tone}
+        isFull={item.status === 'cancelled' || Boolean(item.myParticipation?.noShow)}
+        isFree={item.price === 0}
+        onPress={openPlan}
+      />
+    )
+  }, [openPlan])
 
   const header = (
     <View style={styles.header}>
-      <ChipGroup label={TEXTS.role} options={ROLES} selected={[role]} onSelect={setRole} />
-      <ChipGroup label={TEXTS.when} options={WHENS} selected={[when]} onSelect={setWhen} />
+      <ChipGroup label={TEXTS.role} options={ROLES} selected={[role]} onSelect={setRole} variant='segmented' hideLabel />
+      <ChipGroup label={TEXTS.when} options={WHENS} selected={[when]} onSelect={setWhen} variant='segmented' hideLabel />
+      {plans.refreshError
+        ? (
+          <View style={styles.refreshError}>
+            <ErrorBanner title={TEXTS.refreshError} error={plans.refreshError} />
+            <Button title={TEXTS.retry} variant='secondary' size='sm' icon='refresh-outline' onPress={refresh} style={styles.start} />
+          </View>
+          )
+        : null}
     </View>
   )
 
+  const listKey = `${role}-${when}`
+  const emptyAction = EMPTY_ACTIONS[listKey]
+
   function footer () {
-    if (plans.isLoadingMore) return <ActivityIndicator accessibilityLabel={TEXTS.loadingMore} style={styles.footer} />
+    if (plans.isLoadingMore) return <ActivityIndicator accessibilityLabel={TEXTS.loadingMore} color={colors.primary} style={styles.footer} />
     if (plans.loadMoreError) {
       return (
         <View style={styles.footer}>
-          <ErrorBanner message={`${TEXTS.loadMoreError} ${messageForError(plans.loadMoreError)}`} requestId={plans.loadMoreError.requestId} />
-          {plans.hasMore ? <Button title={TEXTS.retry} variant='secondary' onPress={loadMore} /> : null}
+          <ErrorBanner title={TEXTS.loadMoreError} error={plans.loadMoreError} />
+          <Button title={TEXTS.retry} variant='secondary' size='sm' icon='refresh-outline' onPress={loadMore} style={styles.start} />
         </View>
       )
     }
@@ -105,24 +149,15 @@ export default function MyPlansScreen ({ navigation }) {
     <View style={styles.container}>
       {plans.status === LIST_STATUS.LOADING
         ? (
-          <View style={styles.center}>
+          <View style={styles.list}>
             {header}
-            <ActivityIndicator accessibilityLabel={TEXTS.loading} />
-            <Text>{TEXTS.loading}</Text>
+            <PlanCardSkeleton label={TEXTS.loading} />
           </View>
           )
         : null}
 
-      {plans.status === LIST_STATUS.ERROR
-        ? (
-          <View style={styles.center}>
-            {header}
-            <Text style={styles.errorTitle}>{TEXTS.errorTitle}</Text>
-            <ErrorBanner message={messageForError(plans.error)} requestId={plans.error?.requestId} />
-            <Button title={TEXTS.retry} onPress={retry} />
-          </View>
-          )
-        : null}
+      {/* Los filtros siguen arriba del error: permiten cambiar de lista. */}
+      {plans.status === LIST_STATUS.ERROR ? <ErrorState title={TEXTS.errorTitle} error={plans.error} onRetry={retry}>{header}</ErrorState> : null}
 
       {plans.status === LIST_STATUS.READY
         ? (
@@ -133,7 +168,16 @@ export default function MyPlansScreen ({ navigation }) {
             renderItem={renderPlan}
             contentContainerStyle={styles.list}
             ListHeaderComponent={header}
-            ListEmptyComponent={<EmptyState title={TEXTS.emptyTitle} message={TEXTS.empty[`${role}-${when}`]} />}
+            ListEmptyComponent={(
+              <EmptyState
+                icon={emptyAction?.icon ?? 'calendar-outline'}
+                title={TEXTS.emptyTitle}
+                message={TEXTS.empty[listKey]}
+                actionTitle={emptyAction?.title}
+                actionVariant='primary'
+                onAction={emptyAction ? () => navigation.navigate(emptyAction.route) : undefined}
+              />
+            )}
             ListFooterComponent={footer()}
             onEndReached={loadMore}
             onEndReachedThreshold={0.5}
@@ -146,11 +190,11 @@ export default function MyPlansScreen ({ navigation }) {
   )
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  center: { padding: 16, gap: 12 },
-  header: { gap: 12, marginBottom: 4 },
-  list: { padding: 16, gap: 12 },
-  errorTitle: { fontSize: 16, fontWeight: '600', color: '#b42318' },
-  footer: { paddingVertical: 16, gap: 8 }
-})
+const useStyles = createThemedStyles(({ colors }) => ({
+  container: { flex: 1, backgroundColor: colors.background },
+  list: { padding: spacing.lg, gap: spacing.md },
+  header: { gap: spacing.md },
+  refreshError: { gap: spacing.sm },
+  footer: { paddingVertical: spacing.lg, gap: spacing.sm },
+  start: { alignSelf: 'flex-start' }
+}))

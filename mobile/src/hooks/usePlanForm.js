@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import * as plansApi from '../services/api/plans.js'
 import { isApiError } from '../services/api/errors.js'
 import { toggleInterest as toggleInterestIn, visibleInterestCategories } from '../utils/catalog.js'
-import { fieldErrorsFrom, messageForError } from '../utils/errorMessages.js'
+import { fieldErrorsFrom, toViewError } from '../utils/errorMessages.js'
 import { formValuesFrom, planChanges, toPlanPayload, validatePlanForm } from '../utils/plans.js'
 import { useAuth } from './useAuth.js'
 import { useCatalogs } from './useCatalogs.js'
@@ -16,6 +16,7 @@ function formFieldFor (path) {
 }
 
 function serverFieldErrors (error) {
+  // El back explica el mínimo posible ("ya hay 5 inscriptos"): se muestra su texto en el campo del cupo.
   if (isApiError(error) && error.code === 'CAPACITY_BELOW_PARTICIPANTS') return { capacity: error.message }
   return Object.fromEntries(Object.entries(fieldErrorsFrom(error)).map(([path, message]) => [formFieldFor(path), message]))
 }
@@ -26,6 +27,7 @@ function serverFieldErrors (error) {
  * @param {object} [params]
  * @param {object | null} [params.plan]  Plan a editar; sin él se crea uno nuevo.
  * @param {(plan: object) => void} [params.onSaved]
+ * Errores: `errors` por campo (texto) y `formError` (`ViewError`) para el resto.
  */
 export function usePlanForm ({ plan = null, onSaved } = {}) {
   const { user } = useAuth()
@@ -73,7 +75,7 @@ export function usePlanForm ({ plan = null, onSaved } = {}) {
     } catch (error) {
       const fields = serverFieldErrors(error)
       if (Object.keys(fields).length > 0) setErrors(fields)
-      else setFormError({ message: messageForError(error), requestId: error?.requestId ?? null, code: error?.code ?? null })
+      else setFormError(toViewError(error))
     } finally {
       setIsSaving(false)
     }

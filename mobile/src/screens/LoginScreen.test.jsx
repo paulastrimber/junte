@@ -134,6 +134,8 @@ describe('LoginScreen', () => {
     await act(async () => service.expire(new ApiError({ status: 401, code: 'ACCOUNT_SUSPENDED' })))
 
     expect(screen.getByText('Tu cuenta está suspendida.')).toBeOnTheScreen()
+    // Es un aviso, no un error del formulario: no se anuncia como alerta.
+    expect(screen.queryByRole('alert')).not.toBeOnTheScreen()
   })
 
   it('el botón de crear cuenta lleva al registro', async () => {

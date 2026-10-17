@@ -27,4 +27,21 @@ describe('ErrorState', () => {
 
     expect(screen.getByText('Filtros')).toBeOnTheScreen()
   })
+
+  it('toma el mensaje y el requestId del error del hook; el requestId solo en desarrollo', async () => {
+    const error = { code: 'NETWORK_ERROR', message: 'Revisá tu conexión.', requestId: 'req-1' }
+    await render(<ErrorState title='Falló' error={error} />)
+    expect(screen.getByText('Revisá tu conexión.')).toBeOnTheScreen()
+    expect(screen.getByText('requestId: req-1')).toBeOnTheScreen()
+
+    const wasDev = global.__DEV__
+    global.__DEV__ = false
+    try {
+      await screen.rerender(<ErrorState title='Falló' error={{ ...error }} />)
+      expect(screen.getByText('Revisá tu conexión.')).toBeOnTheScreen()
+      expect(screen.queryByText('requestId: req-1')).not.toBeOnTheScreen()
+    } finally {
+      global.__DEV__ = wasDev
+    }
+  })
 })

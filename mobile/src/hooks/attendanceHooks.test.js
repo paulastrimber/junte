@@ -340,7 +340,15 @@ describe('useMyPlans (lista paginada)', () => {
 
     await act(async () => { await result.current.refresh() })
     expect(result.current.items).toEqual([{ id: 'a' }])
-    expect(result.current).toMatchObject({ isRefreshing: false, loadMoreError: { code: 'INTERNAL' } })
+    // Un refresco fallido no se confunde con "cargar más": tiene su propio error, con el contrato completo.
+    expect(result.current).toMatchObject({ isRefreshing: false, loadMoreError: null })
+    expect(result.current.refreshError).toEqual({ code: 'INTERNAL', message: expect.any(String), requestId: 'r1' })
+
+    // Al empezar otro refresco se limpia.
+    listMyPlans.mockResolvedValueOnce(page(['a', 'b']))
+    await act(async () => { await result.current.refresh() })
+    expect(result.current.refreshError).toBeNull()
+    expect(result.current.items).toEqual([{ id: 'a' }, { id: 'b' }])
   })
 
   it('sin más páginas, loadMore no pide nada', async () => {
@@ -390,11 +398,15 @@ describe('useMyStats', () => {
     expect(result.current).toMatchObject({ reputation: 3, noShowCount: 1 })
   })
 
-  it('si falla se queda con lo último conocido; reload lo vuelve a pedir', async () => {
+  it('si falla se queda con lo último conocido (y lo loguea en desarrollo); reload lo vuelve a pedir', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
     getMe.mockRejectedValueOnce(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR)).mockResolvedValueOnce({ reputation: 5, noShowCount: 0 })
     const { result } = await renderHook(() => useMyStats({ reputation: 2 }))
     await waitFor(() => expect(getMe).toHaveBeenCalledTimes(1))
     expect(result.current.reputation).toBe(2)
+    // Solo `code` y `requestId`: nunca el body ni datos del usuario.
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.any(String), { code: CLIENT_ERROR_CODES.NETWORK_ERROR, requestId: 'r1' }))
+    warn.mockRestore()
 
     await act(async () => result.current.reload())
 

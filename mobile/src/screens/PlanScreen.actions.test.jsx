@@ -129,12 +129,17 @@ describe('PlanScreen: inscripción, asistencia y estado', () => {
   })
 
   describe('darse de baja', () => {
-    it('al confirmar el servidor vuelve a ofrecer inscribirse', async () => {
+    it('pide confirmación y, al confirmar, el servidor vuelve a ofrecer inscribirse', async () => {
       getPlan.mockResolvedValueOnce(plan({ myParticipation: joined() })).mockResolvedValue(plan({ myParticipation: joined({ status: 'cancelled' }) }))
       leavePlan.mockResolvedValue()
       await renderPlan()
 
       await fireEvent.press(button(TEXTS.leave))
+      // El lugar liberado lo puede ocupar otra persona: no se manda nada sin confirmar.
+      expect(leavePlan).not.toHaveBeenCalled()
+      expect(screen.getByText(TEXTS.confirmLeaveHint)).toBeOnTheScreen()
+
+      await fireEvent.press(button(TEXTS.confirmLeave))
 
       expect(await screen.findByRole('button', { name: TEXTS.join })).toBeOnTheScreen()
       expect(screen.queryByText(TEXTS.joinedNotice)).not.toBeOnTheScreen()
@@ -147,8 +152,21 @@ describe('PlanScreen: inscripción, asistencia y estado', () => {
       await renderPlan()
 
       await fireEvent.press(button(TEXTS.leave))
+      await fireEvent.press(button(TEXTS.confirmLeave))
 
       expect(await screen.findByText(/Ya no podés darte de baja/)).toBeOnTheScreen()
+    })
+
+    it('"Seguir inscripto" deja todo como estaba', async () => {
+      getPlan.mockResolvedValue(plan({ myParticipation: joined() }))
+      await renderPlan()
+
+      await fireEvent.press(button(TEXTS.leave))
+      await fireEvent.press(button(TEXTS.keepJoined))
+
+      expect(leavePlan).not.toHaveBeenCalled()
+      expect(screen.queryByText(TEXTS.confirmLeaveHint)).not.toBeOnTheScreen()
+      expect(button(TEXTS.leave)).toBeOnTheScreen()
     })
 
     it('no ofrece la baja con el plan empezado ni con la asistencia registrada', async () => {
@@ -197,14 +215,21 @@ describe('PlanScreen: inscripción, asistencia y estado', () => {
       expect(queryButton(TEXTS.checkIn)).not.toBeOnTheScreen()
     })
 
-    it('al volver a la pantalla (foco) pide el plan otra vez', async () => {
+    it('al montar pide el plan una sola vez; al volver a la pantalla (foco) lo pide otra vez', async () => {
       getPlan.mockResolvedValue(plan({ myParticipation: joined() }))
       await renderPlan()
+      await waitFor(() => expect(listParticipants).toHaveBeenCalledTimes(1))
       const [, onFocus] = navigation.addListener.mock.calls.find(([event]) => event === 'focus')
+
+      // React Navigation emite `focus` también al montar: ese no vuelve a pedir nada.
+      await act(async () => onFocus())
+      expect(getPlan).toHaveBeenCalledTimes(1)
+      expect(listParticipants).toHaveBeenCalledTimes(1)
 
       await act(async () => onFocus())
 
       await waitFor(() => expect(getPlan).toHaveBeenCalledTimes(2))
+      await waitFor(() => expect(listParticipants).toHaveBeenCalledTimes(2))
     })
   })
 
