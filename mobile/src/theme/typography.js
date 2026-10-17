@@ -33,6 +33,16 @@ export const typography = Object.freeze({
   bodyStrong: { fontFamily: fonts.semibold, fontSize: 16, lineHeight: 24 },
   label: { fontFamily: fonts.semibold, fontSize: 14, lineHeight: 20 },
   caption: { fontFamily: fonts.medium, fontSize: 13, lineHeight: 18 },
-  // Rótulos en mayúsculas ("ORGANIZA", "CUÁNDO").
+  // Texto chico de chips, etiquetas y la barra de tabs. No se usa para frases.
+  micro: { fontFamily: fonts.semibold, fontSize: 11, lineHeight: 14, letterSpacing: 0.2 },
+  // Números que importan (reputación, inscriptos): grandes y con cifras del mismo ancho.
+  stat: { fontFamily: fonts.extrabold, fontSize: 28, lineHeight: 32, letterSpacing: -0.4, fontVariant: ['tabular-nums'] },
+  // Rótulos en mayúsculas. Con moderación: para títulos de sección se usa `SectionHeader` (sin mayúsculas).
   overline: { fontFamily: fonts.bold, fontSize: 12, lineHeight: 16, letterSpacing: 0.8, textTransform: 'uppercase' }
 })
+
+/**
+ * Tope del texto grande del sistema (Dynamic Type / tamaño de fuente de Android) por variante. El texto siempre
+ * escala; los títulos, que ya son grandes, escalan menos para no partirse en cinco renglones.
+ */
+export const fontScaleLimits = Object.freeze({ display: 1.3, title: 1.4, stat: 1.4, heading: 1.6, default: 2 })

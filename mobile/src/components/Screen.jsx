@@ -1,15 +1,17 @@
 import { useContext } from 'react'
-import { KeyboardAvoidingView, Platform, ScrollView } from 'react-native'
+import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native'
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context'
 
-import { createThemedStyles, spacing } from '../theme/index.js'
+import { borders, createThemedStyles, spacing } from '../theme/index.js'
 
 /**
  * Contenedor de pantallas con formularios: scroll y teclado que no tapa los campos.
  * @param {object} props
  * @param {boolean} [props.safeTop]  Para pantallas SIN encabezado de navegación: deja libre la barra de estado.
+ * @param {import('react').ReactNode} [props.footer]  Acciones fijas abajo, fuera del scroll ("Crear plan",
+ *   "Siguiente"): siempre a mano aunque el formulario sea largo. Respeta el área segura de abajo.
  */
-export function Screen ({ children, safeTop = false }) {
+export function Screen ({ children, safeTop = false, footer }) {
   const styles = useStyles()
   // Fuera de un navegador (tests de una pantalla suelta) no hay proveedor de áreas seguras.
   const insets = useContext(SafeAreaInsetsContext)
@@ -23,11 +25,20 @@ export function Screen ({ children, safeTop = false }) {
       >
         {children}
       </ScrollView>
+      {footer ? <View style={[styles.footer, { paddingBottom: spacing.md + (insets?.bottom ?? 0) }]}>{footer}</View> : null}
     </KeyboardAvoidingView>
   )
 }
 
 const useStyles = createThemedStyles(({ colors }) => ({
   flex: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.xl, gap: spacing.lg }
+  content: { padding: spacing.xl, gap: spacing.lg },
+  footer: {
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    borderTopWidth: borders.thin,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface
+  }
 }))

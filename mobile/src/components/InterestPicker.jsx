@@ -1,6 +1,9 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { View } from 'react-native'
 
+import { spacing } from '../theme/index.js'
 import { MAX_INTERESTS } from '../utils/catalog.js'
+import { Chip } from './Chip.jsx'
+import { Text } from './Text.jsx'
 
 /**
  * Intereses agrupados por categoría (hobbies). Elige hasta MAX_INTERESTS; al llegar al máximo, el resto se deshabilita.
@@ -15,23 +18,18 @@ export function InterestPicker ({ categories, selected, onToggle }) {
     <View style={styles.container}>
       {categories.map((category) => (
         <View key={category.key} style={styles.category}>
-          <Text style={styles.categoryName} accessibilityRole='header'>{category.name}</Text>
+          <Text variant='label' color='textMuted' accessibilityRole='header'>{category.name}</Text>
           <View style={styles.row}>
             {category.interests.map(({ key, name }) => {
               const isSelected = selected.includes(key)
-              const isDisabled = isFull && !isSelected
               return (
-                <Pressable
+                <Chip
                   key={key}
-                  accessibilityRole='checkbox'
-                  accessibilityLabel={name}
-                  accessibilityState={{ checked: isSelected, disabled: isDisabled }}
-                  disabled={isDisabled}
+                  label={name}
+                  selected={isSelected}
+                  disabled={isFull && !isSelected}
                   onPress={() => onToggle(key)}
-                  style={[styles.chip, isSelected && styles.chipSelected, isDisabled && styles.chipDisabled]}
-                >
-                  <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>{name}</Text>
-                </Pressable>
+                />
               )
             })}
           </View>
@@ -41,14 +39,8 @@ export function InterestPicker ({ categories, selected, onToggle }) {
   )
 }
 
-const styles = StyleSheet.create({
-  container: { gap: 16 },
-  category: { gap: 8 },
-  categoryName: { fontSize: 15, fontWeight: '600', color: '#222' },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#bbb', backgroundColor: '#fff' },
-  chipSelected: { backgroundColor: '#1f4fd1', borderColor: '#1f4fd1' },
-  chipDisabled: { opacity: 0.4 },
-  chipText: { color: '#222' },
-  chipTextSelected: { color: '#fff', fontWeight: '600' }
-})
+const styles = {
+  container: { gap: spacing.lg },
+  category: { gap: spacing.sm },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }
+}

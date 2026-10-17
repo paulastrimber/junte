@@ -1,9 +1,13 @@
-import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { useContext } from 'react'
+import { Modal, Platform, ScrollView, View } from 'react-native'
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context'
 
+import { borders, createThemedStyles, spacing } from '../theme/index.js'
 import { DATE_PRESETS, RADIUS_OPTIONS_KM, priceRangeLabel, radiusLabel } from '../utils/plans.js'
 import { Button } from './Button.jsx'
 import { ChipGroup } from './ChipGroup.jsx'
 import { InterestPicker } from './InterestPicker.jsx'
+import { Text } from './Text.jsx'
 
 export const TEXTS = Object.freeze({
   title: 'Filtros',
@@ -33,15 +37,27 @@ const RADIUS_CHOICES = RADIUS_OPTIONS_KM.map((km) => ({ key: km, label: radiusLa
  * @param {() => void} props.onReset
  */
 export function FeedFilters ({ visible, onClose, values, priceRangeOptions, interestCategories, onChange, onToggleInterest, onTogglePriceRange, onReset }) {
+  const styles = useStyles()
+  // Fuera de un navegador (tests de un componente suelto) no hay proveedor de áreas seguras.
+  const insets = useContext(SafeAreaInsetsContext)
+  const isSheet = Platform.OS === 'ios'
   const priceChoices = priceRangeOptions.map((range) => ({ key: range.key, label: priceRangeLabel(range) }))
   return (
-    <Modal visible={visible} animationType='slide' onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType='slide'
+      // En iOS, hoja nativa (se cierra deslizando hacia abajo); en Android, pantalla completa.
+      presentationStyle={isSheet ? 'pageSheet' : undefined}
+      onRequestClose={onClose}
+    >
       <View style={styles.container}>
-        <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.title} accessibilityRole='header'>{TEXTS.title}</Text>
+        <ScrollView contentContainerStyle={[styles.content, { paddingTop: spacing.xl + (isSheet ? 0 : insets?.top ?? 0) }]}>
+          <Text variant='title' accessibilityRole='header'>{TEXTS.title}</Text>
 
-          <ChipGroup label={TEXTS.radius} options={RADIUS_CHOICES} selected={[values.radiusKm]} onSelect={(km) => onChange('radiusKm', km)} />
-          <Text style={styles.hint}>{TEXTS.radiusHint}</Text>
+          <View style={styles.section}>
+            <ChipGroup label={TEXTS.radius} options={RADIUS_CHOICES} selected={[values.radiusKm]} onSelect={(km) => onChange('radiusKm', km)} />
+            <Text variant='caption' color='textMuted'>{TEXTS.radiusHint}</Text>
+          </View>
 
           <ChipGroup label={TEXTS.date} options={DATE_PRESETS} selected={[values.datePreset]} onSelect={(key) => onChange('datePreset', key)} />
 
@@ -52,27 +68,33 @@ export function FeedFilters ({ visible, onClose, values, priceRangeOptions, inte
           {interestCategories.length > 0
             ? (
               <View style={styles.section}>
-                <Text style={styles.sectionLabel} accessibilityRole='header'>{TEXTS.interests}</Text>
+                <Text variant='heading' accessibilityRole='header'>{TEXTS.interests}</Text>
                 <InterestPicker categories={interestCategories} selected={values.interests} onToggle={onToggleInterest} />
               </View>
               )
             : null}
         </ScrollView>
-        <View style={styles.footer}>
-          <Button title={TEXTS.reset} variant='secondary' onPress={onReset} />
-          <Button title={TEXTS.apply} onPress={onClose} />
+        <View style={[styles.footer, { paddingBottom: spacing.lg + (insets?.bottom ?? 0) }]}>
+          <Button title={TEXTS.reset} variant='ghost' onPress={onReset} style={styles.footerButton} />
+          <Button title={TEXTS.apply} onPress={onClose} style={styles.footerButton} />
         </View>
       </View>
     </Modal>
   )
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  content: { padding: 24, gap: 20 },
-  title: { fontSize: 22, fontWeight: '700', color: '#222' },
-  hint: { fontSize: 12, color: '#666', marginTop: -12 },
-  section: { gap: 12 },
-  sectionLabel: { fontSize: 15, fontWeight: '600', color: '#222' },
-  footer: { padding: 16, gap: 8, borderTopWidth: 1, borderTopColor: '#eee' }
-})
+const useStyles = createThemedStyles(({ colors }) => ({
+  container: { flex: 1, backgroundColor: colors.background },
+  content: { padding: spacing.xl, gap: spacing.xl },
+  section: { gap: spacing.sm },
+  footer: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: borders.thin,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface
+  },
+  footerButton: { flex: 1 }
+}))

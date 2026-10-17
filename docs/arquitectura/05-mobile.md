@@ -115,6 +115,7 @@ Pedirlos **en el momento en que se usan**, explicando para qué, y degradar con 
 - Listas largas con `FlatList` (nunca `map` dentro de un `ScrollView` para el feed o el chat).
 - Componentes de lista con `React.memo` y `keyExtractor` estable.
 - Toda pantalla contempla cuatro estados: **cargando, vacío, error, con datos**.
+- Colores, tipografía, espaciado, componentes base y reglas de accesibilidad: [diseno-ui.md](../practicas/diseno-ui.md).
 
 ## Entornos (EAS)
 
