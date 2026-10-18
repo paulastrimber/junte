@@ -1,4 +1,4 @@
-import { MESSAGE_STATUS, createClientId, formatMessageTime, mergeMessages, mergeRecoveredPage, sortMessages } from './chat.js'
+import { MESSAGE_STATUS, createClientId, formatMessageTime, mergeMessages, mergeRecoveredPage, messageGroupPosition, sortMessages } from './chat.js'
 
 const message = (id, createdAt, extra = {}) => ({ id, planId: 'p1', sender: { id: 'u1', name: 'Ana' }, type: 'text', text: id, clientId: null, createdAt, ...extra })
 const sent = (id, createdAt, extra) => ({ ...message(id, createdAt, extra), status: MESSAGE_STATUS.SENT })
@@ -161,5 +161,50 @@ describe('formatMessageTime', () => {
 
   it('una fecha inválida no rompe', () => {
     expect(formatMessageTime('ayer', now)).toBe('')
+  })
+})
+
+describe('messageGroupPosition', () => {
+  // Hora local (el corte de día es el del teléfono).
+  const at = (hours, minutes) => new Date(2026, 9, 25, hours, minutes).toISOString()
+  const from = (senderId, createdAt) => sent(`${senderId}-${createdAt}`, createdAt, { sender: { id: senderId, name: senderId } })
+  // Del más nuevo al más viejo, como la lista invertida.
+  const positions = (oldestFirst) => {
+    const list = [...oldestFirst].reverse()
+    return list.map((_, index) => messageGroupPosition(list, index)).reverse()
+  }
+
+  it('agrupa los seguidos de la misma persona: nombre en el primero (arriba) y avatar en el último (abajo)', () => {
+    expect(positions([from('ana', at(14, 0)), from('ana', at(14, 2)), from('ana', at(14, 6))])).toEqual([
+      { isFirst: true, isLast: false },
+      { isFirst: false, isLast: false },
+      { isFirst: false, isLast: true }
+    ])
+  })
+
+  it('corta el grupo si cambia quien escribe', () => {
+    expect(positions([from('ana', at(14, 0)), from('beto', at(14, 1)), from('ana', at(14, 2))])).toEqual([
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true }
+    ])
+  })
+
+  it('corta el grupo con 5 minutos o más entre uno y el siguiente', () => {
+    expect(positions([from('ana', at(14, 0)), from('ana', at(14, 5))])).toEqual([
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true }
+    ])
+  })
+
+  it('corta el grupo al cambiar de día, aunque pasen menos de 5 minutos', () => {
+    expect(positions([from('ana', at(23, 58)), from('ana', new Date(2026, 9, 26, 0, 1).toISOString())])).toEqual([
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true }
+    ])
+  })
+
+  it('un mensaje solo es primero y último a la vez', () => {
+    expect(messageGroupPosition([from('ana', at(14, 0))], 0)).toEqual({ isFirst: true, isLast: true })
   })
 })

@@ -96,6 +96,28 @@ describe('ChatScreen: estados', () => {
     expect(screen.queryAllByLabelText(/foto de perfil/i)).toHaveLength(0)
   })
 
+  it('agrupa los seguidos de la misma persona: un nombre arriba y una foto abajo por grupo', async () => {
+    // Del más nuevo al más viejo: Beto 10:01 y 10:02 (grupo), yo 10:03, Beto 10:09 (más de 5 min: otro grupo).
+    listMessages.mockResolvedValue({ items: [message(9), message(3, { sender: ME, text: 'Yo llego' }), message(2), message(1)], nextCursor: null })
+
+    await renderChat()
+
+    expect(await screen.findByText('Mensaje 9')).toBeOnTheScreen()
+    expect(screen.getAllByText('Beto')).toHaveLength(2)
+    // La inicial del avatar (sin foto) solo en el último de cada grupo ajeno.
+    expect(screen.getAllByText('B', { includeHiddenElements: true })).toHaveLength(2)
+  })
+
+  it('cada burbuja se anuncia completa, con quién y la hora, aunque no se vea el nombre', async () => {
+    listMessages.mockResolvedValue({ items: [message(3, { sender: ME, text: 'Yo llego' }), message(2), message(1)], nextCursor: null })
+
+    await renderChat()
+
+    expect(await screen.findByLabelText('Beto: Mensaje 1. 10:01')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Beto: Mensaje 2. 10:02')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Vos: Yo llego. 10:03')).toBeOnTheScreen()
+  })
+
   it('un mensaje de un tipo que la app no conoce no rompe la lista', async () => {
     listMessages.mockResolvedValue({ items: [message(2, { type: 'voice', text: '' }), message(1)], nextCursor: null })
 

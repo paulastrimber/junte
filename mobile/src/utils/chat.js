@@ -1,8 +1,11 @@
-// Funciones puras del chat: ids de idempotencia, fusión de mensajes y formato de la hora.
+// Funciones puras del chat: ids de idempotencia, fusión de mensajes, agrupado y formato de la hora.
 import { isSameSignedFile } from './url.js'
 
 /** Estado de un mensaje en la app. Los que vienen del servidor siempre están `sent`. */
 export const MESSAGE_STATUS = Object.freeze({ SENT: 'sent', PENDING: 'pending', FAILED: 'failed' })
+
+/** Dos mensajes seguidos de la misma persona van en el mismo grupo si entre uno y otro pasan menos que esto. */
+export const GROUP_WINDOW_MS = 5 * 60 * 1000
 
 /** Largo máximo de un mensaje (el servidor valida lo mismo, después de recortar los espacios). */
 export const MAX_MESSAGE_LENGTH = 2000
@@ -106,4 +109,33 @@ export function formatMessageTime (iso, now = new Date()) {
   const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`
   const isToday = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate()
   return isToday ? time : `${pad(date.getDate())}/${pad(date.getMonth() + 1)} ${time}`
+}
+
+const isSameLocalDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+
+// `older` y `newer` son seguidos en el chat: van juntos si los mandó la misma persona, el mismo día y con menos de
+// `GROUP_WINDOW_MS` entre uno y otro.
+function isSameGroup (older, newer) {
+  if (!older || !newer || !older.sender?.id || older.sender.id !== newer.sender?.id) return false
+  const from = new Date(older.createdAt)
+  const to = new Date(newer.createdAt)
+  const gap = to.getTime() - from.getTime()
+  return Number.isFinite(gap) && Math.abs(gap) < GROUP_WINDOW_MS && isSameLocalDay(from, to)
+}
+
+/**
+ * Lugar de un mensaje en su grupo (mensajes seguidos de la misma persona). La lista va del más nuevo al más viejo,
+ * como la deja `sortMessages` para la lista invertida: en pantalla el más viejo queda arriba, así que el "primero"
+ * del grupo (el de arriba, donde va el nombre) es el de índice mayor y el "último" (abajo, donde va el avatar) el
+ * de índice menor.
+ * @param {object[]} messages  Del más nuevo al más viejo.
+ * @param {number} index
+ * @returns {{ isFirst: boolean, isLast: boolean }}
+ */
+export function messageGroupPosition (messages, index) {
+  const message = messages[index]
+  return {
+    isFirst: !isSameGroup(messages[index + 1], message),
+    isLast: !isSameGroup(message, messages[index - 1])
+  }
 }

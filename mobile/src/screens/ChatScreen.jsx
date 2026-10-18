@@ -14,13 +14,13 @@ import { Text } from '../components/Text.jsx'
 import { CHAT_STATUS, POLL_INTERVAL_MS, useChat } from '../hooks/useChat.js'
 import { useAuth } from '../hooks/useAuth.js'
 import { useScreenFocus } from '../hooks/useScreenFocus.js'
-import { MAX_MESSAGE_LENGTH, MESSAGE_STATUS, formatMessageTime } from '../utils/chat.js'
+import { MAX_MESSAGE_LENGTH, MESSAGE_STATUS, formatMessageTime, messageGroupPosition } from '../utils/chat.js'
 import { borders, createThemedStyles, radius, sizes, spacing, typography, useTheme } from '../theme/index.js'
 
 export const TEXTS = Object.freeze({
   title: 'Chat del plan',
   loading: 'Cargando el chat…',
-  errorTitle: 'No pudimos cargar el chat.',
+  errorTitle: 'No pudimos cargar el chat',
   retry: 'Reintentar',
   emptyTitle: 'Todavía no hay mensajes',
   emptyMessage: 'Escribí el primero para arrancar la conversación.',
@@ -31,7 +31,9 @@ export const TEXTS = Object.freeze({
   sending: 'Enviando…',
   notSent: 'No se envió',
   retrySend: 'Reintentar',
-  unsupported: 'Mensaje no compatible con esta versión de la app',
+  unsupported: 'Actualizá la app para ver este mensaje',
+  /** Quién escribió, en el nombre accesible de los mensajes propios. */
+  me: 'Vos',
   loadingOlder: 'Cargando mensajes anteriores…',
   loadOlderError: 'No pudimos cargar los mensajes anteriores.',
   polling: `Sin conexión en tiempo real: actualizamos cada ${POLL_INTERVAL_MS / 1000} s`
@@ -44,8 +46,12 @@ const INPUT_MAX_HEIGHT = typography.body.lineHeight * 5 + spacing.md * 2
 
 const keyOf = (message) => message.clientId ?? message.id
 
-/** Una burbuja: propia a la derecha, ajena a la izquierda con foto y nombre. Presentacional. */
-const MessageRow = memo(function MessageRow ({ message, isOwn, onRetry }) {
+/**
+ * Una burbuja: propia a la derecha, ajena a la izquierda. Presentacional. Los mensajes seguidos de la misma persona
+ * van agrupados: en los ajenos el nombre va solo en el primero del grupo (`isFirst`) y la foto solo en el último
+ * (`isLast`); la esquina chica de la burbuja ("cola"), también solo en el último.
+ */
+const MessageRow = memo(function MessageRow ({ message, isOwn, isFirst, isLast, onRetry }) {
   const styles = useStyles()
   const isPending = message.status === MESSAGE_STATUS.PENDING
   const isFailed = message.status === MESSAGE_STATUS.FAILED
@@ -56,18 +62,36 @@ const MessageRow = memo(function MessageRow ({ message, isOwn, onRetry }) {
   const name = message.sender?.name ?? ''
   // Tipos que esta versión no sabe mostrar (p. ej. notas de voz) no rompen la lista.
   const isText = !message.type || message.type === 'text'
+  const status = isPending ? TEXTS.sending : formatMessageTime(message.createdAt)
+  // Se anuncia completo aunque el nombre no se vea (no es el primero del grupo): "Ana: hola. 14:32".
+  const label = `${isOwn ? TEXTS.me : name}: ${isText ? message.text : TEXTS.unsupported}. ${isFailed ? TEXTS.notSent : status}`
 
   return (
-    <View style={[styles.row, isOwn && styles.rowOwn]}>
-      {/* El nombre va escrito en la burbuja: la foto es decorativa para el lector de pantalla. */}
-      {isOwn ? null : <Avatar photoUrl={message.sender?.photoUrl} name={message.sender?.name} size={sizes.avatarSm} decorative />}
+    <View style={[styles.row, isOwn && styles.rowOwn, isFirst ? styles.groupStart : styles.groupNext]}>
+      {/* El nombre va en el nombre accesible de la burbuja: la foto es decorativa para el lector de pantalla. Los
+          mensajes sin foto dejan su lugar vacío para que las burbujas del grupo queden alineadas. */}
+      {isOwn
+        ? null
+        : isLast
+          ? <Avatar photoUrl={message.sender?.photoUrl} name={message.sender?.name} size={sizes.avatarSm} recyclingKey={keyOf(message)} decorative />
+          : <View style={styles.avatarSpace} />}
       <View style={styles.column}>
-        <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther, isPending && styles.pending, isFailed && styles.bubbleFailed]}>
-          {isOwn ? null : <Text variant='label' color='primary'>{name}</Text>}
+        <View
+          accessible
+          accessibilityLabel={label}
+          style={[
+            styles.bubble,
+            isOwn ? styles.bubbleOwn : styles.bubbleOther,
+            isLast && (isOwn ? styles.tailOwn : styles.tailOther),
+            isPending && styles.pending,
+            isFailed && styles.bubbleFailed
+          ]}
+        >
+          {isOwn || !isFirst ? null : <Text variant='label' color='primary'>{name}</Text>}
           {isText
             ? <Text color={bodyColor} selectable>{message.text}</Text>
             : <Text color={metaColor} variant='caption'>{TEXTS.unsupported}</Text>}
-          <Text variant='caption' color={metaColor} style={styles.time}>{isPending ? TEXTS.sending : formatMessageTime(message.createdAt)}</Text>
+          <Text variant='caption' color={metaColor} style={styles.time}>{status}</Text>
         </View>
         {isFailed
           ? (
@@ -162,9 +186,12 @@ export default function ChatScreen ({ navigation, route }) {
     containerRef.current?.measureInWindow?.((_x, y) => setKeyboardOffset(y))
   }, [])
 
-  const renderMessage = useCallback(({ item }) => (
-    <MessageRow message={item} isOwn={item.sender?.id === userId} onRetry={retrySend} />
-  ), [userId, retrySend])
+  // `messages` va del más nuevo al más viejo (lista invertida): `messageGroupPosition` mira los vecinos en ese orden.
+  const messages = chat.messages
+  const renderMessage = useCallback(({ item, index }) => {
+    const { isFirst, isLast } = messageGroupPosition(messages, index)
+    return <MessageRow message={item} isOwn={item.sender?.id === userId} isFirst={isFirst} isLast={isLast} onRetry={retrySend} />
+  }, [messages, userId, retrySend])
 
   function olderFooter () {
     if (chat.isLoadingOlder) {
@@ -226,17 +253,23 @@ export default function ChatScreen ({ navigation, route }) {
 
 const useStyles = createThemedStyles(({ colors }) => ({
   screen: { flex: 1, backgroundColor: colors.background },
-  list: { padding: spacing.lg, gap: spacing.sm },
+  list: { padding: spacing.lg },
   empty: { flex: 1, justifyContent: 'center' },
   banner: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
   footer: { paddingVertical: spacing.md, gap: spacing.sm },
 
   row: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, paddingRight: spacing.xxxl },
   rowOwn: { justifyContent: 'flex-end', paddingRight: 0, paddingLeft: spacing.xxxl },
+  // Cada celda de la lista invertida se da vuelta otra vez: adentro, arriba es arriba.
+  groupStart: { marginTop: spacing.md },
+  groupNext: { marginTop: spacing.xxs },
+  avatarSpace: { width: sizes.avatarSm },
   column: { flexShrink: 1, gap: spacing.xs },
   bubble: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.lg, borderCurve: 'continuous', gap: spacing.xxs },
-  bubbleOwn: { backgroundColor: colors.primary, borderBottomRightRadius: radius.sm },
-  bubbleOther: { backgroundColor: colors.surface, borderWidth: borders.thin, borderColor: colors.border, borderBottomLeftRadius: radius.sm },
+  bubbleOwn: { backgroundColor: colors.primary },
+  bubbleOther: { backgroundColor: colors.surface, borderWidth: borders.thin, borderColor: colors.border },
+  tailOwn: { borderBottomRightRadius: radius.sm },
+  tailOther: { borderBottomLeftRadius: radius.sm },
   bubbleFailed: { borderWidth: borders.thick, borderColor: colors.danger },
   pending: { opacity: 0.6 },
   time: { alignSelf: 'flex-end' },
