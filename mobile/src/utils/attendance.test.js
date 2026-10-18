@@ -1,4 +1,4 @@
-import { formatNoShows, formatReputation, isQrExpired, looksLikeQrToken, planActions, qrRefreshDelay } from './attendance.js'
+import { formatNoShows, formatReputation, isQrExpired, localQrExpiry, looksLikeQrToken, planActions, qrRefreshDelay } from './attendance.js'
 
 const NOW = new Date('2026-10-25T21:00:00.000Z')
 const MINUTE_MS = 60 * 1000
@@ -116,6 +116,21 @@ describe('isQrExpired', () => {
 
   it('una fecha inválida cuenta como vencido', () => {
     expect(isQrExpired('no es una fecha', NOW)).toBe(true)
+  })
+})
+
+describe('localQrExpiry', () => {
+  const EXPIRES = new Date(NOW.getTime() + 90_000).toISOString()
+
+  it('cuenta la vida del QR según el servidor desde que llegó la respuesta, aunque el teléfono esté corrido', () => {
+    const phoneAhead = new Date(NOW.getTime() + 120_000)
+
+    expect(localQrExpiry(EXPIRES, NOW.toUTCString(), phoneAhead)).toBe(new Date(phoneAhead.getTime() + 90_000).toISOString())
+  })
+
+  it('sin header Date (o ilegible) usa expiresAt tal cual', () => {
+    expect(localQrExpiry(EXPIRES, null, NOW)).toBe(EXPIRES)
+    expect(localQrExpiry(EXPIRES, 'cualquier cosa', NOW)).toBe(EXPIRES)
   })
 })
 

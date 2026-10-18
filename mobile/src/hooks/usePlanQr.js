@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { AppState } from 'react-native'
 
 import { createPlanQr } from '../services/api/checkins.js'
-import { QR_MIN_REFRESH_MS, isQrExpired, isQrRefreshDue, qrRefreshDelay } from '../utils/attendance.js'
+import { QR_MIN_REFRESH_MS, isQrExpired, isQrRefreshDue, localQrExpiry, qrRefreshDelay } from '../utils/attendance.js'
 import { toViewError } from '../utils/errorMessages.js'
 
 export const QR_STATUS = Object.freeze({
@@ -37,6 +37,8 @@ const time = (iso) => new Date(iso).getTime()
  *
  * Al volver de segundo plano los timers estuvieron pausados: si el QR ya venció se oculta y se pide otro; si sigue
  * valiendo pero ya tocaba renovarlo, se renueva sin ocultarlo.
+ *
+ * `expiresAt` está en el reloj del teléfono (ver `localQrExpiry`): sirve tal cual para mostrar "vale hasta las HH:MM".
  * @param {string} planId
  */
 export function usePlanQr (planId) {
@@ -62,11 +64,17 @@ export function usePlanQr (planId) {
       setState(next)
     }
 
-    // El QR que se ve venció sin que llegara el próximo: si ya falló una renovación, error con "Reintentar"; si
-    // todavía se está pidiendo, se espera la respuesta sin mostrar uno vencido.
+    // El QR que se ve venció sin que llegara el próximo: si ya falló una renovación, error con "Reintentar"; si no,
+    // se deja de mostrar y se espera el próximo, que ya está en camino o programado (un QR con menos vida que
+    // `QR_MIN_REFRESH_MS` vence antes de su renovación): ese timer no se cancela.
     function expire () {
-      if (lastRefreshError) hide({ ...LOADING_STATE, status: QR_STATUS.ERROR, error: lastRefreshError })
-      else hide(LOADING_STATE)
+      shownExpiresAt = null
+      if (lastRefreshError) {
+        clearTimeout(refreshTimer)
+        setState({ ...LOADING_STATE, status: QR_STATUS.ERROR, error: lastRefreshError })
+      } else {
+        setState(LOADING_STATE)
+      }
     }
 
     // No rechaza nunca: toda falla termina en un estado que la pantalla sabe pintar.
@@ -75,8 +83,11 @@ export function usePlanQr (planId) {
       isRequesting = true
       lastRequestAt = Date.now()
       try {
-        const { qrToken, expiresAt } = await createPlanQr(planId, { signal: controller.signal })
+        const response = await createPlanQr(planId, { signal: controller.signal })
         if (controller.signal.aborted) return
+        // De acá en adelante todo se compara con el reloj del teléfono: el vencimiento se pasa a ese reloj.
+        const { qrToken } = response
+        const expiresAt = localQrExpiry(response.expiresAt, response.serverDate)
         clearTimeout(expiryTimer)
         shownExpiresAt = expiresAt
         lastRefreshError = null

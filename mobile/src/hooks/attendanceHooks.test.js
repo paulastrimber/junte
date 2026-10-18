@@ -331,11 +331,9 @@ describe('usePlanQr', () => {
     expect(result.current).toMatchObject({ qrToken: 'p1.token-2', refreshError: null })
   })
 
-  // BUG-QA-8: si el vencimiento del QR que se ve llega antes que la renovación programada (el timer mínimo es de 5 s:
-  // pasa cuando el QR llega con menos de 5 s de vida, p. ej. con el reloj del teléfono adelantado), `expire()` llama a
-  // `hide()`, que cancela también la renovación: la pantalla queda en "Generando el QR…" para siempre, sin pedir otro
-  // ni ofrecer "Reintentar".
-  it.failing('un QR que llega con menos de 5 s de vida no deja la pantalla cargando para siempre', async () => {
+  // BUG-QA-8: un QR con menos vida que la renovación mínima (5 s) vencía antes de renovarse y el vencimiento
+  // cancelaba la renovación: quedaba "Generando el QR…" para siempre.
+  it('un QR que llega con menos de 5 s de vida no deja la pantalla cargando para siempre', async () => {
     createPlanQr.mockResolvedValueOnce(qr(1, 3)).mockResolvedValue(qr(2, 90))
     const { result } = await renderHook(() => usePlanQr('p1'))
     await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
@@ -346,12 +344,12 @@ describe('usePlanQr', () => {
     expect(result.current.status).not.toBe(QR_STATUS.LOADING)
   })
 
-  // BUG-QA-9: el vencimiento se compara con el reloj del teléfono. Con el reloj adelantado más que la vida del QR
-  // (~90 s), cada QR recién llegado se da por vencido en el acto y no se llega a ver (antes de 40b8b68 se mostraba
-  // igual: el reloj solo decidía cuándo renovar). Habría que medir la vida restante con la hora del servidor.
-  it.failing('con el reloj del teléfono 2 minutos adelantado, el QR recién llegado se sigue viendo', async () => {
+  // BUG-QA-9: con el reloj del teléfono corrido más que la vida del QR, cada QR se daba por vencido al llegar. La
+  // vida se mide con la hora del servidor (header `Date`).
+  it('con el reloj del teléfono 2 minutos adelantado, el QR recién llegado se sigue viendo', async () => {
     jest.setSystemTime(new Date(NOW.getTime() + 120_000))
-    createPlanQr.mockResolvedValue(qr(1))
+    // El header `Date` de la respuesta trae la hora del servidor.
+    createPlanQr.mockResolvedValue({ ...qr(1), serverDate: NOW.toUTCString() })
     const { result } = await renderHook(() => usePlanQr('p1'))
     await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
 

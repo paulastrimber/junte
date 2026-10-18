@@ -83,6 +83,21 @@ export function isQrRefreshDue (expiresAt, now = new Date()) {
 }
 
 /**
+ * Vencimiento del QR en el reloj del teléfono. El reloj del teléfono puede estar corrido: la vida del QR se mide con
+ * la hora del servidor (`expiresAt` menos el header `Date` de la respuesta) y se cuenta desde que llegó la respuesta.
+ * Sin `serverDate` (o si no se puede leer) se usa `expiresAt` tal cual.
+ * @param {string} expiresAt ISO 8601, hora del servidor.
+ * @param {string | null | undefined} serverDate  Header HTTP `Date` de la respuesta.
+ * @param {Date} [receivedAt]  Cuándo llegó la respuesta, en el reloj del teléfono.
+ * @returns {string} ISO 8601 en el reloj del teléfono.
+ */
+export function localQrExpiry (expiresAt, serverDate, receivedAt = new Date()) {
+  const lifeMs = time(expiresAt) - (serverDate ? time(serverDate) : NaN)
+  if (!Number.isFinite(lifeMs)) return expiresAt
+  return new Date(receivedAt.getTime() + lifeMs).toISOString()
+}
+
+/**
  * ¿El QR ya venció? Mientras no venza se puede seguir mostrando aunque no se haya podido renovar.
  * @param {string} expiresAt ISO 8601
  * @param {Date} [now]

@@ -437,7 +437,7 @@ Lo que jest no cubre de estos cambios. Marcar cada punto con la fecha, el teléf
 - [ ] Dejar el modo avión hasta que venza: el QR se oculta y aparece "No pudimos mostrar el QR" con "Reintentar"; sin red no se reintenta solo, y "Reintentar" con red vuelve a mostrar uno.
 - [ ] Un lector real (otro teléfono con la app, pantalla de check-in) lee el QR justo después del cambio, en el primer segundo: el cambio es instantáneo, sin fundido.
 - [ ] Mandar la app a segundo plano 1 minuto y volver: si el QR todavía vale, no se oculta; si ya venció (dejarla 2 minutos), se oculta y aparece uno nuevo.
-- [ ] Con el reloj del teléfono en hora automática y, después, adelantado 2 minutos a mano: ver si el QR se llega a mostrar (ver BUG-QA-8 y BUG-QA-9 en `mobile/src/hooks/attendanceHooks.test.js`).
+- [ ] Con el reloj del teléfono en hora automática y, después, adelantado 2 minutos a mano: el QR se muestra igual y vence a su hora: la vida del QR se mide con el header `Date` del servidor y se cuenta desde que llegó la respuesta (BUG-QA-9, corregido). No cubre cambiar el reloj durante los ~90 s del QR.
 - [ ] Con TalkBack y VoiceOver: el QR se anuncia como "Código QR de asistencia. Se renueva solo."; la renovación normal no se anuncia; el aviso de sin conexión sí, sin cortar lo que se estaba leyendo.
 
 #### Chat agrupado
@@ -456,3 +456,8 @@ Lo que jest no cubre de estos cambios. Marcar cada punto con la fecha, el teléf
   - [ ] En "Mis planes", los dos segmentados se leen enteros en 2 líneas.
 - [ ] Cambiar el tamaño de la fuente con la app abierta (volver desde Ajustes): la barra cambia de fila a columna (y al revés) sin reabrir la app.
 - [ ] Con el tamaño de fuente normal, la barra sigue en una fila.
+
+### Corregido después de QA
+- **BUG-QA-8:** un QR que vencía antes de su renovación dejaba la pantalla en "Generando el QR…" para siempre. Ahora se oculta y la renovación sigue en pie (o pasa a error con "Reintentar" si ya había fallado).
+- **BUG-QA-9:** con el reloj del teléfono adelantado, cada QR se daba por vencido al llegar. Ahora la vida se calcula con la hora del servidor (header `Date`) y se ancla al momento en que llegó la respuesta; sin header se usa `expiresAt` tal cual.
+- **Dependencias:** parches de `expo`, `expo-asset`, `expo-constants`, `expo-dev-client` y `jest-expo` alineados con `expo install --fix`; `expo-doctor` 21/21.

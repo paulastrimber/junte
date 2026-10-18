@@ -5,11 +5,13 @@ const planPath = (id) => `/plans/${encodeURIComponent(id)}`
 
 /**
  * Pide un QR nuevo (solo el creador, dentro del horario de asistencia). Invalida el anterior.
- * @returns {Promise<{ qrToken: string, expiresAt: string }>}
+ * `serverDate` es el header HTTP `Date` de la respuesta (la hora del servidor): con eso se calcula cuánto le queda
+ * al QR sin depender del reloj del teléfono. `null` si no vino.
+ * @returns {Promise<{ qrToken: string, expiresAt: string, serverDate: string | null }>}
  */
 export async function createPlanQr (id, { client = getApiClient(), signal } = {}) {
-  const { data } = await client.post(`${planPath(id)}/qr`, undefined, { signal })
-  return data
+  const { data, headers } = await client.post(`${planPath(id)}/qr`, undefined, { signal })
+  return { ...data, serverDate: headers?.date ?? null }
 }
 
 /**
