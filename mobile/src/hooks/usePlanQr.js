@@ -52,6 +52,8 @@ export function usePlanQr (planId) {
     // Por qué falló la última renovación (null si no falló o todavía no se intentó).
     let lastRefreshError = null
     let isRequesting = false
+    // Cuándo empezó el último pedido: nunca se pide otro antes de `QR_MIN_REFRESH_MS`.
+    let lastRequestAt = 0
 
     function hide (next) {
       clearTimeout(refreshTimer)
@@ -71,6 +73,7 @@ export function usePlanQr (planId) {
     async function load () {
       clearTimeout(refreshTimer)
       isRequesting = true
+      lastRequestAt = Date.now()
       try {
         const { qrToken, expiresAt } = await createPlanQr(planId, { signal: controller.signal })
         if (controller.signal.aborted) return
@@ -100,11 +103,15 @@ export function usePlanQr (planId) {
     load()
     const subscription = AppState.addEventListener('change', (next) => {
       if (next !== 'active' || !shownExpiresAt || isRequesting) return
-      if (isQrExpired(shownExpiresAt)) {
-        hide(LOADING_STATE)
+      if (isQrExpired(shownExpiresAt)) hide(LOADING_STATE)
+      else if (!isQrRefreshDue(shownExpiresAt)) return
+      // Si recién se pidió uno (p. ej. un reintento que falló), se espera lo que falta del mínimo.
+      const wait = lastRequestAt + QR_MIN_REFRESH_MS - Date.now()
+      if (wait <= 0) {
         load()
-      } else if (isQrRefreshDue(shownExpiresAt)) {
-        load()
+      } else {
+        clearTimeout(refreshTimer)
+        refreshTimer = setTimeout(load, wait)
       }
     })
     return () => {
