@@ -162,7 +162,7 @@ describe('OnboardingScreen', () => {
 
       await press(TEXTS.photo)
 
-      expect((await screen.findByLabelText('Foto de perfil')).props.source).toEqual({ uri: 'https://s3.example/foto.jpg?firma' })
+      expect((await screen.findByLabelText('Foto de perfil')).props.source).toEqual([expect.objectContaining({ uri: 'https://s3.example/foto.jpg?firma' })])
       expect(button(TEXTS.changePhoto)).toBeOnTheScreen()
     })
   })

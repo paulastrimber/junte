@@ -287,7 +287,7 @@ describe('ProfileScreen', () => {
       await changePhoto()
 
       expect(uploadProfilePhoto).toHaveBeenCalledWith(asset)
-      expect((await screen.findByLabelText('Foto de perfil')).props.source).toEqual({ uri: 'https://s3.example/foto.jpg?firma' })
+      expect((await screen.findByLabelText('Foto de perfil')).props.source).toEqual([expect.objectContaining({ uri: 'https://s3.example/foto.jpg?firma' })])
     })
 
     it('si cancela la selección no sube nada ni muestra error', async () => {

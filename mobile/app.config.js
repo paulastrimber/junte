@@ -88,6 +88,8 @@ export default ({ config }) => ({
     'expo-dev-client',
     // Tokens en Keychain / Keystore.
     'expo-secure-store',
+    // Fotos de perfil con caché en disco (la URL firmada cambia; la caché va por la ruta sin firma).
+    'expo-image',
     // Foto de perfil: solo se elige de la galería (no se pide acceso a la cámara).
     ['expo-image-picker', { photosPermission: 'junte necesita acceder a tus fotos para que elijas tu foto de perfil.', cameraPermission: false, microphonePermission: false }],
     '@react-native-community/datetimepicker',
