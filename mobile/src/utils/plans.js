@@ -1,6 +1,8 @@
 // Funciones puras sobre planes: textos para mostrar, opciones de los filtros y validación local del formulario.
 // El back valida todo otra vez (Zod): esto solo ahorra un viaje al servidor y da el error junto al campo.
 
+import { spacing } from '../theme/tokens.js'
+
 /** Mismos límites que el back (back-service/src/modules/plans/plan.rules.js). */
 export const PLAN_LIMITS = Object.freeze({
   TITLE_MIN: 3,
@@ -233,4 +235,52 @@ export function planChanges (plan, values) {
   if (next.price !== plan.price) changes.price = next.price
   if (!sameItems(next.interests, plan.interests)) changes.interests = next.interests
   return changes
+}
+
+// ── Feedback del envío ───────────────────────────────────────────────────────────────────────────────────────────
+
+/** Campos del formulario en el orden en que se ven: ordena el resumen de errores y elige a cuál scrollear. */
+export const PLAN_FORM_FIELDS = Object.freeze(['title', 'description', 'startsAt', 'endsAt', 'coordinates', 'locationLabel', 'capacity', 'price', 'interests'])
+
+/**
+ * Campos con error, en orden visual. Ignora claves que el formulario no pinta.
+ * @param {Record<string, string | undefined>} errors
+ * @returns {string[]}
+ */
+export function planFormIssues (errors) {
+  return PLAN_FORM_FIELDS.filter((name) => errors[name])
+}
+
+// Más de esto y el resumen ocuparía media pantalla con texto grande: el resto se cuenta.
+const MAX_LISTED_ISSUES = 3
+
+/**
+ * Lista de campos para el resumen de errores: "Título.", "Título y Empieza.", "Título, Empieza, Termina y 4 más.".
+ * @param {string[]} labels  Nombres de los campos, ya en orden visual.
+ * @param {(count: number) => string} more  "y 4 más".
+ */
+export function formatIssueList (labels, more) {
+  if (labels.length === 0) return ''
+  if (labels.length > MAX_LISTED_ISSUES) return `${labels.slice(0, MAX_LISTED_ISSUES).join(', ')} ${more(labels.length - MAX_LISTED_ISSUES)}.`
+  if (labels.length === 1) return `${labels[0]}.`
+  return `${labels.slice(0, -1).join(', ')} y ${labels.at(-1)}.`
+}
+
+// Diferencia (px) por debajo de la cual no vale la pena mover el scroll.
+const SCROLL_TOLERANCE = 4
+
+/**
+ * Hasta dónde scrollear para que un bloque se vea entero.
+ * @param {{ y: number, height: number }} block  Posición dentro del contenido del ScrollView.
+ * @param {{ offset: number, viewport: number }} view  Scroll actual y alto visible.
+ * @param {{ align?: 'nearest' | 'top', margin?: number }} [options]  `nearest` mueve lo justo; `top` deja el bloque arriba.
+ * @returns {number | null} y a la que scrollear, o null si ya se ve entero.
+ */
+export function scrollTargetY ({ y, height }, { offset, viewport }, { align = 'nearest', margin = spacing.xl } = {}) {
+  const top = Math.max(0, y - margin)
+  if (align === 'top') return Math.abs(offset - top) <= SCROLL_TOLERANCE ? null : top
+  if (y >= offset + margin && y + height <= offset + viewport - margin) return null
+  // Más alto que lo visible: se muestra desde arriba (la etiqueta y el comienzo del bloque).
+  if (height > viewport - 2 * margin || y < offset + margin) return top
+  return y + height - viewport + margin
 }

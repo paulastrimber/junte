@@ -5,6 +5,9 @@ import { borders, createThemedStyles, radius, sizes, spacing, typography, useThe
 import { Icon } from './Icon.jsx'
 import { Text } from './Text.jsx'
 
+/** Se suma a la ayuda de los campos obligatorios: el lector no lee el asterisco. */
+export const REQUIRED_HINT = 'Obligatorio'
+
 /**
  * Campo de texto con etiqueta y error. Presentacional: no conoce validaciones ni la API.
  * @param {object} props
@@ -12,20 +15,21 @@ import { Text } from './Text.jsx'
  * @param {string} [props.error]
  * @param {string} [props.icon]  Nombre de Ionicons; va dentro del campo, a la izquierda.
  * @param {string} [props.hint]  Ayuda bajo el campo ("Lo ven quienes se anotan"). Si hay error, se muestra el error.
+ * @param {boolean} [props.required]  Muestra un asterisco junto a la etiqueta y dice "Obligatorio" al lector.
  */
-export function FormField ({ label, error, icon, hint, onFocus, onBlur, multiline, style, ...inputProps }) {
+export function FormField ({ label, error, icon, hint, required = false, onFocus, onBlur, multiline, style, ...inputProps }) {
   const styles = useStyles()
   const { colors } = useTheme()
   const [isFocused, setIsFocused] = useState(false)
   return (
     <View style={styles.field}>
-      <Text variant='label'>{label}</Text>
+      {required ? <RequiredLabel label={label} /> : <Text variant='label'>{label}</Text>}
       <View style={[styles.box, isFocused && styles.boxFocused, error && styles.boxError]}>
         {icon ? <Icon name={icon} color={isFocused ? 'primary' : 'textMuted'} /> : null}
         <TextInput
           accessibilityLabel={label}
           // Con error, el lector lo anuncia junto con el campo (la ayuda no se ve mientras hay error).
-          accessibilityHint={error || hint}
+          accessibilityHint={required ? [REQUIRED_HINT, error || hint].filter(Boolean).join('. ') : error || hint}
           style={[styles.input, multiline && styles.multiline, style]}
           placeholderTextColor={colors.textMuted}
           selectionColor={colors.primary}
@@ -46,6 +50,23 @@ export function FormField ({ label, error, icon, hint, onFocus, onBlur, multilin
     </View>
   )
 }
+
+/**
+ * Etiqueta con asterisco. El asterisco es un `Text` hermano (no anidado) para poder ocultarlo al lector: en iOS un
+ * `Text` anidado es parte del mismo elemento accesible. La etiqueta en sí no lleva `accessibilityLabel`, así el campo
+ * sigue siendo el único elemento con ese nombre.
+ * @param {{ label: string }} props
+ */
+export function RequiredLabel ({ label }) {
+  return (
+    <View style={labelStyles.row}>
+      <Text variant='label'>{label}</Text>
+      <Text variant='label' color='danger' aria-hidden>{' *'}</Text>
+    </View>
+  )
+}
+
+const labelStyles = { row: { flexDirection: 'row', flexWrap: 'wrap' } }
 
 const useStyles = createThemedStyles(({ colors }) => ({
   field: { gap: spacing.sm },

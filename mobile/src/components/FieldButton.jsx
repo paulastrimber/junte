@@ -2,6 +2,7 @@ import { Pressable, View } from 'react-native'
 
 import { borders, createThemedStyles, radius, sizes, spacing, useTheme } from '../theme/index.js'
 import { Icon } from './Icon.jsx'
+import { REQUIRED_HINT, RequiredLabel } from './FormField.jsx'
 import { Text } from './Text.jsx'
 
 /**
@@ -18,18 +19,20 @@ import { Text } from './Text.jsx'
  * @param {boolean} [props.disabled]
  * @param {string} [props.hint]  Texto bajo el campo (p. ej. por qué está deshabilitado).
  * @param {string} [props.error]
+ * @param {boolean} [props.required]  Asterisco junto a la etiqueta y "Obligatorio" para el lector.
  * @param {import('react').ReactNode} [props.children]  Lo que se despliega debajo (el selector en línea de iOS).
  */
-export function FieldButton ({ label, value, placeholder, onPress, accessibilityHint, icon, disabled = false, hint, error, children }) {
+export function FieldButton ({ label, value, placeholder, onPress, accessibilityHint, icon, disabled = false, hint, error, required = false, children }) {
   const styles = useStyles()
   const { colors } = useTheme()
   return (
     <View style={styles.field}>
-      <Text variant='label'>{label}</Text>
+      {required ? <RequiredLabel label={label} /> : <Text variant='label'>{label}</Text>}
       <Pressable
         accessibilityRole='button'
         accessibilityLabel={label}
-        accessibilityHint={accessibilityHint}
+        // Con `required`, el lector dice también que es obligatorio y el error (si lo hay) al enfocar el botón.
+        accessibilityHint={required ? [REQUIRED_HINT, error, accessibilityHint].filter(Boolean).join('. ') : accessibilityHint}
         accessibilityValue={value ? { text: value } : undefined}
         accessibilityState={{ disabled }}
         disabled={disabled}
