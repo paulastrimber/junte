@@ -135,6 +135,7 @@ describe('AuthProvider', () => {
     expect(result.current.status).toBe(AUTH_STATUS.SIGNED_OUT)
     expect(result.current.user).toBeNull()
     expect(result.current.sessionEndedBy).toBe(reason)
+    expect(clearPhotoCache).toHaveBeenCalledTimes(1)
   })
 
   it('iniciar sesión de nuevo limpia el motivo anterior', async () => {

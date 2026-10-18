@@ -118,6 +118,42 @@ describe('ChatScreen: estados', () => {
     expect(screen.getByLabelText('Vos: Yo llego. 10:03')).toBeOnTheScreen()
   })
 
+  it('grupo de 3 ajenos: el nombre y la foto una sola vez, y cada uno se anuncia "Ana: texto. hora"', async () => {
+    const ANA = { id: 'u3', name: 'Ana', photoUrl: null, reputation: 2 }
+    listMessages.mockResolvedValue({ items: [message(4, { sender: ME, text: 'Dale' }), message(3, { sender: ANA }), message(2, { sender: ANA }), message(1, { sender: ANA })], nextCursor: null })
+
+    await renderChat()
+
+    expect(await screen.findByLabelText('Ana: Mensaje 1. 10:01')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Ana: Mensaje 2. 10:02')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Ana: Mensaje 3. 10:03')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Vos: Dale. 10:04')).toBeOnTheScreen()
+    expect(screen.getAllByText('Ana')).toHaveLength(1)
+    // La inicial del avatar (decorativo, oculto al lector) una sola vez: en el último del grupo.
+    expect(screen.getAllByText('A', { includeHiddenElements: true })).toHaveLength(1)
+    expect(screen.queryAllByText('A')).toHaveLength(0)
+  })
+
+  it('textos de la pantalla en voseo, sin punto final en el título de error', async () => {
+    expect(TEXTS.errorTitle).toBe('No pudimos cargar el chat')
+    expect(TEXTS.unsupported).toBe('Actualizá la app para ver este mensaje')
+
+    listMessages.mockResolvedValue({ items: [message(1, { type: 'voice', text: '' })], nextCursor: null })
+    await renderChat()
+
+    expect(await screen.findByText('Actualizá la app para ver este mensaje')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Beto: Actualizá la app para ver este mensaje. 10:01')).toBeOnTheScreen()
+  })
+
+  it('el error de carga se titula "No pudimos cargar el chat"', async () => {
+    listMessages.mockRejectedValue(apiError(500, 'INTERNAL_ERROR'))
+
+    await renderChat()
+
+    expect(await screen.findByText('No pudimos cargar el chat')).toBeOnTheScreen()
+    expect(screen.getByRole('button', { name: 'Reintentar' })).toBeOnTheScreen()
+  })
+
   it('un mensaje de un tipo que la app no conoce no rompe la lista', async () => {
     listMessages.mockResolvedValue({ items: [message(2, { type: 'voice', text: '' }), message(1)], nextCursor: null })
 

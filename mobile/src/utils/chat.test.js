@@ -1,4 +1,4 @@
-import { MESSAGE_STATUS, createClientId, formatMessageTime, mergeMessages, mergeRecoveredPage, messageGroupPosition, sortMessages } from './chat.js'
+import { GROUP_WINDOW_MS, MESSAGE_STATUS, createClientId, formatMessageTime, mergeMessages, mergeRecoveredPage, messageGroupPosition, sortMessages } from './chat.js'
 
 const message = (id, createdAt, extra = {}) => ({ id, planId: 'p1', sender: { id: 'u1', name: 'Ana' }, type: 'text', text: id, clientId: null, createdAt, ...extra })
 const sent = (id, createdAt, extra) => ({ ...message(id, createdAt, extra), status: MESSAGE_STATUS.SENT })
@@ -201,6 +201,51 @@ describe('messageGroupPosition', () => {
     expect(positions([from('ana', at(23, 58)), from('ana', new Date(2026, 9, 26, 0, 1).toISOString())])).toEqual([
       { isFirst: true, isLast: true },
       { isFirst: true, isLast: true }
+    ])
+  })
+
+  // Borde implementado (y documentado en pendientes.md: "a menos de 5 minutos"): 5 min justos ya cortan.
+  it('el borde de la ventana: 5 min - 1 ms agrupa, 5 min justos cortan', () => {
+    const base = new Date(2026, 9, 25, 14, 0).getTime()
+    const iso = (offset) => new Date(base + offset).toISOString()
+
+    expect(positions([from('ana', iso(0)), from('ana', iso(GROUP_WINDOW_MS - 1))])).toEqual([
+      { isFirst: true, isLast: false },
+      { isFirst: false, isLast: true }
+    ])
+    expect(positions([from('ana', iso(0)), from('ana', iso(GROUP_WINDOW_MS))])).toEqual([
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true }
+    ])
+    expect(positions([from('ana', iso(0)), from('ana', iso(GROUP_WINDOW_MS + 1))])).toEqual([
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true }
+    ])
+  })
+
+  it('corta el grupo de 23:59 a 00:01 (2 minutos, pero otro día)', () => {
+    expect(positions([from('ana', new Date(2026, 9, 25, 23, 59).toISOString()), from('ana', new Date(2026, 9, 26, 0, 1).toISOString())])).toEqual([
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true }
+    ])
+  })
+
+  it('lee la lista invertida: en el índice 0 (el más nuevo) va el avatar, en el último índice el nombre', () => {
+    // Sin el helper `positions`: la lista tal como la recibe la FlatList invertida.
+    const newestFirst = [from('ana', at(14, 4)), from('ana', at(14, 2)), from('ana', at(14, 0))]
+
+    expect(messageGroupPosition(newestFirst, 0)).toEqual({ isFirst: false, isLast: true })
+    expect(messageGroupPosition(newestFirst, 1)).toEqual({ isFirst: false, isLast: false })
+    expect(messageGroupPosition(newestFirst, 2)).toEqual({ isFirst: true, isLast: false })
+  })
+
+  it('cambio de persona en el medio: cada tramo es su propio grupo', () => {
+    expect(positions([from('ana', at(14, 0)), from('ana', at(14, 1)), from('beto', at(14, 2)), from('ana', at(14, 3)), from('ana', at(14, 4))])).toEqual([
+      { isFirst: true, isLast: false },
+      { isFirst: false, isLast: true },
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: false },
+      { isFirst: false, isLast: true }
     ])
   })
 

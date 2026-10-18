@@ -415,3 +415,44 @@ Decidido por el líder del equipo de agentes del front (rama `front-agentes`), s
 - El agrupado del chat con texto grande, con TalkBack y VoiceOver.
 - El segmentado y la barra del inicio con el texto más grande del sistema en Android e iOS.
 - Sigue abierto de S5: con el aviso de polling visible, el primer mensaje queda en parte debajo del aviso.
+
+### Checklist manual en el teléfono
+Lo que jest no cubre de estos cambios. Marcar cada punto con la fecha, el teléfono y la versión del sistema.
+
+#### Fotos con `expo-image` (development build nuevo)
+
+`expo-image` es un módulo nativo: hace falta un development build nuevo (EAS, perfil `development`) antes de probar. Un build viejo falla al abrir cualquier pantalla con fotos.
+
+- [ ] El build nuevo abre sin errores en Android e iOS.
+- [ ] En el chat y en la lista de participantes, las fotos no parpadean cuando llega una respuesta nueva del back (la URL vuelve con otra firma): dejar el chat abierto con polling y mirar los avatares durante un minuto.
+- [ ] Sin red, al reabrir la app (matarla y volver a abrirla), las fotos que ya se vieron se siguen viendo.
+- [ ] Una foto de perfil nueva (subida desde otro teléfono) sí aparece: no se queda la vieja del caché.
+- [ ] Al cerrar sesión ("Cerrar sesión" y "Cerrar todas las sesiones"), en modo avión y entrando con otra cuenta, las fotos de la sesión anterior ya no aparecen (el caché se vació).
+- [ ] Una foto que no carga (URL vencida o borrada) muestra la inicial, no un círculo vacío.
+
+#### QR de asistencia
+
+- [ ] Con el QR a la vista, prender el modo avión a mitad de su vida (unos 40 s después de que apareció): el QR sigue a la vista y, al tocar la renovación (~15 s antes de vencer), aparece "Sin conexión. Este QR vale hasta las HH:MM; reintentamos solo." con la hora correcta.
+- [ ] Apagar el modo avión antes de que venza: en 5 s o menos el aviso desaparece y el QR cambia por uno nuevo.
+- [ ] Dejar el modo avión hasta que venza: el QR se oculta y aparece "No pudimos mostrar el QR" con "Reintentar"; sin red no se reintenta solo, y "Reintentar" con red vuelve a mostrar uno.
+- [ ] Un lector real (otro teléfono con la app, pantalla de check-in) lee el QR justo después del cambio, en el primer segundo: el cambio es instantáneo, sin fundido.
+- [ ] Mandar la app a segundo plano 1 minuto y volver: si el QR todavía vale, no se oculta; si ya venció (dejarla 2 minutos), se oculta y aparece uno nuevo.
+- [ ] Con el reloj del teléfono en hora automática y, después, adelantado 2 minutos a mano: ver si el QR se llega a mostrar (ver BUG-QA-8 y BUG-QA-9 en `mobile/src/hooks/attendanceHooks.test.js`).
+- [ ] Con TalkBack y VoiceOver: el QR se anuncia como "Código QR de asistencia. Se renueva solo."; la renovación normal no se anuncia; el aviso de sin conexión sí, sin cortar lo que se estaba leyendo.
+
+#### Chat agrupado
+
+- [ ] Con TalkBack (Android) y VoiceOver (iOS): cada burbuja se lee completa, "Ana: texto. 14:32" (o "Vos: …" en las propias), también las del medio de un grupo que no muestran el nombre; el avatar no se lee aparte.
+- [ ] El foco del lector recorre los mensajes en orden (de arriba hacia abajo) aunque la lista esté invertida.
+- [ ] Con el texto más grande del sistema: el nombre del primero del grupo, las burbujas y el avatar del último quedan alineados; nada se corta ni se superpone; el espacio entre grupos se distingue del espacio dentro de un grupo.
+- [ ] Mensajes alrededor de la medianoche (23:59 y 00:01) quedan en grupos distintos.
+- [ ] Un mensaje de tipo desconocido muestra "Actualizá la app para ver este mensaje".
+
+#### Selector segmentado y barra del inicio con texto grande
+
+- [ ] Android (Ajustes → Pantalla → Tamaño de fuente al máximo) y iOS (Accesibilidad → Pantalla y tamaño del texto → Texto más grande al máximo):
+  - [ ] En el inicio, la barra pasa a columna: el segmentado ("Con cupo / Llenos") ocupa todo el ancho y "Filtros (n)" queda abajo, a la derecha.
+  - [ ] Las etiquetas del segmentado usan hasta 2 líneas, sin "…", y los dos segmentos quedan del mismo alto.
+  - [ ] En "Mis planes", los dos segmentados se leen enteros en 2 líneas.
+- [ ] Cambiar el tamaño de la fuente con la app abierta (volver desde Ajustes): la barra cambia de fila a columna (y al revés) sin reabrir la app.
+- [ ] Con el tamaño de fuente normal, la barra sigue en una fila.

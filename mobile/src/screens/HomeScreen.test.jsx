@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react-native'
-import { StyleSheet } from 'react-native'
+import { Dimensions, StyleSheet } from 'react-native'
 
 import { CATALOG, COMPLETE_USER, SignedIn, createFakeAuthService, renderWithAuth } from '../../tests/helpers/auth.jsx'
 import { deferred } from '../../tests/helpers/deferred.js'
@@ -368,6 +368,56 @@ describe('HomeScreen (feed)', () => {
       // Las dos opciones siguen ahí y se pueden elegir.
       await fireEvent.press(screen.getByRole('radio', { name: TEXTS.full }))
       expect(screen.getByRole('radio', { name: TEXTS.full })).toBeChecked()
+      // Se espera el pedido de "Llenos": si no, su timer (0 ms) corre después del test y React avisa de un act().
+      await waitFor(() => expect(lastFeedBody().availability).toBe('full'))
+    })
+
+    // Con el hook real: el `fontScale` lo informa el sistema (Dimensions). El layout solo se puede ver por estilo
+    // (flexDirection de la barra): la librería de tests no mide posiciones.
+    describe('con el fontScale del sistema', () => {
+      const withFontScale = (fontScale) => {
+        const window = Dimensions.get('window')
+        jest.spyOn(Dimensions, 'get').mockReturnValue({ ...window, fontScale })
+      }
+      beforeEach(() => useIsLargeText.mockImplementation(jest.requireActual('../hooks/useIsLargeText.js').useIsLargeText))
+      afterEach(() => jest.restoreAllMocks())
+
+      it('fontScale 2: barra en columna, "Filtros" accesible por nombre y segmentos de hasta 2 líneas', async () => {
+        withFontScale(2)
+        withLocation()
+        getFeed.mockResolvedValue(page([]))
+        await renderHome()
+
+        expect(toolbarStyle().flexDirection ?? 'column').toBe('column')
+        expect(screen.getByRole('button', { name: 'Filtros' })).toBeOnTheScreen()
+        for (const label of [TEXTS.available, TEXTS.full]) {
+          expect(screen.getByRole('radio', { name: label })).toBeOnTheScreen()
+          expect(screen.getByText(label).props.numberOfLines).toBe(2)
+        }
+      })
+
+      it('fontScale 1: barra en fila', async () => {
+        withFontScale(1)
+        withLocation()
+        getFeed.mockResolvedValue(page([]))
+        await renderHome()
+
+        expect(toolbarStyle().flexDirection).toBe('row')
+        expect(screen.getByText(TEXTS.available).props.numberOfLines).toBe(2)
+      })
+
+      it('el borde: 1.3 ya es texto grande, 1.29 no', async () => {
+        withFontScale(1.29)
+        withLocation()
+        getFeed.mockResolvedValue(page([]))
+        const view = await renderHome()
+        expect(toolbarStyle().flexDirection).toBe('row')
+        await view.unmount()
+
+        withFontScale(1.3)
+        await renderHome()
+        expect(toolbarStyle().flexDirection ?? 'column').toBe('column')
+      })
     })
   })
 })

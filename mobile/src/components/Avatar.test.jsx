@@ -35,6 +35,50 @@ describe('Avatar', () => {
     expect(photo()).toBeOnTheScreen()
   })
 
+  it('con firmas que cambian de lugar o de largo, la clave sigue siendo la ruta', async () => {
+    const a = 'https://bucket.s3.amazonaws.com/users/u1/c.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=600&X-Amz-Signature=aaa'
+    const b = 'https://bucket.s3.amazonaws.com/users/u1/c.jpg?X-Amz-Signature=bbbbbbbb&X-Amz-Expires=300&X-Amz-Algorithm=AWS4-HMAC-SHA256'
+    const { rerender } = await render(<Avatar photoUrl={a} />)
+    const first = sourceOf().cacheKey
+
+    await rerender(<Avatar photoUrl={b} />)
+
+    expect(sourceOf().cacheKey).toBe(first)
+    expect(first).toBe('https://bucket.s3.amazonaws.com/users/u1/c.jpg')
+  })
+
+  it('otra foto (otra ruta) usa otra clave', async () => {
+    const { rerender } = await render(<Avatar photoUrl={signed('a.jpg', 'uno')} />)
+    const first = sourceOf().cacheKey
+
+    await rerender(<Avatar photoUrl={signed('nueva.jpg', 'uno')} />)
+
+    expect(sourceOf().cacheKey).not.toBe(first)
+  })
+
+  it('decorativa: el lector de pantalla no la ve, con foto ni con la inicial', async () => {
+    const { rerender } = await render(<Avatar name='Ana' photoUrl={signed('a.jpg', 'uno')} decorative />)
+    expect(screen.queryByRole('image')).not.toBeOnTheScreen()
+    expect(screen.queryByLabelText(/foto de perfil/i)).not.toBeOnTheScreen()
+
+    await rerender(<Avatar name='Ana' decorative />)
+    expect(screen.queryByRole('image')).not.toBeOnTheScreen()
+    expect(screen.queryByText('A')).not.toBeOnTheScreen()
+    // Sigue dibujada para quien ve la pantalla.
+    expect(screen.getByText('A', { includeHiddenElements: true })).toBeTruthy()
+  })
+
+  it('decorativa y con error de carga: la inicial también queda oculta al lector', async () => {
+    await render(<Avatar name='Ana' photoUrl={signed('a.jpg', 'uno')} decorative />)
+    // Decorativa no tiene rol ni nombre: se busca la vista de expo-image por sus props.
+    const image = screen.container.queryAll((node) => typeof node.props.onError === 'function' && node.props.source != null)[0]
+
+    await fireEvent(image, 'error', { nativeEvent: { error: 'HTTP 403' } })
+
+    expect(screen.queryByText('A')).not.toBeOnTheScreen()
+    expect(screen.getByText('A', { includeHiddenElements: true })).toBeTruthy()
+  })
+
   it('clearPhotoCache vacía memoria y disco y no rechaza aunque el caché falle', async () => {
     jest.spyOn(Image, 'clearMemoryCache').mockResolvedValue(true)
     jest.spyOn(Image, 'clearDiskCache').mockRejectedValue(new Error('disco'))
