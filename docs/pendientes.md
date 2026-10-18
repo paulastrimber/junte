@@ -393,3 +393,25 @@ Cómo se corre cada prueba: [pruebas en local](practicas/pruebas-en-local.md).
 - **Sin probar:** el teclado en pantalla (el simulador sin la app Simulator no lo muestra; mirarlo en un teléfono, sobre todo Android edge-to-edge) y una caída de red con "conexión rechazada": durante la prueba un Jenkins local en `127.0.0.1:8080` respondía 404 en lugar de Nginx caído (ver [puerto 8080 ocupado](practicas/pruebas-en-local.md#puerto-8080-ocupado-por-otro-servicio)). Ese camino lo cubren los tests unitarios.
 - **Visto en la prueba, sin cambios:** en el detalle del plan el botón "Chat del plan" queda debajo de la barra de pestañas hasta scrollear (es el comportamiento normal del scroll); mensajes seguidos de la misma persona repiten nombre y avatar; con el aviso de polling visible, el primer mensaje queda en parte debajo del aviso.
 
+
+## Front: decisiones del equipo de agentes (2026-10-17)
+
+Decidido por el líder del equipo de agentes del front (rama `front-agentes`), sin cambios en el back ni en el contrato de la API.
+
+- ✅ **Fotos con `expo-image`.** `Avatar` (el único que dibuja imágenes) pasa a `expo-image` con `cacheKey` = la URL sin firma (`withoutSignature`), `cachePolicy='memory-disk'`, una `transition` corta y `recyclingKey` en las listas (chat). Se borra `useStablePhotoUri`: el caché por clave ya evita la re-descarga y el parpadeo cuando el back re-firma. Si la carga falla se muestra la inicial. Al cerrar sesión se vacían los cachés de memoria y disco (son fotos de otras personas). **Es un módulo nativo: hace falta un development build nuevo** (EAS, perfil `development`); Expo Go ya lo trae.
+  - Por qué: caché en disco por archivo y no por URL (hoy, al reabrir la app, cada foto llega con otra firma y se vuelve a bajar), menos lógica propia y reciclado correcto en listas largas.
+- ✅ **QR: se queda `react-native-qrcode-svg`.** Ya dibuja un solo `Path`, no es nativo y funciona; cambiarla no mejora nada medible y suma riesgo antes de la entrega.
+- ✅ **QR: renovación sin ocultar uno vigente.** Si falla la renovación por red y el QR que se ve todavía no venció, sigue a la vista con un aviso (`Notice` de advertencia: "Sin conexión. Este QR vale hasta las HH:MM; reintentamos solo.") y se reintenta cada 5 s (`QR_MIN_REFRESH_MS`). Recién al vencer pasa a error con "Reintentar". Si la respuesta es de "no disponible" (`CHECKIN_WINDOW_CLOSED`, `PLAN_CLOSED`…) se oculta enseguida. Lo mismo al volver de segundo plano: solo se oculta si ya venció. El cambio de un QR al siguiente es instantáneo (sin animación: un lector podría leer a mitad de un fundido).
+  - Accesibilidad: el QR es una imagen con nombre ("Código QR de asistencia. Se renueva solo."); la renovación no se anuncia (sería ruido cada minuto y medio), el aviso de sin conexión sí (`polite`).
+- ✅ **Chat: mensajes agrupados.** Un grupo son mensajes seguidos de la misma persona, a menos de 5 minutos entre uno y el siguiente y el mismo día. En los ajenos, el nombre va solo en el primero del grupo y el avatar solo en el último (abajo, como en cualquier chat); los demás dejan el lugar del avatar vacío para que las burbujas queden alineadas. Entre mensajes del mismo grupo el espacio es `spacing.xxs`; entre grupos, `spacing.md`. La "cola" de la burbuja (esquina chica) solo en el último del grupo. Los propios se agrupan igual (solo cambia el espaciado y la cola).
+  - Accesibilidad: cada mensaje se anuncia completo aunque no se vea el nombre: "Ana: texto. 14:32" (o "Vos: …" en los propios).
+  - Textos de la pantalla: "No pudimos cargar el chat" (sin punto, como el resto de los títulos de error) y, para un tipo desconocido, "Actualizá la app para ver este mensaje". El resto ya estaba en voseo y no hay ningún "Error:".
+- ✅ **Selector segmentado con texto grande.** Las etiquetas pasan a hasta 2 líneas (nunca "…"). En el inicio, con `fontScale ≥ 1.3` la barra deja de ser una fila: el segmentado ocupa todo el ancho y "Filtros (n)" baja a la línea siguiente, alineado a la derecha. En "Mis planes" los dos segmentados ya van uno abajo del otro: alcanza con las 2 líneas.
+  - Por qué: una regla por `fontScale` es predecible y se puede testear; un `flexWrap` dependía del largo de cada texto.
+
+### Sin probar en un teléfono
+- `expo-image` en un development build nuevo: que la foto no parpadee al re-firmar, que se vea sin red después de reabrir la app y que el caché se vacíe al cerrar sesión.
+- La renovación del QR con el modo avión prendido y apagado a mitad de la vida del QR, y que un lector real lea el QR justo después de cambiar.
+- El agrupado del chat con texto grande, con TalkBack y VoiceOver.
+- El segmentado y la barra del inicio con el texto más grande del sistema en Android e iOS.
+- Sigue abierto de S5: con el aviso de polling visible, el primer mensaje queda en parte debajo del aviso.
