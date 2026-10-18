@@ -3,13 +3,16 @@ import { StyleSheet } from 'react-native'
 
 import { sizes } from '../theme/index.js'
 import { Chip } from './Chip.jsx'
-import { ChipGroup } from './ChipGroup.jsx'
+import { ChipGroup, SEGMENT_MAX_LINES } from './ChipGroup.jsx'
 
 const OPTIONS = Object.freeze([{ key: 'available', label: 'Con cupo' }, { key: 'full', label: 'Llenos' }])
 
+// Estilo de un control sin apretar (el de `Pressable` puede ser una función).
+const styleOf = (element) => StyleSheet.flatten(typeof element.props.style === 'function' ? element.props.style({ pressed: false }) : element.props.style)
+
 // Alto táctil real de un control: su alto mínimo más lo que el `hitSlop` agranda arriba y abajo.
 function touchHeight (element) {
-  const style = StyleSheet.flatten(typeof element.props.style === 'function' ? element.props.style({ pressed: false }) : element.props.style)
+  const style = styleOf(element)
   const slop = element.props.hitSlop ?? {}
   return (style?.minHeight ?? 0) + (slop.top ?? 0) + (slop.bottom ?? 0)
 }
@@ -67,5 +70,23 @@ describe('ChipGroup', () => {
     await render(<ChipGroup label='Qué planes ver' options={OPTIONS} selected={['available']} onSelect={jest.fn()} variant='segmented' />)
 
     for (const segment of screen.getAllByRole('radio')) expect(touchHeight(segment)).toBeGreaterThanOrEqual(sizes.touch)
+  })
+
+  // Con texto grande la etiqueta de un segmento no se corta con "…": baja a una segunda línea y el segmento crece.
+  it('segmentado: las etiquetas usan hasta 2 líneas y los segmentos crecen en alto (minHeight, sin alto fijo)', async () => {
+    const options = [{ key: 'joined', label: 'Planes a los que voy' }, { key: 'created', label: 'Organizo' }]
+    await render(<ChipGroup label='Mostrar' options={options} selected={['joined']} onSelect={jest.fn()} variant='segmented' />)
+
+    expect(SEGMENT_MAX_LINES).toBe(2)
+    for (const option of options) expect(screen.getByText(option.label).props.numberOfLines).toBe(SEGMENT_MAX_LINES)
+    for (const segment of screen.getAllByRole('radio')) {
+      const style = styleOf(segment)
+      expect(style.height).toBeUndefined()
+      expect(style.minHeight).toBe(sizes.touchSmall)
+    }
+    // Todos los segmentos de la pista con el mismo alto: la pista estira a sus hijos.
+    let track = screen.getAllByRole('radio')[0].parent
+    while (styleOf(track)?.flexDirection !== 'row') track = track.parent
+    expect(styleOf(track).alignItems).toBe('stretch')
   })
 })

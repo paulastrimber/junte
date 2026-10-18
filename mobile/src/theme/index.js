@@ -6,7 +6,7 @@ import { shadows } from './tokens.js'
 export { palettes } from './colors.js'
 export { navigationTheme, stackScreenOptions, tabScreenOptions } from './navigation.js'
 export { borders, motion, radius, sizes, spacing } from './tokens.js'
-export { fontAssets, fontScaleLimits, fonts, typography } from './typography.js'
+export { LARGE_TEXT_SCALE, fontAssets, fontScaleLimits, fonts, typography } from './typography.js'
 export { useReducedMotion } from './useReducedMotion.js'
 
 const themes = Object.freeze({

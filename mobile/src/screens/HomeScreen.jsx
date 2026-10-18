@@ -13,6 +13,7 @@ import { PlanCardSkeleton } from '../components/Skeleton.jsx'
 import { Text } from '../components/Text.jsx'
 import { FEED_MODE, FEED_STATUS, LOCATION_NOTICE, useFeed } from '../hooks/useFeed.js'
 import { useFeedFilters } from '../hooks/useFeedFilters.js'
+import { useIsLargeText } from '../hooks/useIsLargeText.js'
 import { ROUTES } from '../navigation/routes.js'
 import { createThemedStyles, spacing, useTheme } from '../theme/index.js'
 import { AVAILABILITY, formatDistance, formatPrice, formatSchedule, formatSpots } from '../utils/plans.js'
@@ -60,6 +61,8 @@ export default function HomeScreen ({ navigation }) {
   const filters = useFeedFilters()
   const feed = useFeed({ query: filters.query, radiusKm: filters.radiusKm })
   const [areFiltersOpen, setAreFiltersOpen] = useState(false)
+  // Con texto grande el segmentado y "Filtros (n)" no entran en una fila: van uno abajo del otro.
+  const isLargeText = useIsLargeText()
   // Los manejadores se pasan como identificadores sueltos (regla react/jsx-handler-names).
   const { loadMore, refresh, retry } = feed
   const { setValue, toggleInterest, togglePriceRange, reset } = filters
@@ -87,8 +90,8 @@ export default function HomeScreen ({ navigation }) {
 
   const header = (
     <View style={styles.header}>
-      <View style={styles.toolbar}>
-        <View style={styles.sections}>
+      <View testID='feed-toolbar' style={isLargeText ? styles.toolbarStacked : styles.toolbar}>
+        <View style={isLargeText ? styles.sectionsStacked : styles.sections}>
           <ChipGroup label={TEXTS.section} options={SECTIONS} selected={[filters.values.availability]} onSelect={(key) => setValue('availability', key)} variant='segmented' hideLabel />
         </View>
         <Button
@@ -98,6 +101,7 @@ export default function HomeScreen ({ navigation }) {
           size='sm'
           icon='options-outline'
           onPress={() => setAreFiltersOpen(true)}
+          style={isLargeText ? styles.end : undefined}
         />
       </View>
       {feed.isReloading
@@ -199,7 +203,10 @@ const useStyles = createThemedStyles(({ colors }) => ({
   header: { gap: spacing.md },
   toolbar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   sections: { flex: 1 },
+  toolbarStacked: { gap: spacing.sm },
+  sectionsStacked: { alignSelf: 'stretch' },
   refreshError: { gap: spacing.sm },
   footer: { paddingVertical: spacing.lg, gap: spacing.sm },
-  start: { alignSelf: 'flex-start' }
+  start: { alignSelf: 'flex-start' },
+  end: { alignSelf: 'flex-end' }
 }))

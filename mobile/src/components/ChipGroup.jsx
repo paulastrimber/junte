@@ -7,6 +7,8 @@ import { Text } from './Text.jsx'
 
 // El segmento mide 40 de alto: el área táctil se completa hasta 48 por fuera, como en `Chip`.
 const SEGMENT_HIT_SLOP = Object.freeze({ top: (sizes.touch - sizes.touchSmall) / 2, bottom: (sizes.touch - sizes.touchSmall) / 2 })
+// Con texto grande la etiqueta baja a una segunda línea en lugar de cortarse con "…"; el segmento crece en alto.
+export const SEGMENT_MAX_LINES = 2
 
 /**
  * Grupo de opciones como chips. Con `multiple` se pueden marcar varias (checkbox); si no, una sola (radio).
@@ -18,7 +20,8 @@ const SEGMENT_HIT_SLOP = Object.freeze({ top: (sizes.touch - sizes.touchSmall) /
  * @param {(key: string | number) => void} props.onSelect
  * @param {boolean} [props.multiple]
  * @param {'chips' | 'segmented'} [props.variant]  `segmented`: 2 o 3 opciones excluyentes que cambian la vista
- *   entera ("Con cupo / Llenos", "Voy / Organizo"). Ocupa todo el ancho; no sirve con `multiple`.
+ *   entera ("Con cupo / Llenos", "Voy / Organizo"). Ocupa todo el ancho; no sirve con `multiple`. Con texto grande
+ *   las etiquetas usan hasta 2 líneas (nunca "…") y los segmentos crecen en alto, todos iguales.
  * @param {boolean} [props.hideLabel]  No muestra el título (sigue siendo el nombre accesible del grupo).
  */
 export function ChipGroup ({ label, options, selected, onSelect, multiple = false, variant = 'chips', hideLabel = false }) {
@@ -69,7 +72,7 @@ function Segmented ({ options, selected, onSelect }) {
             }}
             style={({ pressed }) => [styles.segment, isSelected && styles.segmentSelected, pressed && styles.pressed]}
           >
-            <Text variant='label' color={isSelected ? 'primary' : 'textMuted'} center numberOfLines={1}>{option.label}</Text>
+            <Text variant='label' color={isSelected ? 'primary' : 'textMuted'} center numberOfLines={SEGMENT_MAX_LINES}>{option.label}</Text>
           </Pressable>
         )
       })}
@@ -80,13 +83,15 @@ function Segmented ({ options, selected, onSelect }) {
 const useStyles = createThemedStyles(({ colors, shadows }) => ({
   group: { gap: spacing.sm },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  track: { flexDirection: 'row', gap: spacing.xs, padding: spacing.xs, borderRadius: radius.lg, borderCurve: 'continuous', backgroundColor: colors.surfaceAlt },
+  // `stretch`: si una etiqueta usa dos líneas, todos los segmentos de la pista quedan del mismo alto.
+  track: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.xs, padding: spacing.xs, borderRadius: radius.lg, borderCurve: 'continuous', backgroundColor: colors.surfaceAlt },
   segment: {
     flex: 1,
     minHeight: sizes.touchSmall,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
     borderRadius: radius.md,
     borderCurve: 'continuous',
     borderWidth: borders.thin,

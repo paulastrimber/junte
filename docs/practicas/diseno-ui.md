@@ -61,6 +61,9 @@ Plus Jakarta Sans, un archivo por peso (`fonts.regular` … `fonts.extrabold`). 
 
 **Texto grande del sistema (Dynamic Type / tamaño de fuente de Android).** El texto **siempre** escala (`allowFontScaling` queda en `true`). `Text` aplica un tope por variante (`fontScaleLimits`: `display` 1.3, `title` y `stat` 1.4, `heading` 1.6, el resto 2) para que los títulos no se partan en cinco renglones. Única excepción: la inicial del `Avatar`, que escala con el círculo. Los contenedores usan `minHeight` (no `height`) para crecer con el texto.
 
+- **Etiquetas que no se cortan.** Lo que tiene que leerse entero (segmentos, botones) no usa `numberOfLines={1}`: con texto grande pasa a una segunda línea y el contenedor crece. El `…` queda para datos largos de una lista (título de un plan, dirección), nunca para una opción.
+- **Filas que pasan a columna.** Una fila que reparte el ancho entre controles (la barra del inicio: segmentado + "Filtros (n)") pasa a columna con `useIsLargeText()` (`fontScale ≥ LARGE_TEXT_SCALE`, 1.3, en `typography.js`). Una regla por `fontScale` es predecible y se puede testear; un `flexWrap` depende del largo de cada texto. El hook decide el layout, no el tamaño de la letra (eso ya lo hace `Text`).
+
 ## Espaciado
 
 Grilla de 4 (`spacing`): `xxs` 2 · `xs` 4 · `sm` 8 · `md` 12 · `lg` 16 · `xl` 24 · `xxl` 32 · `xxxl` 48.
@@ -106,7 +109,7 @@ Todos aceptan `style` solo para ubicarlos (margen, flex), nunca para cambiar su 
 | `Badge` | Estado corto que no se toca | `label`, `tone` (`neutral` · `primary` · `accent` · `success` · `warning` · `danger`), `icon` |
 | `DetailRow` | Un dato con rótulo e ícono | `label`, `value`, `icon`, `hint` |
 | `SectionHeader` | Título de sección dentro de la pantalla | `title`, `description`, `actionTitle` + `onAction` |
-| `Avatar` | Foto o inicial | `photoUrl`, `name`, `size` (`sizes.avatarSm` · `avatarMd` · `avatarLg`), `accessibilityLabel`, `decorative` |
+| `Avatar` | Foto o inicial (ver [Fotos](#fotos-de-perfil)) | `photoUrl`, `name`, `size` (`sizes.avatarSm` · `avatarMd` · `avatarLg`), `accessibilityLabel`, `decorative`, `recyclingKey` (en listas) |
 | `Notice` | Aviso dentro de la pantalla | `message`, `tone` (`info` · `success` · `warning` · `danger`), `title`, `icon`, `children` |
 | `ErrorBanner` | Error de un formulario, de una acción o de un refresco | `error` (el `ViewError` del hook) o `message` + `requestId` (solo en desarrollo), `title` |
 | `FieldError` | Error de un dato que no es un `FormField` (intereses, cupo ilimitado), con el mismo aspecto | `message` |
@@ -119,6 +122,38 @@ Todos aceptan `style` solo para ubicarlos (margen, flex), nunca para cambiar su 
 | `QrScanner` | Cámara que lee QR, con visor | `onScan`, `paused` |
 | `CatalogGate` | Espera a los catálogos | `status`, `onRetry`, `children` |
 | `StudyFields` | Universidad, carrera, ciudad y barrio (onboarding y perfil, mismos textos) | `values`, `options`, `dependents`, `errors`, `onChange` |
+
+### Control segmentado
+
+`ChipGroup variant='segmented'`: 2 o 3 opciones excluyentes que cambian la vista entera ("Con cupo / Llenos", "Voy / Organizo"). Una pista `surfaceAlt` con la opción elegida "levantada" (`surface` + `raised`, y en oscuro un borde).
+
+- Cada segmento mide al menos 40 (`touchSmall`) y completa los 48 con `hitSlop`. Crece en alto con `minHeight`, nunca con `height`.
+- Las etiquetas usan **hasta 2 líneas** (`SEGMENT_MAX_LINES`), nunca "…". La pista estira a sus hijos (`alignItems: 'stretch'`): si una etiqueta baja a la segunda línea, todos los segmentos quedan del mismo alto.
+- Etiquetas cortas (una o dos palabras). Si no entran en dos líneas con el texto más grande, la etiqueta es demasiado larga.
+- **Inicio:** con texto grande (`useIsLargeText()`) la barra deja de ser una fila: el segmentado ocupa todo el ancho y "Filtros (n)" baja a la línea siguiente, alineado a la derecha. **Mis planes:** los dos segmentados ya van uno abajo del otro; alcanza con las 2 líneas.
+
+### Chat: mensajes agrupados
+
+- **Grupo:** mensajes seguidos de la misma persona, a menos de 5 minutos entre uno y el siguiente y el mismo día.
+- En los ajenos, el **nombre** va solo en el primero del grupo y el **avatar** solo en el último (abajo); los demás dejan vacío el lugar del avatar para que las burbujas queden alineadas. La "cola" de la burbuja (esquina chica) va solo en el último del grupo. Los propios se agrupan igual (cambian el espaciado y la cola).
+- Espaciado: `spacing.xxs` entre mensajes del mismo grupo, `spacing.md` entre grupos.
+- Accesibilidad: cada mensaje se anuncia completo aunque no se vea el nombre: "Ana: texto. 14:32" (o "Vos: …" en los propios).
+
+### QR de asistencia
+
+| Estado | Qué se ve |
+|--------|-----------|
+| Vigente | El QR en el visor lima. El cambio de un QR al siguiente es instantáneo (sin fundido: un lector podría leer a mitad de la animación). La renovación no se anuncia |
+| Vigente sin conexión | El mismo QR, con un `Notice tone='warning'`: "Sin conexión. Este QR vale hasta las HH:MM; reintentamos solo." (anunciado con `polite`). Se reintenta solo cada 5 s |
+| Vencido sin conexión | Recién al vencer pasa a error, con "Reintentar" |
+| No disponible | Si el back responde que ya no se puede (`CHECKIN_WINDOW_CLOSED`, `PLAN_CLOSED`…), el QR se oculta enseguida |
+
+- El QR es una imagen con nombre: "Código QR de asistencia. Se renueva solo."
+- Al volver de segundo plano, el QR solo se oculta si ya venció.
+
+### Fotos de perfil
+
+`Avatar` dibuja con `expo-image`: `cacheKey` es la URL **sin firma** (`withoutSignature`) y `cachePolicy='memory-disk'`, así que cuando el back re-firma la misma foto no se vuelve a bajar ni parpadea (tampoco al reabrir la app). Entra con una `transition` corta (`motion.fast`); en listas (chat) lleva `recyclingKey`. Si la carga falla, muestra la inicial. Al cerrar sesión se vacían los cachés de memoria y disco (`clearPhotoCache`).
 
 Cuándo crear uno nuevo: cuando el mismo bloque aparece en **dos o más pantallas**, tiene un nombre claro y su API es más chica que su implementación. Mientras tanto, vive en la pantalla.
 
@@ -144,7 +179,7 @@ Errores de un formulario o de una acción (inscribirse, guardar) no reemplazan l
 - **Errores y cambios**: los errores llevan `accessibilityRole='alert'`; los avisos que aparecen solos (guardado, asistencia registrada) `accessibilityLiveRegion='polite'`.
 - **Contraste**: texto ≥ 4.5:1 y contorno de controles ≥ 3:1 en los dos modos (lo prueba `theme.test.js`). Nada de texto lima sobre fondo claro.
 - **Modo oscuro**: todo color sale de `useTheme()` / `createThemedStyles`, así que cambia solo. En Android, los componentes que pintan colores llaman a `useTheme()` (que usa `useColorScheme`) para volver a pintarse cuando cambia el modo.
-- **Texto grande**: ver [Tipografía](#tipografía). Probar cada pantalla con el tamaño más grande del sistema.
+- **Texto grande**: ver [Tipografía](#tipografía). Probar cada pantalla con el tamaño más grande del sistema. Ninguna opción ni botón se corta con "…"; una fila de controles que no entra pasa a columna con `useIsLargeText()`.
 - **Datos copiables**: `selectable` en mensajes de error, direcciones, emails y mensajes del chat.
 
 ## Checklist para el PR
@@ -156,5 +191,5 @@ Errores de un formulario o de una acción (inscribirse, guardar) no reemplazan l
 - [ ] Los cuatro estados (cargando, vacío, error, con datos), con textos que dicen qué hacer.
 - [ ] Microcopy en voseo, frases cortas, verbo concreto en los botones; el mismo nombre para la misma acción en toda la app.
 - [ ] Todo lo que se toca: ≥ 48 (o `hitSlop`), rol, nombre, estado y respuesta al apretar.
-- [ ] Probado en claro y en oscuro, y con el texto más grande del sistema, en iOS y en Android.
+- [ ] Probado en claro y en oscuro, y con el texto más grande del sistema, en iOS y en Android: nada se corta con "…" salvo datos largos de una lista, y las filas de controles pasan a columna (`useIsLargeText()`).
 - [ ] Tests con `getByRole` / `getByLabelText` (no por estilos), que además prueban la accesibilidad.

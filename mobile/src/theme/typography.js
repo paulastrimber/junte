@@ -51,3 +51,9 @@ export const typography = Object.freeze({
  * escala; los títulos, que ya son grandes, escalan menos para no partirse en cinco renglones.
  */
 export const fontScaleLimits = Object.freeze({ display: 1.3, title: 1.4, stat: 1.4, heading: 1.6, default: 2 })
+
+/**
+ * Desde qué `fontScale` del sistema se considera "texto grande": las filas que comparten ancho entre controles
+ * (la barra del inicio) pasan a columna. Se lee con `useIsLargeText()`.
+ */
+export const LARGE_TEXT_SCALE = 1.3

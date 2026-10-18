@@ -1,10 +1,12 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react-native'
+import { StyleSheet } from 'react-native'
 
 import { CATALOG, COMPLETE_USER, SignedIn, createFakeAuthService, renderWithAuth } from '../../tests/helpers/auth.jsx'
 import { deferred } from '../../tests/helpers/deferred.js'
 import { TEXTS as FILTERS } from '../components/FeedFilters.jsx'
 import { resetCatalogsCache } from '../hooks/useCatalogs.js'
 import { resetFilterOptionsCache } from '../hooks/useFeedFilters.js'
+import { useIsLargeText } from '../hooks/useIsLargeText.js'
 import { getCatalogs } from '../services/api/catalogs.js'
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import { getFeed } from '../services/api/feed.js'
@@ -17,6 +19,7 @@ jest.mock('../services/api/catalogs.js', () => ({ getCatalogs: jest.fn() }))
 jest.mock('../services/api/feed.js', () => ({ getFeed: jest.fn() }))
 jest.mock('../services/api/plans.js', () => ({ listPlans: jest.fn(), getPlanFilters: jest.fn() }))
 jest.mock('../services/calendar.js', () => ({ readBusySlots: jest.fn() }))
+jest.mock('../hooks/useIsLargeText.js', () => ({ useIsLargeText: jest.fn(() => false) }))
 jest.mock('../services/location.js', () => ({ ...jest.requireActual('../services/location.js'), getCurrentCoordinates: jest.fn() }))
 
 const NEAR = [-56.1645, -34.9011]
@@ -63,6 +66,7 @@ describe('HomeScreen (feed)', () => {
     listPlans.mockReset()
     readBusySlots.mockReset().mockResolvedValue(null)
     getCurrentCoordinates.mockReset()
+    useIsLargeText.mockReset().mockReturnValue(false)
   })
 
   describe('los cuatro estados', () => {
@@ -335,6 +339,35 @@ describe('HomeScreen (feed)', () => {
 
       await screen.findByRole('button', { name: TEXTS.filters })
       expect(lastFeedBody()).toEqual({ availability: 'available', near: NEAR, radiusKm: 10, limit: 20 })
+    })
+  })
+
+  describe('texto grande del sistema', () => {
+    const toolbarStyle = () => StyleSheet.flatten(screen.getByTestId('feed-toolbar').props.style)
+    const filtersStyle = () => {
+      const { style } = screen.getByRole('button', { name: TEXTS.filters }).props
+      return StyleSheet.flatten(typeof style === 'function' ? style({ pressed: false }) : style)
+    }
+
+    it('con texto normal el segmentado y "Filtros" comparten fila', async () => {
+      withLocation()
+      getFeed.mockResolvedValue(page([]))
+      await renderHome()
+
+      expect(toolbarStyle().flexDirection).toBe('row')
+    })
+
+    it('con texto grande la barra pasa a columna: segmentado a todo el ancho y "Filtros" abajo a la derecha', async () => {
+      useIsLargeText.mockReturnValue(true)
+      withLocation()
+      getFeed.mockResolvedValue(page([]))
+      await renderHome()
+
+      expect(toolbarStyle().flexDirection ?? 'column').toBe('column')
+      expect(filtersStyle().alignSelf).toBe('flex-end')
+      // Las dos opciones siguen ahí y se pueden elegir.
+      await fireEvent.press(screen.getByRole('radio', { name: TEXTS.full }))
+      expect(screen.getByRole('radio', { name: TEXTS.full })).toBeChecked()
     })
   })
 })
