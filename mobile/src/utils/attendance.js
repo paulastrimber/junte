@@ -82,6 +82,15 @@ export function isQrRefreshDue (expiresAt, now = new Date()) {
   return time(expiresAt) - now.getTime() <= QR_REFRESH_MARGIN_MS
 }
 
+/**
+ * ¿El QR ya venció? Mientras no venza se puede seguir mostrando aunque no se haya podido renovar.
+ * @param {string} expiresAt ISO 8601
+ * @param {Date} [now]
+ */
+export function isQrExpired (expiresAt, now = new Date()) {
+  return !(time(expiresAt) > now.getTime())
+}
+
 /** ¿Lo que se leyó con la cámara puede ser un QR de asistencia? (texto corto, no una URL cualquiera). */
 export function looksLikeQrToken (data) {
   return typeof data === 'string' && data.length > 0 && data.length <= QR_TOKEN_MAX_LENGTH

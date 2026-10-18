@@ -14,12 +14,16 @@ import { CHECK_IN_STATUS, useCheckIn } from '../hooks/useCheckIn.js'
 import { QR_STATUS, usePlanQr } from '../hooks/usePlanQr.js'
 import { SCREEN_TITLES } from '../navigation/titles.js'
 import { createThemedStyles, palettes, radius, spacing } from '../theme/index.js'
+import { formatMessageTime } from '../utils/chat.js'
 
 export const TEXTS = Object.freeze({
   title: SCREEN_TITLES.planQr,
   loading: 'Generando el QR…',
   errorTitle: 'No pudimos mostrar el QR',
   hint: 'Mostrales este QR a quienes llegan para que registren su asistencia. Se renueva solo cada poco más de un minuto: no sirve una foto. La pantalla queda encendida mientras lo mostrás.',
+  qrLabel: 'Código QR de asistencia. Se renueva solo.',
+  /** @param {string} time "HH:MM" */
+  refreshFailed: (time) => `Sin conexión. Este QR vale hasta las ${time}; reintentamos solo.`,
   retry: 'Reintentar',
   back: 'Volver al plan',
   myAttendance: 'Tu asistencia',
@@ -54,8 +58,13 @@ export default function PlanQrScreen ({ navigation, route }) {
       {qr.status === QR_STATUS.READY
         ? (
           <View style={styles.block}>
+            {/* Se anuncia el aviso, no cada renovación (sería ruido cada minuto y medio). */}
+            {qr.refreshError
+              ? <Notice tone='warning' icon='cloud-offline-outline' message={TEXTS.refreshFailed(formatMessageTime(qr.expiresAt))} accessibilityLiveRegion='polite' />
+              : null}
             <Card padding='lg' style={styles.qrCard}>
-              <View style={styles.qr}>
+              {/* El cambio de un QR al siguiente es instantáneo: un lector podría leer a mitad de un fundido. */}
+              <View style={styles.qr} accessible accessibilityRole='image' accessibilityLabel={TEXTS.qrLabel}>
                 <QRCode value={qr.qrToken} size={QR_SIZE} color={QR_COLORS.code} backgroundColor={QR_COLORS.background} />
               </View>
             </Card>

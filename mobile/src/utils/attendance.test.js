@@ -1,4 +1,4 @@
-import { formatNoShows, formatReputation, looksLikeQrToken, planActions, qrRefreshDelay } from './attendance.js'
+import { formatNoShows, formatReputation, isQrExpired, looksLikeQrToken, planActions, qrRefreshDelay } from './attendance.js'
 
 const NOW = new Date('2026-10-25T21:00:00.000Z')
 const MINUTE_MS = 60 * 1000
@@ -102,6 +102,20 @@ describe('qrRefreshDelay', () => {
     expect(qrRefreshDelay(new Date(NOW.getTime() + 90_000).toISOString(), NOW)).toBe(75_000)
     expect(qrRefreshDelay(new Date(NOW.getTime() + 10_000).toISOString(), NOW)).toBe(5_000)
     expect(qrRefreshDelay(new Date(NOW.getTime() - 60_000).toISOString(), NOW)).toBe(5_000)
+  })
+})
+
+describe('isQrExpired', () => {
+  const inSeconds = (seconds) => new Date(NOW.getTime() + seconds * 1000).toISOString()
+
+  it('vigente hasta el instante en que vence', () => {
+    expect(isQrExpired(inSeconds(1), NOW)).toBe(false)
+    expect(isQrExpired(inSeconds(0), NOW)).toBe(true)
+    expect(isQrExpired(inSeconds(-30), NOW)).toBe(true)
+  })
+
+  it('una fecha inválida cuenta como vencido', () => {
+    expect(isQrExpired('no es una fecha', NOW)).toBe(true)
   })
 })
 

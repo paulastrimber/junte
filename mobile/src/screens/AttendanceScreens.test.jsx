@@ -11,6 +11,7 @@ import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import { listMyPlans } from '../services/api/plans.js'
 import * as usersApi from '../services/api/users.js'
 import { LOCATION_STATUS, getPreciseLocation } from '../services/location.js'
+import { formatMessageTime } from '../utils/chat.js'
 import CheckInScreen, { TEXTS as CHECK_IN } from './CheckInScreen.jsx'
 import MyPlansScreen, { TEXTS as MY_PLANS } from './MyPlansScreen.jsx'
 import PlanQrScreen, { TEXTS as QR } from './PlanQrScreen.jsx'
@@ -165,6 +166,29 @@ describe('PlanQrScreen (creador)', () => {
 
     expect(await screen.findByLabelText('p1.token-2')).toBeOnTheScreen()
     expect(screen.queryByLabelText('p1.token-1')).not.toBeOnTheScreen()
+  })
+
+  it('el QR es una imagen con nombre accesible', async () => {
+    createPlanQr.mockResolvedValue(qr(1))
+    await render(<PlanQrScreen navigation={navigation} route={route()} />)
+
+    expect(await screen.findByRole('image', { name: QR.qrLabel })).toBeOnTheScreen()
+  })
+
+  it('si no se puede renovar, deja el QR vigente con un aviso hasta cuándo vale', async () => {
+    createPlanQr.mockResolvedValueOnce(qr(1)).mockRejectedValue(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
+    await render(<PlanQrScreen navigation={navigation} route={route()} />)
+    await screen.findByLabelText('p1.token-1')
+
+    await act(async () => jest.advanceTimersByTime(75_000))
+
+    expect(screen.getByText(QR.refreshFailed(formatMessageTime(qr(1).expiresAt)))).toBeOnTheScreen()
+    expect(screen.getByLabelText('p1.token-1')).toBeOnTheScreen()
+
+    await act(async () => jest.advanceTimersByTime(15_000))
+
+    expect(screen.queryByLabelText('p1.token-1')).not.toBeOnTheScreen()
+    expect(screen.getByRole('button', { name: QR.retry })).toBeOnTheScreen()
   })
 
   it('fuera del horario de asistencia lo explica, sin QR ni reintento', async () => {
