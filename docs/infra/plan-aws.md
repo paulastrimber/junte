@@ -1,6 +1,8 @@
 # Plan de AWS
 
-Plan de trabajo de la responsable de AWS: qué hay hecho, qué falta, en qué orden hacerlo, cuánto cuesta y cómo verificarlo. **Es solo un plan: todavía no se creó ni se cambió nada en AWS**, y los templates que nombra todavía no existen.
+Plan de trabajo de la responsable de AWS: qué hay hecho, qué falta, en qué orden hacerlo, cuánto cuesta y cómo verificarlo.
+
+**Estado (2026-10-18):** en la cuenta A está desplegado `junte-dev-network` (pasos 1.3 y 1.4, template `10-network.yml`). El resto de los templates que nombra este plan todavía no existe en `main`.
 
 Escrito el 2026-10-12 a partir del informe de arquitectura (`docs/junte.pdf`), `CLAUDE.md`, `docs/` e `infra/`.
 
@@ -49,9 +51,9 @@ El informe y `docs/` están escritos pensando en una cuenta común. En Learner L
 | Migraciones (índices y validadores) | `back-service/migrations/` |
 | Diseño de red, Security Groups, timeouts y secuencia de despliegue | `docs/arquitectura/02`, `09`, `10`, ADR-0003 y ADR-0005 |
 
-### Falta todo lo de AWS
+### Lo de AWS
 
-`infra/templates/` e `infra/parameters/` están vacíos (solo `.gitkeep`). No hay ningún template de CloudFormation ni parámetros. Tareas abiertas:
+Hecho: `infra/templates/10-network.yml` con sus parámetros de `dev` y `entrega` (red y Security Groups; S1-INF-05 sin los NAT ni los endpoints de interfaz, y S1-INF-06 sin la prueba con instancias). Tareas abiertas:
 
 | Tarea | Qué es |
 |-------|--------|
@@ -299,6 +301,8 @@ Objetivo del informe: topología multi-AZ, health checks de los dos ALB y acceso
   | `sg-db` | 27017 | `sg-back` y `sg-db` (replicación) |
 
   Salidas explícitas, no "todo permitido": cada grupo sale solo hacia el siguiente, más 443 para servicios de AWS, FCM e imágenes. Ningún grupo abre el 22. El `sg-alb` **no** abre el 80: el informe pide que 443 sea la única entrada.
+
+  El grupo de los endpoints de interfaz (443 desde la VPC) no va acá: lo crea `20-egress.yml`, junto con los endpoints. El grupo `default` que AWS crea con la VPC no se usa en ningún recurso.
 - **Verificación:** se completa en 1.8 y 1.9, con instancias. Es el criterio de aislamiento del informe (7.5).
 - **Lo necesita:** todas las capas.
 
