@@ -5,7 +5,7 @@ import { deferred } from '../../tests/helpers/deferred.js'
 import { ApiError } from '../services/api/errors.js'
 import RegisterScreen, { TEXTS } from './RegisterScreen.jsx'
 
-const navigation = { navigate: jest.fn() }
+const navigation = { navigate: jest.fn(), goBack: jest.fn() }
 
 async function renderRegister (service = createFakeAuthService()) {
   const view = await renderWithAuth(<RegisterScreen navigation={navigation} />, { service })
@@ -97,11 +97,12 @@ describe('RegisterScreen', () => {
     expect(register).toHaveBeenCalledTimes(2)
   })
 
-  it('el botón "Ya tengo cuenta" lleva al login', async () => {
+  it('el botón "Ya tengo cuenta" vuelve al login (no apila otro)', async () => {
     await renderRegister()
 
     await fireEvent.press(screen.getByRole('button', { name: TEXTS.login }))
 
-    expect(navigation.navigate).toHaveBeenCalledWith('Login')
+    expect(navigation.goBack).toHaveBeenCalledTimes(1)
+    expect(navigation.navigate).not.toHaveBeenCalled()
   })
 })

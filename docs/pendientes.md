@@ -95,8 +95,8 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 
 ### Notas de voz y contactos
 **Problema:** el sprint 5 los menciona, pero no hay modelo (`messages` solo tiene `text`) ni endpoints.
-**Propuesta:** notas de voz = `messages.type: 'text'|'voice'` + `audioKey` en S3 por el mismo flujo de `uploads/presign`; contactos = solo invitar compartiendo un link del plan (sin subir contactos al back).
-**Bloquea:** S5.
+✅ **Decidido (2026-10-14, @mperez14ang):** se aprueba la propuesta: notas de voz = `messages.type: 'text'|'voice'` + `audioKey` en S3 por el mismo flujo de `uploads/presign`; contactos = solo invitar compartiendo un link del plan (sin subir contactos al back). **Se implementa después del chat de texto, en otro PR** (S5-BE-09 y S5-MOB-05). El chat de texto ya guarda `type: 'text'`, así que sumar `voice` no necesita backfill.
+**A definir al implementarlo:** duración y tamaño máximos del audio, formato (AAC/M4A), y si el link para compartir abre la app (deep link) o una página.
 
 ### Endpoints y métricas de administración
 **Problema:** `/admin` existe pero sus operaciones no.
@@ -146,7 +146,7 @@ Lo que apareció al implementar el sprint 1 y queda para revisar con el equipo.
 - **Validadores más estrictos que 07 (a confirmar):** `users.email` sin mayúsculas ni espacios (garantiza la normalización de la que depende el índice único) y `checkIns` con `additionalProperties: false` (impide guardar la ubicación del participante; el modelo usa `strict: 'throw'`). `participantCount ≤ capacity` se valida con `$expr` junto al `$jsonSchema`. Todos con `validationLevel: 'moderate'`.
 - **Backfill de `role`/`status` (ADR-0004):** no se escribió migración de backfill porque no hay entornos con usuarios previos; la colección nace con el validador que exige ambos campos. Si aparece una base vieja, agregar la migración de backfill de [migraciones.md](practicas/migraciones.md).
 - **Mongoose 9 depreca `{ new: true }`** en `findOneAndUpdate`: el ejemplo de 07 (patrón de inscripción) debería usar `{ returnDocument: 'after' }`.
-- **Idempotencia del chat (`clientId`):** [testing.md](practicas/testing.md) pide que reintentar `chat:send` con el mismo `clientId` cree un solo mensaje, pero `messages` no tiene `clientId` ni índice en 07. Definir antes de S5 (campo + índice único parcial `{ senderId, clientId }` por migración).
+- ✅ **Resuelto en S5 (decidido el 2026-10-14, @mperez14ang).** **Idempotencia del chat (`clientId`):** campo `clientId` opcional + índice único parcial `{ senderId, clientId }` por migración, **por Socket.io y por REST**: un reintento devuelve el mensaje ya creado (REST: 200 en lugar de 201). Ver [H](#h-notas-del-sprint-5-chat).
 - **Helpers para otros agentes:** `tests/helpers/db.js` (`useTestDb()` / `startDb` / `clearDb` / `stopDb`) y `tests/helpers/factories.js` (`makeUser`, `makePlan`, `makeParticipation`). `src/adapters/db/index.js` exporta además `getConnection()`; `src/adapters/db/migrations.js` expone `runMigrations`/`rollbackMigrations`/`migrationStatus` (no se llaman al arrancar la app).
 
 ### infra local + Nginx (Agente C)
@@ -340,8 +340,124 @@ Decisiones en [s4-decisiones.md](tareas/s4-decisiones.md) (2026-10-12, Paula). L
 
 ### Sin probar
 - **Sin probar en un teléfono:** la cámara (`expo-camera`), la lectura real del QR, la precisión del GPS en interiores, el dibujo del QR, que la pantalla quede encendida (`expo-keep-awake`) y el refresco al volver a primer plano. Verificado: tests (jest-expo), lint, `expo-doctor` y `expo export --platform android`.
-- **Dos instancias reales del back contra un Redis real** (criterio de aceptación de S4-BE-08): cubierto con un test de dos schedulers sobre un Redis simulado; falta la prueba con docker-compose levantado.
+- ✅ **Dos instancias reales del back contra un Redis real** (criterio de aceptación de S4-BE-08): verificado el 2026-10-14 con docker-compose (perfil `scale`): en cada ciclo una instancia corre el job y la otra lo saltea por el lock.
 - La app contra el back real no se probó de punta a punta; el back sí, por HTTP (Supertest) y contra MongoDB en memoria con replica set.
 
 ### Para investigar
 - **Aviso intermitente de consola en los tests de la app.** En dos corridas completas de `npm test` (mobile) del 2026-10-12, Jest mostró un bloque `● Console` en alguna suite, sin que fallara ningún test. No se pudo reproducir en las corridas siguientes (cinco seguidas, incluida la de `task ci`), así que no se sabe de qué suite viene ni qué dice. Sospecha sin confirmar: una actualización de estado fuera de `act()` en alguna pantalla con efectos asíncronos (las suites que se agregaron en S4 usan timers y promesas diferidas), que solo aparece cuando la máquina está cargada. Para encontrarlo: correr `npx jest --runInBand` varias veces guardando la salida completa, o hacer fallar los tests ante cualquier `console.error`/`console.warn` en un `setupFilesAfterEach`.
+
+## H. Notas del sprint 5: chat
+
+Decidido con @mperez14ang el 2026-10-14: el **chat completo** (S5-BE-01 a 05 y S5-NG-01 del lado local en el PR del back; S5-MOB-01 y 02 en el PR de la app, apilado sobre el del back); devices, FCM, avisos, recordatorio, `spotAlerts` y notas de voz van en PRs siguientes. `clientId` por socket y por REST ([idempotencia](#back-data-agente-b)); notas de voz aprobadas para después ([notas de voz](#notas-de-voz-y-contactos)). Lo que quedó abierto o se resolvió con la opción más chica:
+
+### Reglas que se resolvieron con la opción más chica
+- **El chat funciona en cualquier estado del plan** (abierto, cerrado, cancelado, completado o ya terminado) para quien tenga acceso: participante activo o creador. Alternativa: dejarlo de solo lectura cuando el plan se cancela o termina.
+- **El creador siempre tiene chat**, aunque no esté inscripto o se dé de baja.
+- **Darse de baja quita el acceso** (403) y saca al usuario de la sala en tiempo real en todas las instancias (sala `user:<id>`). Su historial anterior no se borra: si se vuelve a inscribir lo ve completo.
+- **El mismo `clientId` en otro plan** es 400 (no es un reintento). El mismo `clientId` de dos personas son dos mensajes.
+- **`chat:message` llega también a quien lo mandó** (la app fusiona por `id`/`clientId`); un reintento por `clientId` no se vuelve a emitir.
+- **`type: 'text'`** se guarda desde ahora para que las notas de voz no necesiten backfill. Sin `type` (mensajes de desarrollo anteriores) cuenta como texto.
+- **Forma del mensaje** (no estaba definida): `{ id, planId, sender, type, text, clientId, createdAt }`, con `sender` = vista pública del usuario ([06](arquitectura/06-api.md#chat)). `status` no sale para usuarios comunes.
+- **`chat:join` y una baja simultánea:** después de unir el socket a la sala se vuelve a verificar el permiso; si en el medio terminó una baja, sale de la sala y responde `FORBIDDEN`.
+- **Errores por socket:** el ack lleva `{ error: { code, message, requestId } }` con un `requestId` generado por evento (no hay header). Un usuario suspendido recibe `ACCOUNT_SUSPENDED` y se le cierra la conexión.
+
+### Para los próximos PRs de S5
+- **FCM (S5-BE-07, S5-MOB-03/04): no hay proyecto de Firebase todavía** (2026-10-14). Hace falta que alguien del equipo lo cree y cargue: `google-services.json` para el development build (EAS) y una cuenta de servicio para el back (Secrets Manager / `.env`, nunca en Git). Mientras tanto el adapter de FCM se puede hacer detrás de una interfaz con una implementación en memoria para desarrollo y tests.
+
+### Límites conocidos
+- **Sin rate limit de eventos de socket:** Nginx limita la conexión (upgrade), no los mensajes dentro del WebSocket. Un cliente podría mandar muchos `chat:send` seguidos. Propuesta: un límite por usuario en Redis (p. ej. 20 mensajes cada 10 s) si se ve abuso.
+- **Token vencido con la conexión abierta:** la conexión sigue hasta que se corta (límite ya aceptado en [08](arquitectura/08-tiempo-real-y-push.md#autenticación-y-autorización)); en cada evento sí se verifica que el usuario siga activo.
+- **A confirmar con el equipo (salió en la revisión):** con el socket abierto, un `logout` o `logout-all` no corta la conexión (en cada evento se mira que el usuario esté activo, no que la sesión siga vigente; igual que el HTTP, que no consulta `sessions`), y un usuario suspendido que solo escucha sigue recibiendo mensajes hasta que manda un evento o se reconecta. Propuesta si no se acepta: guardar el `sid` en el socket, verificar la sesión en cada evento, y que `logout-all` / la suspensión (S6) desconecten los sockets del usuario con `io.in('user:<id>').disconnectSockets()`.
+- **Cursores con un instante fuera de rango** (salió en la revisión): un cursor manipulado con un número que no entra en un `Date` daba 500 en todos los listados (planes, anotados, feed y chat). Ahora es 400 (`cursorInstantField` en `shared/pagination.js`).
+- **Sin Redis**, cada instancia emite solo a sus propios clientes; el resto ve los mensajes por el polling REST de la app.
+- **Moderación:** el evento `chat:hidden` y `PATCH /admin/messages/:id` son de S6; el historial ya filtra los `hidden`.
+
+### Validación en local (2026-10-14)
+Cómo se corre cada prueba: [pruebas en local](practicas/pruebas-en-local.md).
+- ✅ **Dos instancias con Redis** (S5-BE-05): `task chat:two-instances` OK, en los dos sentidos.
+- ✅ **WebSocket a través de Nginx:** `nginx -t` y `smoke.sh` OK (30/30, con el upgrade a WebSocket y el long-polling rechazado).
+- ✅ **E2E del chat por Nginx** (un agente, con REST y Socket.io como la app): permisos (403 por REST y socket), validaciones, paginación sin duplicados, cursores manipulados → 400, idempotencia por `clientId` (socket + REST), mensajes entre instancias, la baja saca de la sala en las dos instancias, recuperación del historial al reconectar, refresh del token, y el texto de los mensajes nunca aparece en los logs de back ni de Nginx.
+- **Falta en AWS** (S5-NG-01): que una conexión ociosa 5 minutos siga viva a través de los dos ALB.
+
+### App
+- **Dependencia nueva:** `socket.io-client` 4.8.
+- ✅ **Botón "Chat del plan"** en el detalle, solo para el creador o un participante activo; el chat se abre dentro del tab desde el que se entró (como el QR y el check-in).
+- **Opción más chica:** páginas de 30 mensajes; sin cola offline (un envío fallido se reintenta a mano, con el mismo `clientId`); un mensaje pendiente se ordena arriba de los confirmados (el reloj del teléfono puede estar corrido); un `type` desconocido se muestra como "Mensaje no compatible con esta versión de la app".
+- **Reconexión tras un rechazo del servidor** (salió en la revisión): si el servidor rechaza la conexión por algo que no es el token (p. ej. `INTERNAL` con la base caída), Socket.io no reintenta solo; la app vuelve a intentar cada 3 s y, al tercer fallo seguido, pasa al polling. Un "Reintentar" de la pantalla ya no descarta los mensajes pendientes o fallidos.
+- **Hueco en el historial:** si al reconectar la primera página no comparte ningún mensaje con lo que se veía, se reemplaza la lista por esa página (no se muestra un hueco).
+- **Carrera conocida:** un mensaje enviado entre la carga de la primera página y el `chat:join` puede no verse hasta la próxima reconexión o refresco. La recuperación al conectar la achica, pero no la cierra del todo.
+- ✅ **Probada en el simulador de iOS (iPhone 17, Expo Go) contra el back local, el 2026-10-14**, con un agente usando la app y la otra persona simulada por REST/socket: botón y estado vacío, mensajes en tiempo real, envío confirmado una sola vez, botón deshabilitado con el campo vacío, historial hacia atrás sin duplicados, banner de polling y "Reintentar" con Nginx caído (el mensaje se mandó una sola vez), y la baja con el chat abierto. Checklist en [pruebas en local](practicas/pruebas-en-local.md#checklist-manual-del-chat).
+- **Encontrado en esa prueba y corregido:**
+  - Con una sugerencia del autocorrector de iOS pendiente, después de enviar el campo se volvía a llenar con el texto corregido y se podía mandar dos veces. Ahora el campo se recrea después de cada envío (y conserva el foco).
+  - Si la persona se daba de baja con el chat abierto, al enviar veía "No se envió · Reintentar", que no servía. Ahora un `FORBIDDEN`/`NOT_FOUND` al enviar lleva a la pantalla de error del chat.
+- **Sin probar:** el teclado en pantalla (el simulador sin la app Simulator no lo muestra; mirarlo en un teléfono, sobre todo Android edge-to-edge) y una caída de red con "conexión rechazada": durante la prueba un Jenkins local en `127.0.0.1:8080` respondía 404 en lugar de Nginx caído (ver [puerto 8080 ocupado](practicas/pruebas-en-local.md#puerto-8080-ocupado-por-otro-servicio)). Ese camino lo cubren los tests unitarios.
+- **Visto en la prueba, sin cambios:** en el detalle del plan el botón "Chat del plan" queda debajo de la barra de pestañas hasta scrollear (es el comportamiento normal del scroll); mensajes seguidos de la misma persona repiten nombre y avatar; con el aviso de polling visible, el primer mensaje queda en parte debajo del aviso.
+
+
+## Front: decisiones del equipo de agentes (2026-10-17)
+
+Decidido por el líder del equipo de agentes del front (rama `front-agentes`), sin cambios en el back ni en el contrato de la API.
+
+- ✅ **Fotos con `expo-image`.** `Avatar` (el único que dibuja imágenes) pasa a `expo-image` con `cacheKey` = la URL sin firma (`withoutSignature`), `cachePolicy='memory-disk'`, una `transition` corta y `recyclingKey` en las listas (chat). Se borra `useStablePhotoUri`: el caché por clave ya evita la re-descarga y el parpadeo cuando el back re-firma. Si la carga falla se muestra la inicial. Al cerrar sesión se vacían los cachés de memoria y disco (son fotos de otras personas). **Es un módulo nativo: hace falta un development build nuevo** (EAS, perfil `development`); Expo Go ya lo trae.
+  - Por qué: caché en disco por archivo y no por URL (hoy, al reabrir la app, cada foto llega con otra firma y se vuelve a bajar), menos lógica propia y reciclado correcto en listas largas.
+- ✅ **QR: se queda `react-native-qrcode-svg`.** Ya dibuja un solo `Path`, no es nativo y funciona; cambiarla no mejora nada medible y suma riesgo antes de la entrega.
+- ✅ **QR: renovación sin ocultar uno vigente.** Si falla la renovación por red y el QR que se ve todavía no venció, sigue a la vista con un aviso (`Notice` de advertencia: "Sin conexión. Este QR vale hasta las HH:MM; reintentamos solo.") y se reintenta cada 5 s (`QR_MIN_REFRESH_MS`). Recién al vencer pasa a error con "Reintentar". Si la respuesta es de "no disponible" (`CHECKIN_WINDOW_CLOSED`, `PLAN_CLOSED`…) se oculta enseguida. Lo mismo al volver de segundo plano: solo se oculta si ya venció. El cambio de un QR al siguiente es instantáneo (sin animación: un lector podría leer a mitad de un fundido).
+  - Accesibilidad: el QR es una imagen con nombre ("Código QR de asistencia. Se renueva solo."); la renovación no se anuncia (sería ruido cada minuto y medio), el aviso de sin conexión sí (`polite`).
+- ✅ **Chat: mensajes agrupados.** Un grupo son mensajes seguidos de la misma persona, a menos de 5 minutos entre uno y el siguiente y el mismo día. En los ajenos, el nombre va solo en el primero del grupo y el avatar solo en el último (abajo, como en cualquier chat); los demás dejan el lugar del avatar vacío para que las burbujas queden alineadas. Entre mensajes del mismo grupo el espacio es `spacing.xxs`; entre grupos, `spacing.md`. La "cola" de la burbuja (esquina chica) solo en el último del grupo. Los propios se agrupan igual (solo cambia el espaciado y la cola).
+  - Accesibilidad: cada mensaje se anuncia completo aunque no se vea el nombre: "Ana: texto. 14:32" (o "Vos: …" en los propios).
+  - Textos de la pantalla: "No pudimos cargar el chat" (sin punto, como el resto de los títulos de error) y, para un tipo desconocido, "Actualizá la app para ver este mensaje". El resto ya estaba en voseo y no hay ningún "Error:".
+- ✅ **Selector segmentado con texto grande.** Las etiquetas pasan a hasta 2 líneas (nunca "…"). En el inicio, con `fontScale ≥ 1.3` la barra deja de ser una fila: el segmentado ocupa todo el ancho y "Filtros (n)" baja a la línea siguiente, alineado a la derecha. En "Mis planes" los dos segmentados ya van uno abajo del otro: alcanza con las 2 líneas.
+  - Por qué: una regla por `fontScale` es predecible y se puede testear; un `flexWrap` dependía del largo de cada texto.
+
+### Sin probar en un teléfono
+- `expo-image` en un development build nuevo: que la foto no parpadee al re-firmar, que se vea sin red después de reabrir la app y que el caché se vacíe al cerrar sesión.
+- La renovación del QR con el modo avión prendido y apagado a mitad de la vida del QR, y que un lector real lea el QR justo después de cambiar.
+- El agrupado del chat con texto grande, con TalkBack y VoiceOver.
+- El segmentado y la barra del inicio con el texto más grande del sistema en Android e iOS.
+- Sigue abierto de S5: con el aviso de polling visible, el primer mensaje queda en parte debajo del aviso.
+
+### Checklist manual en el teléfono
+Lo que jest no cubre de estos cambios. Marcar cada punto con la fecha, el teléfono y la versión del sistema.
+
+#### Fotos con `expo-image` (development build nuevo)
+
+`expo-image` es un módulo nativo: hace falta un development build nuevo (EAS, perfil `development`) antes de probar. Un build viejo falla al abrir cualquier pantalla con fotos.
+
+- [ ] El build nuevo abre sin errores en Android e iOS.
+- [ ] En el chat y en la lista de participantes, las fotos no parpadean cuando llega una respuesta nueva del back (la URL vuelve con otra firma): dejar el chat abierto con polling y mirar los avatares durante un minuto.
+- [ ] Sin red, al reabrir la app (matarla y volver a abrirla), las fotos que ya se vieron se siguen viendo.
+- [ ] Una foto de perfil nueva (subida desde otro teléfono) sí aparece: no se queda la vieja del caché.
+- [ ] Al cerrar sesión ("Cerrar sesión" y "Cerrar todas las sesiones"), en modo avión y entrando con otra cuenta, las fotos de la sesión anterior ya no aparecen (el caché se vació).
+- [ ] Una foto que no carga (URL vencida o borrada) muestra la inicial, no un círculo vacío.
+
+#### QR de asistencia
+
+- [ ] Con el QR a la vista, prender el modo avión a mitad de su vida (unos 40 s después de que apareció): el QR sigue a la vista y, al tocar la renovación (~15 s antes de vencer), aparece "Sin conexión. Este QR vale hasta las HH:MM; reintentamos solo." con la hora correcta.
+- [ ] Apagar el modo avión antes de que venza: en 5 s o menos el aviso desaparece y el QR cambia por uno nuevo.
+- [ ] Dejar el modo avión hasta que venza: el QR se oculta y aparece "No pudimos mostrar el QR" con "Reintentar"; sin red no se reintenta solo, y "Reintentar" con red vuelve a mostrar uno.
+- [ ] Un lector real (otro teléfono con la app, pantalla de check-in) lee el QR justo después del cambio, en el primer segundo: el cambio es instantáneo, sin fundido.
+- [ ] Mandar la app a segundo plano 1 minuto y volver: si el QR todavía vale, no se oculta; si ya venció (dejarla 2 minutos), se oculta y aparece uno nuevo.
+- [ ] Con el reloj del teléfono en hora automática y, después, adelantado 2 minutos a mano: el QR se muestra igual y vence a su hora: la vida del QR se mide con el header `Date` del servidor y se cuenta desde que llegó la respuesta (BUG-QA-9, corregido). No cubre cambiar el reloj durante los ~90 s del QR.
+- [ ] Con TalkBack y VoiceOver: el QR se anuncia como "Código QR de asistencia. Se renueva solo."; la renovación normal no se anuncia; el aviso de sin conexión sí, sin cortar lo que se estaba leyendo.
+
+#### Chat agrupado
+
+- [ ] Con TalkBack (Android) y VoiceOver (iOS): cada burbuja se lee completa, "Ana: texto. 14:32" (o "Vos: …" en las propias), también las del medio de un grupo que no muestran el nombre; el avatar no se lee aparte.
+- [ ] El foco del lector recorre los mensajes en orden (de arriba hacia abajo) aunque la lista esté invertida.
+- [ ] Con el texto más grande del sistema: el nombre del primero del grupo, las burbujas y el avatar del último quedan alineados; nada se corta ni se superpone; el espacio entre grupos se distingue del espacio dentro de un grupo.
+- [ ] Mensajes alrededor de la medianoche (23:59 y 00:01) quedan en grupos distintos.
+- [ ] Un mensaje de tipo desconocido muestra "Actualizá la app para ver este mensaje".
+
+#### Selector segmentado y barra del inicio con texto grande
+
+- [ ] Android (Ajustes → Pantalla → Tamaño de fuente al máximo) y iOS (Accesibilidad → Pantalla y tamaño del texto → Texto más grande al máximo):
+  - [ ] En el inicio, la barra pasa a columna: el segmentado ("Con cupo / Llenos") ocupa todo el ancho y "Filtros (n)" queda abajo, a la derecha.
+  - [ ] Las etiquetas del segmentado usan hasta 2 líneas, sin "…", y los dos segmentos quedan del mismo alto.
+  - [ ] En "Mis planes", los dos segmentados se leen enteros en 2 líneas.
+- [ ] Cambiar el tamaño de la fuente con la app abierta (volver desde Ajustes): la barra cambia de fila a columna (y al revés) sin reabrir la app.
+- [ ] Con el tamaño de fuente normal, la barra sigue en una fila.
+
+### Corregido después de QA
+- **BUG-QA-8:** un QR que vencía antes de su renovación dejaba la pantalla en "Generando el QR…" para siempre. Ahora se oculta y la renovación sigue en pie (o pasa a error con "Reintentar" si ya había fallado).
+- **BUG-QA-9:** con el reloj del teléfono adelantado, cada QR se daba por vencido al llegar. Ahora la vida se calcula con la hora del servidor (header `Date`) y se ancla al momento en que llegó la respuesta; sin header se usa `expiresAt` tal cual.
+- **Dependencias:** parches de `expo`, `expo-asset`, `expo-constants`, `expo-dev-client` y `jest-expo` alineados con `expo install --fix`; `expo-doctor` 21/21.

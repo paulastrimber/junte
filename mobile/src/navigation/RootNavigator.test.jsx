@@ -1,4 +1,4 @@
-import { NavigationContainer } from '@react-navigation/native'
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native'
 import { act, fireEvent, screen } from '@testing-library/react-native'
 
 import { CATALOG, COMPLETE_USER, USER, createFakeAuthService, renderWithAuth } from '../../tests/helpers/auth.jsx'
@@ -11,6 +11,7 @@ import { TEXTS as LOADING } from '../screens/LoadingScreen.jsx'
 import { TEXTS as LOGIN } from '../screens/LoginScreen.jsx'
 import { TEXTS as ONBOARDING } from '../screens/OnboardingScreen.jsx'
 import { TEXTS as PROFILE } from '../screens/ProfileScreen.jsx'
+import { TEXTS as REGISTER } from '../screens/RegisterScreen.jsx'
 import { TEXTS as RESTORE } from '../screens/RestoreErrorScreen.jsx'
 import { getCatalogs } from '../services/api/catalogs.js'
 import { getPlanFilters, listMyPlans, listPlans } from '../services/api/plans.js'
@@ -71,6 +72,18 @@ describe('RootNavigator (navegación protegida)', () => {
     await fireEvent.press(await screen.findByRole('button', { name: LOGIN.register }))
 
     expect(await screen.findByRole('button', { name: 'Registrarme' })).toBeOnTheScreen()
+  })
+
+  it('Registro → "Ya tengo cuenta" deja un solo Login en el stack', async () => {
+    const navigationRef = createNavigationContainerRef()
+    await renderWithAuth(<NavigationContainer ref={navigationRef}><RootNavigator /></NavigationContainer>, { service: createFakeAuthService({ user: null }) })
+
+    await fireEvent.press(await screen.findByRole('button', { name: LOGIN.register }))
+    await fireEvent.press(await screen.findByRole('button', { name: REGISTER.login }))
+
+    expect(await screen.findByRole('button', { name: LOGIN.submit })).toBeOnTheScreen()
+    const { routes } = navigationRef.getRootState()
+    expect(routes.map((route) => route.name)).toEqual(['Login'])
   })
 
   it('con sesión válida muestra la app (el feed de planes) sin pasar por el login', async () => {

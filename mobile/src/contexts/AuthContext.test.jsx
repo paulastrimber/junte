@@ -1,9 +1,12 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native'
 
 import { deferred } from '../../tests/helpers/deferred.js'
+import { clearPhotoCache } from '../components/Avatar.jsx'
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import { AUTH_STATUS, AuthProvider } from './AuthContext.jsx'
 import { useAuth } from '../hooks/useAuth.js'
+
+jest.mock('../components/Avatar.jsx', () => ({ clearPhotoCache: jest.fn(async () => {}) }))
 
 const USER = { id: '1', name: 'Ana', email: 'ana@um.edu.uy' }
 
@@ -56,7 +59,7 @@ describe('AuthProvider', () => {
 
     const { result } = await setup(service)
     await waitFor(() => expect(result.current.status).toBe(AUTH_STATUS.RESTORE_ERROR))
-    expect(result.current.error).toBe(error)
+    expect(result.current.error).toEqual({ code: CLIENT_ERROR_CODES.NETWORK_ERROR, message: 'No pudimos conectarnos con el servidor. Revisá tu conexión.', requestId: null })
 
     await act(async () => { await result.current.retryRestore() })
 
@@ -100,6 +103,8 @@ describe('AuthProvider', () => {
     expect(service.logout).toHaveBeenCalledTimes(1)
     expect(result.current.status).toBe(AUTH_STATUS.SIGNED_OUT)
     expect(result.current.user).toBeNull()
+    // Las fotos de otras personas no quedan en el caché para la próxima sesión.
+    expect(clearPhotoCache).toHaveBeenCalledTimes(1)
   })
 
   it('signOutAll cierra todas; si el servidor falla sigue signedIn y propaga el error', async () => {
@@ -112,9 +117,11 @@ describe('AuthProvider', () => {
 
     await act(async () => { await expect(result.current.signOutAll()).rejects.toMatchObject({ code: CLIENT_ERROR_CODES.NETWORK_ERROR }) })
     expect(result.current.status).toBe(AUTH_STATUS.SIGNED_IN)
+    expect(clearPhotoCache).not.toHaveBeenCalled()
 
     await act(async () => { await result.current.signOutAll() })
     expect(result.current.status).toBe(AUTH_STATUS.SIGNED_OUT)
+    expect(clearPhotoCache).toHaveBeenCalledTimes(1)
   })
 
   it('cuando el cliente HTTP avisa que la sesión terminó vuelve a signedOut y guarda el motivo', async () => {
@@ -128,6 +135,7 @@ describe('AuthProvider', () => {
     expect(result.current.status).toBe(AUTH_STATUS.SIGNED_OUT)
     expect(result.current.user).toBeNull()
     expect(result.current.sessionEndedBy).toBe(reason)
+    expect(clearPhotoCache).toHaveBeenCalledTimes(1)
   })
 
   it('iniciar sesión de nuevo limpia el motivo anterior', async () => {

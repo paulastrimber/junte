@@ -5,6 +5,7 @@ import { deferred } from '../../tests/helpers/deferred.js'
 import { resetCatalogsCache } from '../hooks/useCatalogs.js'
 import { getCatalogs } from '../services/api/catalogs.js'
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
+import { listParticipants } from '../services/api/participations.js'
 import { getPlan } from '../services/api/plans.js'
 import PlanScreen, { TEXTS } from './PlanScreen.jsx'
 
@@ -127,6 +128,34 @@ describe('PlanScreen (detalle)', () => {
 
     expect(screen.getByText(`Ana (${TEXTS.you})`)).toBeOnTheScreen()
     expect(navigation.navigate).toHaveBeenCalledWith('EditPlan', { plan: own })
+  })
+
+  it('quien no participa ni creó el plan no ve el chat', async () => {
+    getPlan.mockResolvedValue(PLAN)
+
+    await renderPlan()
+    await screen.findByText('Lucía Pérez')
+
+    expect(screen.queryByRole('button', { name: TEXTS.chat })).not.toBeOnTheScreen()
+  })
+
+  it('quien está anotado abre el chat con el id y el título del plan', async () => {
+    getPlan.mockResolvedValue({ ...PLAN, myParticipation: { status: 'active', joinedAt: new Date().toISOString() } })
+    listParticipants.mockResolvedValue({ items: [], nextCursor: null })
+
+    await renderPlan()
+    await fireEvent.press(await screen.findByRole('button', { name: TEXTS.chat }))
+
+    expect(navigation.navigate).toHaveBeenCalledWith('Chat', { planId: 'p1', title: 'Fútbol 5 en Parque Rodó' })
+  })
+
+  it('el creador también ve el chat', async () => {
+    getPlan.mockResolvedValue({ ...PLAN, isCreator: true, creator: { id: '1', name: 'Ana', photoUrl: null } })
+    listParticipants.mockResolvedValue({ items: [], nextCursor: null })
+
+    await renderPlan()
+
+    expect(await screen.findByRole('button', { name: TEXTS.chat })).toBeOnTheScreen()
   })
 
   it('404: explica que no está disponible y permite volver', async () => {

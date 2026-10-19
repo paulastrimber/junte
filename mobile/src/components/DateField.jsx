@@ -1,8 +1,9 @@
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker'
 import { useState } from 'react'
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Platform } from 'react-native'
 
 import { MAX_AGE, formatForDisplay, toCalendarDate, toLocalDate } from '../utils/dates.js'
+import { FieldButton } from './FieldButton.jsx'
 
 // Fecha que muestra el selector cuando todavía no hay ninguna elegida: unos 25 años atrás.
 const DEFAULT_YEARS_AGO = 25
@@ -39,17 +40,15 @@ export function DateField ({ label, value, onChange, error }) {
   }
 
   return (
-    <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
-      <Pressable
-        accessibilityRole='button'
-        accessibilityLabel={label}
-        accessibilityHint='Abre el selector de fecha'
-        onPress={open}
-        style={[styles.input, error && styles.inputError]}
-      >
-        <Text style={value ? styles.value : styles.placeholder}>{value ? formatForDisplay(value) : 'Elegir fecha'}</Text>
-      </Pressable>
+    <FieldButton
+      label={label}
+      value={value ? formatForDisplay(value) : ''}
+      placeholder='Elegir fecha'
+      icon='calendar-outline'
+      accessibilityHint='Abre el selector de fecha'
+      onPress={open}
+      error={error}
+    >
       {isOpen && Platform.OS !== 'android'
         ? (
           <DateTimePicker
@@ -63,17 +62,6 @@ export function DateField ({ label, value, onChange, error }) {
           />
           )
         : null}
-      {error ? <Text style={styles.error} accessibilityRole='alert'>{error}</Text> : null}
-    </View>
+    </FieldButton>
   )
 }
-
-const styles = StyleSheet.create({
-  field: { gap: 4 },
-  label: { fontSize: 14, fontWeight: '600', color: '#222' },
-  input: { borderWidth: 1, borderColor: '#bbb', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 12, backgroundColor: '#fff' },
-  inputError: { borderColor: '#b42318' },
-  value: { fontSize: 16, color: '#222' },
-  placeholder: { fontSize: 16, color: '#888' },
-  error: { color: '#b42318', fontSize: 13 }
-})

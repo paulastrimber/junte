@@ -1,7 +1,7 @@
 import { DarkTheme, DefaultTheme } from '@react-navigation/native'
 
 import { palettes } from './colors.js'
-import { fonts } from './typography.js'
+import { fonts, typography } from './typography.js'
 
 const navigationFonts = Object.freeze({
   regular: { fontFamily: fonts.regular, fontWeight: 'normal' },
@@ -47,7 +47,7 @@ export function tabScreenOptions (colors) {
     headerShown: false,
     tabBarActiveTintColor: colors.primary,
     tabBarInactiveTintColor: colors.textMuted,
-    tabBarLabelStyle: { fontFamily: fonts.semibold, fontSize: 11 },
+    tabBarLabelStyle: { fontFamily: typography.micro.fontFamily, fontSize: typography.micro.fontSize },
     tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border }
   }
 }

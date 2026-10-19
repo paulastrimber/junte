@@ -19,7 +19,7 @@ export default [
     }
   },
   {
-    files: ['app.config.js'],
+    files: ['app.config.js', 'metro.config.js'],
     languageOptions: {
       globals: globals.node
     }

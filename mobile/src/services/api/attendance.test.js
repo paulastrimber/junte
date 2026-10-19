@@ -55,9 +55,16 @@ describe('api/checkins', () => {
   it('createPlanQr: POST /plans/:id/qr', async () => {
     const { client, mock } = setup()
     const qr = { qrToken: `${PLAN_ID}.abc`, expiresAt: '2026-10-25T21:01:30.000Z' }
-    mock.onPost(`/plans/${PLAN_ID}/qr`).reply(201, qr)
+    mock.onPost(`/plans/${PLAN_ID}/qr`).reply(201, qr, { date: 'Sun, 25 Oct 2026 21:00:00 GMT' })
 
-    expect(await checkinsApi.createPlanQr(PLAN_ID, { client })).toEqual(qr)
+    expect(await checkinsApi.createPlanQr(PLAN_ID, { client })).toEqual({ ...qr, serverDate: 'Sun, 25 Oct 2026 21:00:00 GMT' })
+  })
+
+  it('createPlanQr: sin header Date, serverDate es null', async () => {
+    const { client, mock } = setup()
+    mock.onPost(`/plans/${PLAN_ID}/qr`).reply(201, { qrToken: `${PLAN_ID}.abc`, expiresAt: '2026-10-25T21:01:30.000Z' })
+
+    expect(await checkinsApi.createPlanQr(PLAN_ID, { client })).toMatchObject({ serverDate: null })
   })
 
   it('checkIn: POST /plans/:id/check-in con el QR, la ubicación y su precisión', async () => {

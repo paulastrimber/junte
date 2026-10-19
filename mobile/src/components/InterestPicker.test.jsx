@@ -3,6 +3,14 @@ import { fireEvent, render, screen } from '@testing-library/react-native'
 import { MAX_INTERESTS } from '../utils/catalog.js'
 import { InterestPicker } from './InterestPicker.jsx'
 
+// Cuenta qué chips se pintan, sin cambiar lo que hacen (la función de adentro del `memo` real).
+const mockChipRenders = []
+jest.mock('./Chip.jsx', () => {
+  const { memo } = require('react')
+  const actual = jest.requireActual('./Chip.jsx')
+  return { Chip: memo((props) => { mockChipRenders.push(props.label); return actual.Chip.type(props) }) }
+})
+
 const CATEGORIES = [
   { key: 'deportes', name: 'Deportes', interests: [{ key: 'futbol', name: 'Fútbol' }, { key: 'padel', name: 'Pádel' }] },
   { key: 'arte', name: 'Arte y cultura', interests: [{ key: 'teatro', name: 'Teatro' }] }
@@ -34,5 +42,15 @@ describe('InterestPicker', () => {
 
     expect(screen.getByRole('checkbox', { name: `Interés ${MAX_INTERESTS}` })).toBeDisabled()
     expect(screen.getByRole('checkbox', { name: 'Interés 0' })).toBeEnabled()
+  })
+
+  it('al marcar un interés solo se vuelve a pintar ese chip', async () => {
+    const onToggle = jest.fn()
+    const { rerender } = await render(<InterestPicker categories={CATEGORIES} selected={[]} onToggle={onToggle} />)
+    mockChipRenders.length = 0
+
+    await rerender(<InterestPicker categories={CATEGORIES} selected={['teatro']} onToggle={onToggle} />)
+
+    expect(mockChipRenders).toEqual(['Teatro'])
   })
 })

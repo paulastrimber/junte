@@ -1,27 +1,34 @@
-import { StyleSheet, Switch, Text, View } from 'react-native'
+import { StyleSheet, Switch, View } from 'react-native'
 
 import { Button } from '../components/Button.jsx'
+import { Card } from '../components/Card.jsx'
 import { CatalogGate } from '../components/CatalogGate.jsx'
 import { DateTimeField } from '../components/DateTimeField.jsx'
 import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorBanner } from '../components/ErrorBanner.jsx'
 import { FormField } from '../components/FormField.jsx'
+import { FieldError } from '../components/FieldError.jsx'
 import { InterestPicker } from '../components/InterestPicker.jsx'
 import { LocationPicker } from '../components/LocationPicker.jsx'
 import { Screen } from '../components/Screen.jsx'
+import { SectionHeader } from '../components/SectionHeader.jsx'
+import { Text } from '../components/Text.jsx'
 import { usePlacePicker } from '../hooks/usePlacePicker.js'
 import { usePlanForm } from '../hooks/usePlanForm.js'
 import { ROUTES } from '../navigation/routes.js'
-import { PLAN_LIMITS } from '../utils/plans.js'
+import { SCREEN_TITLES } from '../navigation/titles.js'
+import { spacing, useTheme } from '../theme/index.js'
+import { PLAN_LIMITS, defaultEndsAt } from '../utils/plans.js'
 
 export const TEXTS = Object.freeze({
-  createTitle: 'Crear plan',
-  editTitle: 'Editar plan',
+  createTitle: SCREEN_TITLES.createPlan,
+  editTitle: SCREEN_TITLES.editPlan,
   incompleteTitle: 'Completá tu perfil para crear planes',
   incompleteMessage: 'Necesitás tu nombre, tu fecha de nacimiento y al menos un interés.',
   goToProfile: 'Ir a mi perfil',
   title: 'Título',
   description: 'Descripción (opcional)',
+  descriptionHint: 'Lo ven quienes miran el plan.',
   startsAt: 'Empieza',
   endsAt: 'Termina',
   place: 'Lugar',
@@ -36,9 +43,8 @@ export const TEXTS = Object.freeze({
   save: 'Guardar cambios'
 })
 
-const TWO_HOURS_MS = 2 * 60 * 60 * 1000
-
 export default function CreatePlanScreen ({ navigation, route }) {
+  const { colors } = useTheme()
   const plan = route.params?.plan ?? null
 
   // El plan solo se da por guardado cuando el servidor responde: recién ahí se navega al detalle.
@@ -57,16 +63,22 @@ export default function CreatePlanScreen ({ navigation, route }) {
   if (!form.isEditing && !form.canCreate) {
     return (
       <EmptyState
+        icon='person-circle-outline'
         title={TEXTS.incompleteTitle}
         message={TEXTS.incompleteMessage}
         actionTitle={TEXTS.goToProfile}
+        actionVariant='primary'
         onAction={() => navigation.navigate(ROUTES.PROFILE_TAB)}
+        fill
       />
     )
   }
 
+  // El botón queda fijo abajo: el formulario es largo y guardar tiene que estar siempre a mano.
+  const footer = <Button title={form.isEditing ? TEXTS.save : TEXTS.create} onPress={submit} loading={form.isSaving} haptic />
+
   return (
-    <Screen>
+    <Screen footer={footer}>
       <FormField
         label={TEXTS.title}
         value={values.title}
@@ -80,6 +92,7 @@ export default function CreatePlanScreen ({ navigation, route }) {
         value={values.description}
         onChangeText={(text) => form.setValue('description', text)}
         error={errors.description}
+        hint={TEXTS.descriptionHint}
         maxLength={PLAN_LIMITS.DESCRIPTION_MAX}
         multiline
         editable={!form.isSaving}
@@ -97,11 +110,11 @@ export default function CreatePlanScreen ({ navigation, route }) {
         value={values.endsAt}
         onChange={(date) => form.setValue('endsAt', date)}
         minimumDate={values.startsAt ?? new Date()}
-        defaultDate={values.startsAt ? new Date(values.startsAt.getTime() + TWO_HOURS_MS) : undefined}
+        defaultDate={defaultEndsAt(values.startsAt)}
         error={errors.endsAt}
       />
 
-      <Text style={styles.sectionLabel} accessibilityRole='header'>{TEXTS.place}</Text>
+      <SectionHeader title={TEXTS.place} style={styles.section} />
       <LocationPicker
         coordinates={values.coordinates}
         onChange={(coordinates) => form.setValue('coordinates', coordinates)}
@@ -123,59 +136,61 @@ export default function CreatePlanScreen ({ navigation, route }) {
         editable={!form.isSaving}
       />
 
-      <View style={styles.switchRow}>
-        <View style={styles.switchText}>
-          <Text style={styles.sectionLabel}>{TEXTS.unlimited}</Text>
-          <Text style={styles.hint}>{TEXTS.unlimitedHint}</Text>
-        </View>
-        <Switch
-          accessibilityLabel={TEXTS.unlimited}
-          value={values.isUnlimited}
-          onValueChange={(isOn) => form.setValue('isUnlimited', isOn)}
-          disabled={form.isSaving}
-        />
-      </View>
-      {!values.isUnlimited
-        ? (
-          <FormField
-            label={TEXTS.capacity}
-            value={values.capacity}
-            onChangeText={(text) => form.setValue('capacity', text)}
-            error={errors.capacity}
-            keyboardType='number-pad'
-            maxLength={3}
-            editable={!form.isSaving}
+      <Card variant='outlined' style={styles.group}>
+        <View style={styles.switchRow}>
+          <View style={styles.switchText}>
+            <Text variant='label'>{TEXTS.unlimited}</Text>
+            <Text variant='caption' color='textMuted'>{TEXTS.unlimitedHint}</Text>
+          </View>
+          <Switch
+            accessibilityLabel={TEXTS.unlimited}
+            value={values.isUnlimited}
+            onValueChange={(isOn) => form.setValue('isUnlimited', isOn)}
+            disabled={form.isSaving}
+            trackColor={{ true: colors.primary }}
           />
-          )
-        : null}
-      {values.isUnlimited && errors.capacity ? <Text style={styles.error} accessibilityRole='alert'>{errors.capacity}</Text> : null}
+        </View>
+        {!values.isUnlimited
+          ? (
+            <FormField
+              label={TEXTS.capacity}
+              value={values.capacity}
+              onChangeText={(text) => form.setValue('capacity', text)}
+              error={errors.capacity}
+              keyboardType='number-pad'
+              maxLength={3}
+              editable={!form.isSaving}
+            />
+            )
+          : null}
+        {/* Con cupo ilimitado el campo no está: el error del servidor (p. ej. menos lugares que inscriptos) va suelto. */}
+        {values.isUnlimited ? <FieldError message={errors.capacity} /> : null}
 
-      <FormField
-        label={TEXTS.price}
-        value={values.price}
-        onChangeText={(text) => form.setValue('price', text)}
-        error={errors.price}
-        keyboardType='number-pad'
-        maxLength={6}
-        editable={!form.isSaving}
-      />
+        <FormField
+          label={TEXTS.price}
+          value={values.price}
+          onChangeText={(text) => form.setValue('price', text)}
+          error={errors.price}
+          keyboardType='number-pad'
+          maxLength={6}
+          editable={!form.isSaving}
+        />
+      </Card>
 
-      <Text style={styles.sectionLabel} accessibilityRole='header'>{TEXTS.interests}</Text>
+      <SectionHeader title={TEXTS.interests} style={styles.section} />
       <CatalogGate status={form.catalogStatus} onRetry={retryCatalogs}>
         <InterestPicker categories={form.interestCategories} selected={values.interests} onToggle={toggleInterest} />
       </CatalogGate>
-      {errors.interests ? <Text style={styles.error} accessibilityRole='alert'>{errors.interests}</Text> : null}
+      <FieldError message={errors.interests} />
 
-      <ErrorBanner message={form.formError?.message} requestId={form.formError?.requestId} />
-      <Button title={form.isEditing ? TEXTS.save : TEXTS.create} onPress={submit} loading={form.isSaving} />
+      <ErrorBanner error={form.formError} />
     </Screen>
   )
 }
 
 const styles = StyleSheet.create({
-  sectionLabel: { fontSize: 14, fontWeight: '600', color: '#222' },
-  switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  switchText: { flex: 1, gap: 2 },
-  hint: { fontSize: 12, color: '#666' },
-  error: { color: '#b42318', fontSize: 13 }
+  section: { marginTop: spacing.sm },
+  group: { gap: spacing.lg },
+  switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
+  switchText: { flex: 1, gap: spacing.xxs }
 })

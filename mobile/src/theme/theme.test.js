@@ -1,7 +1,7 @@
 import { renderHook } from '@testing-library/react-native'
 import { useColorScheme } from 'react-native'
 
-import { createThemedStyles, navigationTheme, palettes, typography, useTheme } from './index.js'
+import { createThemedStyles, fontScaleLimits, navigationTheme, palettes, sizes, spacing, typography, useTheme } from './index.js'
 
 jest.mock('react-native/Libraries/Utilities/useColorScheme', () => ({ __esModule: true, default: jest.fn() }))
 
@@ -36,7 +36,19 @@ const TEXT_PAIRS = [
   ['warning', 'warningSoft'],
   ['danger', 'dangerSoft'],
   ['danger', 'surface'],
-  ['danger', 'background']
+  ['danger', 'background'],
+  ['onPrimarySoft', 'primarySoft'],
+  ['textMuted', 'primarySoft']
+]
+
+// Pares [borde o gráfico, fondo] de componentes de interfaz: WCAG pide 3:1 (no es texto).
+const UI_PAIRS = [
+  ['borderStrong', 'background'],
+  ['borderStrong', 'surface'],
+  ['borderStrong', 'surfaceAlt'],
+  ['accentEdge', 'background'],
+  ['accentEdge', 'surface'],
+  ['primary', 'surfaceAlt']
 ]
 
 describe('tema', () => {
@@ -47,6 +59,10 @@ describe('tema', () => {
   describe.each(['light', 'dark'])('modo %s', (scheme) => {
     it.each(TEXT_PAIRS)('%s sobre %s cumple contraste AA (4.5:1)', (foreground, background) => {
       expect(contrast(palettes[scheme][foreground], palettes[scheme][background])).toBeGreaterThanOrEqual(4.5)
+    })
+
+    it.each(UI_PAIRS)('%s sobre %s cumple contraste de componente (3:1)', (foreground, background) => {
+      expect(contrast(palettes[scheme][foreground], palettes[scheme][background])).toBeGreaterThanOrEqual(3)
     })
 
     it('el tema de navegación usa la paleta de ese modo', () => {
@@ -62,6 +78,16 @@ describe('tema', () => {
       expect(style.fontFamily).toMatch(/^PlusJakartaSans_/)
       expect(style).not.toHaveProperty('fontWeight')
     }
+  })
+
+  it('cada variante tiene un tope de escala de texto razonable (nunca apaga Dynamic Type)', () => {
+    for (const limit of Object.values(fontScaleLimits)) expect(limit).toBeGreaterThan(1)
+  })
+
+  it('las medidas táctiles cumplen el mínimo: 48 o 40 + hitSlop', () => {
+    expect(sizes.touch).toBeGreaterThanOrEqual(48)
+    expect(sizes.input).toBeGreaterThanOrEqual(sizes.touch)
+    expect(sizes.touch - sizes.touchSmall).toBeLessThanOrEqual(spacing.sm)
   })
 
   it('useTheme sigue el modo del sistema y cae a claro si no se conoce', async () => {

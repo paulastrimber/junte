@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { toApiError } from '../services/api/client.js'
 import { getHealth } from '../services/api/health.js'
+import { toViewError } from '../utils/errorMessages.js'
 
 /** Estados que pinta la pantalla: cargando, ok, degradado (503) o error. */
 export const HEALTH_VIEW_STATUS = Object.freeze({
@@ -15,7 +15,7 @@ const LOADING_STATE = Object.freeze({ status: HEALTH_VIEW_STATUS.LOADING, reques
 
 /**
  * Consulta el health de la API al montar y cada vez que se llama a `retry`.
- * @returns {{ status: string, requestId: string | null, error: import('../services/api/errors.js').ApiError | null, retry: () => void }}
+ * @returns {{ status: string, requestId: string | null, error: import('../utils/errorMessages.js').ViewError | null, retry: () => void }}
  */
 export function useHealth () {
   const [state, setState] = useState(LOADING_STATE)
@@ -29,12 +29,12 @@ export function useHealth () {
       try {
         const result = await getHealth({ signal: controller.signal })
         if (controller.signal.aborted) return
-        setState({ status: result.status, requestId: result.requestId, error: result.error ?? null })
+        setState({ status: result.status, requestId: result.requestId, error: result.error ? toViewError(result.error) : null })
       } catch (error) {
         // Si se abortó (desmontaje o reintento), el resultado ya no le importa a nadie.
         if (controller.signal.aborted) return
-        const apiError = toApiError(error)
-        setState({ status: HEALTH_VIEW_STATUS.ERROR, requestId: apiError.requestId, error: apiError })
+        const viewError = toViewError(error)
+        setState({ status: HEALTH_VIEW_STATUS.ERROR, requestId: viewError.requestId, error: viewError })
       }
     }
 

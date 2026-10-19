@@ -1,5 +1,5 @@
 import {
-  dateRangeFor, formValuesFrom, formatDistance, formatPrice, formatSchedule, formatSpots, planChanges, priceRangeLabel, radiusLabel,
+  dateRangeFor, defaultEndsAt, formValuesFrom, formatJoined, formatDistance, formatPrice, formatSchedule, formatSpots, planChanges, priceRangeLabel, radiusLabel,
   toPlanPayload, validatePlanForm
 } from './plans.js'
 
@@ -183,5 +183,23 @@ describe('planChanges (PATCH parcial)', () => {
     const changes = planChanges(PLAN, validValues({ endsAt: local(25, 21), interests: ['futbol', 'cine'], description: '' }))
 
     expect(changes).toEqual({ endsAt: local(25, 21).toISOString(), interests: ['futbol', 'cine'], description: '' })
+  })
+})
+
+describe('formatJoined', () => {
+  it('"N de M" con cupo; solo la cantidad si el cupo es ilimitado', () => {
+    expect(formatJoined({ participantCount: 3, capacity: 10 })).toBe('3 de 10')
+    expect(formatJoined({ participantCount: 0, capacity: 4 })).toBe('0 de 4')
+    expect(formatJoined({ participantCount: 7, capacity: null })).toBe('7')
+  })
+})
+
+describe('defaultEndsAt', () => {
+  it('propone terminar dos horas después del inicio', () => {
+    expect(defaultEndsAt(local(25, 18))).toEqual(local(25, 20))
+  })
+
+  it('sin inicio no propone nada', () => {
+    expect(defaultEndsAt(null)).toBeUndefined()
   })
 })

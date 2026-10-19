@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native'
+import { AppState } from 'react-native'
 
 import { deferred } from '../../tests/helpers/deferred.js'
 import { checkIn, createPlanQr } from '../services/api/checkins.js'
@@ -27,7 +28,11 @@ jest.mock('../services/location.js', () => ({
 const HERE = { status: LOCATION_STATUS.GRANTED, latitude: -34.9, longitude: -56.16, accuracyMeters: 12 }
 const apiError = (status, code, message) => new ApiError({ status, code, message, requestId: 'r1' })
 
-beforeEach(() => jest.resetAllMocks())
+beforeEach(() => {
+  jest.resetAllMocks()
+  // `resetAllMocks` también le borra la implementación al mock de AppState de React Native.
+  AppState.addEventListener.mockImplementation(() => ({ remove: jest.fn() }))
+})
 
 describe('usePlanActions', () => {
   it('inscribirse: mientras espera queda pendiente; al confirmar el servidor avisa con onChanged', async () => {
@@ -141,6 +146,44 @@ describe('usePlanQr', () => {
     expect(createPlanQr).toHaveBeenCalledTimes(2)
   })
 
+  it('al volver de segundo plano con el QR ya vencido, lo oculta y pide otro sin esperar al timer', async () => {
+    let onAppState
+    AppState.addEventListener.mockImplementation((_event, listener) => {
+      onAppState = listener
+      return { remove: jest.fn() }
+    })
+    const next = deferred()
+    createPlanQr.mockResolvedValueOnce(qr(1)).mockReturnValueOnce(next.promise)
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+
+    // En segundo plano los timers no corrieron, pero el reloj sí: el QR ya venció.
+    jest.setSystemTime(new Date(NOW.getTime() + 120_000))
+    await act(async () => onAppState('active'))
+
+    expect(createPlanQr).toHaveBeenCalledTimes(2)
+    expect(result.current).toMatchObject({ status: QR_STATUS.LOADING, qrToken: null })
+    await act(async () => next.resolve(qr(2, 210)))
+    expect(result.current.qrToken).toBe('p1.token-2')
+  })
+
+  it('al volver a primer plano con el QR vigente no pide otro', async () => {
+    let onAppState
+    AppState.addEventListener.mockImplementation((_event, listener) => {
+      onAppState = listener
+      return { remove: jest.fn() }
+    })
+
+    createPlanQr.mockResolvedValue(qr(1))
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+
+    await act(async () => onAppState('active'))
+
+    expect(createPlanQr).toHaveBeenCalledTimes(1)
+    expect(result.current.qrToken).toBe('p1.token-1')
+  })
+
   it('al salir de la pantalla deja de pedir', async () => {
     createPlanQr.mockResolvedValue(qr(1))
     const { result, unmount } = await renderHook(() => usePlanQr('p1'))
@@ -161,6 +204,178 @@ describe('usePlanQr', () => {
 
     expect(result.current.error).toMatchObject({ code, message: expect.any(String) })
     expect(createPlanQr).toHaveBeenCalledTimes(1)
+  })
+
+  it('si falla la renovación, sigue mostrando el QR vigente y reintenta cada 5 s; al vencer pasa a error', async () => {
+    createPlanQr.mockResolvedValueOnce(qr(1)).mockRejectedValue(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+
+    // Falla la renovación de los 75 s: el QR (que vale hasta los 90 s) sigue a la vista con el aviso.
+    await act(async () => jest.advanceTimersByTime(75_000))
+    expect(result.current).toMatchObject({ status: QR_STATUS.READY, qrToken: 'p1.token-1', refreshError: { code: CLIENT_ERROR_CODES.NETWORK_ERROR } })
+
+    await act(async () => jest.advanceTimersByTime(5_000))
+    expect(createPlanQr).toHaveBeenCalledTimes(3)
+    expect(result.current.qrToken).toBe('p1.token-1')
+
+    await act(async () => jest.advanceTimersByTime(10_000))
+    expect(result.current).toMatchObject({ status: QR_STATUS.ERROR, qrToken: null, error: { code: CLIENT_ERROR_CODES.NETWORK_ERROR } })
+  })
+
+  it('si un reintento funciona, muestra el QR nuevo y saca el aviso', async () => {
+    createPlanQr
+      .mockResolvedValueOnce(qr(1))
+      .mockRejectedValueOnce(apiError(503, 'SERVICE_UNAVAILABLE'))
+      .mockResolvedValueOnce(qr(2, 170))
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+
+    await act(async () => jest.advanceTimersByTime(75_000))
+    expect(result.current.refreshError).not.toBeNull()
+    await act(async () => jest.advanceTimersByTime(5_000))
+
+    expect(result.current).toMatchObject({ status: QR_STATUS.READY, qrToken: 'p1.token-2', refreshError: null })
+  })
+
+  it.each(['CHECKIN_WINDOW_CLOSED', 'PLAN_CLOSED'])('si al renovar responde %s, lo oculta enseguida aunque el actual siga valiendo y no reintenta', async (code) => {
+    createPlanQr.mockResolvedValueOnce(qr(1)).mockRejectedValueOnce(apiError(409, code))
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+
+    await act(async () => jest.advanceTimersByTime(75_000))
+
+    expect(result.current).toMatchObject({ status: QR_STATUS.UNAVAILABLE, qrToken: null, error: { code } })
+    await act(async () => jest.advanceTimersByTime(10 * 60_000))
+    expect(createPlanQr).toHaveBeenCalledTimes(2)
+    expect(result.current.status).toBe(QR_STATUS.UNAVAILABLE)
+  })
+
+  it('una falla de red en un reintento, con el QR vigente, no lo oculta: el aviso sigue y vuelve a probar a los 5 s', async () => {
+    createPlanQr
+      .mockResolvedValueOnce(qr(1))
+      .mockRejectedValueOnce(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
+      .mockRejectedValueOnce(apiError(0, CLIENT_ERROR_CODES.TIMEOUT))
+      .mockResolvedValueOnce(qr(2, 175))
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+
+    await act(async () => jest.advanceTimersByTime(75_000))
+    await act(async () => jest.advanceTimersByTime(4_900))
+    expect(createPlanQr).toHaveBeenCalledTimes(2)
+    await act(async () => jest.advanceTimersByTime(100))
+    expect(createPlanQr).toHaveBeenCalledTimes(3)
+    expect(result.current).toMatchObject({ status: QR_STATUS.READY, qrToken: 'p1.token-1', refreshError: { code: CLIENT_ERROR_CODES.TIMEOUT } })
+
+    await act(async () => jest.advanceTimersByTime(5_000))
+    expect(result.current).toMatchObject({ status: QR_STATUS.READY, qrToken: 'p1.token-2', refreshError: null, expiresAt: qr(2, 175).expiresAt })
+  })
+
+  it('después de vencer sin red, "Reintentar" pide uno nuevo', async () => {
+    createPlanQr.mockResolvedValueOnce(qr(1)).mockRejectedValue(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+
+    await act(async () => jest.advanceTimersByTime(90_000))
+    expect(result.current).toMatchObject({ status: QR_STATUS.ERROR, qrToken: null, refreshError: null })
+    // En error no se reintenta solo.
+    const calls = createPlanQr.mock.calls.length
+    await act(async () => jest.advanceTimersByTime(60_000))
+    expect(createPlanQr).toHaveBeenCalledTimes(calls)
+
+    createPlanQr.mockResolvedValueOnce(qr(2, 200))
+    await act(async () => result.current.retry())
+    await waitFor(() => expect(result.current).toMatchObject({ status: QR_STATUS.READY, qrToken: 'p1.token-2' }))
+  })
+
+  it('al volver de segundo plano con la renovación fallando y el QR todavía vigente, no lo oculta', async () => {
+    let onAppState
+    AppState.addEventListener.mockImplementation((_event, listener) => {
+      onAppState = listener
+      return { remove: jest.fn() }
+    })
+    const next = deferred()
+    createPlanQr.mockResolvedValueOnce(qr(1)).mockRejectedValueOnce(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR)).mockReturnValueOnce(next.promise)
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+    await act(async () => jest.advanceTimersByTime(75_000))
+
+    // El reintento de los 80 s no corrió (segundo plano); a los 81 ya pasó el mínimo desde el último pedido.
+    jest.setSystemTime(new Date(NOW.getTime() + 81_000))
+    await act(async () => onAppState('active'))
+
+    expect(createPlanQr).toHaveBeenCalledTimes(3)
+    expect(result.current).toMatchObject({ status: QR_STATUS.READY, qrToken: 'p1.token-1' })
+    await act(async () => next.resolve(qr(2, 170)))
+    expect(result.current).toMatchObject({ qrToken: 'p1.token-2', refreshError: null })
+  })
+
+  it('al volver de segundo plano justo después de un pedido fallido, espera lo que falta del mínimo de 5 s sin ocultar el QR', async () => {
+    let onAppState
+    AppState.addEventListener.mockImplementation((_event, listener) => {
+      onAppState = listener
+      return { remove: jest.fn() }
+    })
+    createPlanQr.mockResolvedValueOnce(qr(1)).mockRejectedValueOnce(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR)).mockResolvedValueOnce(qr(2, 170))
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+    await act(async () => jest.advanceTimersByTime(75_000))
+
+    await act(async () => jest.advanceTimersByTime(2_000))
+    await act(async () => onAppState('active'))
+    expect(createPlanQr).toHaveBeenCalledTimes(2)
+    expect(result.current).toMatchObject({ status: QR_STATUS.READY, qrToken: 'p1.token-1' })
+
+    await act(async () => jest.advanceTimersByTime(3_000))
+    expect(createPlanQr).toHaveBeenCalledTimes(3)
+    expect(result.current).toMatchObject({ qrToken: 'p1.token-2', refreshError: null })
+  })
+
+  // BUG-QA-8: un QR con menos vida que la renovación mínima (5 s) vencía antes de renovarse y el vencimiento
+  // cancelaba la renovación: quedaba "Generando el QR…" para siempre.
+  it('un QR que llega con menos de 5 s de vida no deja la pantalla cargando para siempre', async () => {
+    createPlanQr.mockResolvedValueOnce(qr(1, 3)).mockResolvedValue(qr(2, 90))
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+
+    await act(async () => jest.advanceTimersByTime(30_000))
+
+    expect(createPlanQr.mock.calls.length).toBeGreaterThan(1)
+    expect(result.current.status).not.toBe(QR_STATUS.LOADING)
+  })
+
+  // BUG-QA-9: con el reloj del teléfono corrido más que la vida del QR, cada QR se daba por vencido al llegar. La
+  // vida se mide con la hora del servidor (header `Date`).
+  it('con el reloj del teléfono 2 minutos adelantado, el QR recién llegado se sigue viendo', async () => {
+    jest.setSystemTime(new Date(NOW.getTime() + 120_000))
+    // El header `Date` de la respuesta trae la hora del servidor.
+    createPlanQr.mockResolvedValue({ ...qr(1), serverDate: NOW.toUTCString() })
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+
+    await act(async () => jest.advanceTimersByTime(1_000))
+
+    expect(result.current).toMatchObject({ status: QR_STATUS.READY, qrToken: 'p1.token-1' })
+  })
+
+  it('al volver de segundo plano con el QR vigente pero por vencer, lo renueva sin ocultarlo', async () => {
+    let onAppState
+    AppState.addEventListener.mockImplementation((_event, listener) => {
+      onAppState = listener
+      return { remove: jest.fn() }
+    })
+    const next = deferred()
+    createPlanQr.mockResolvedValueOnce(qr(1)).mockReturnValueOnce(next.promise)
+    const { result } = await renderHook(() => usePlanQr('p1'))
+    await waitFor(() => expect(result.current.status).toBe(QR_STATUS.READY))
+
+    jest.setSystemTime(new Date(NOW.getTime() + 80_000))
+    await act(async () => onAppState('active'))
+
+    expect(createPlanQr).toHaveBeenCalledTimes(2)
+    expect(result.current).toMatchObject({ status: QR_STATUS.READY, qrToken: 'p1.token-1' })
+    await act(async () => next.resolve(qr(2, 170)))
+    expect(result.current.qrToken).toBe('p1.token-2')
   })
 
   it('un error de red se puede reintentar a mano', async () => {
@@ -256,7 +471,7 @@ describe('useCheckIn', () => {
     ['QR_INVALID', 403, /QR actual/, true],
     ['CHECKIN_WINDOW_CLOSED', 409, /Fuera de horario/, false],
     ['ALREADY_CHECKED_IN', 409, /Ya habías registrado/, false],
-    ['FORBIDDEN', 403, /inscripto/, false]
+    ['FORBIDDEN', 403, /inscribite/, false]
   ])('%s: explica el rechazo', async (code, status, message, canRetry) => {
     getPreciseLocation.mockResolvedValue(HERE)
     checkIn.mockRejectedValue(apiError(status, code, 'texto del servidor'))
@@ -340,7 +555,31 @@ describe('useMyPlans (lista paginada)', () => {
 
     await act(async () => { await result.current.refresh() })
     expect(result.current.items).toEqual([{ id: 'a' }])
-    expect(result.current).toMatchObject({ isRefreshing: false, loadMoreError: { code: 'INTERNAL' } })
+    // Un refresco fallido no se confunde con "cargar más": tiene su propio error, con el contrato completo.
+    expect(result.current).toMatchObject({ isRefreshing: false, loadMoreError: null })
+    expect(result.current.refreshError).toEqual({ code: 'INTERNAL', message: expect.any(String), requestId: 'r1' })
+
+    // Al empezar otro refresco se limpia.
+    listMyPlans.mockResolvedValueOnce(page(['a', 'b']))
+    await act(async () => { await result.current.refresh() })
+    expect(result.current.refreshError).toBeNull()
+    expect(result.current.items).toEqual([{ id: 'a' }, { id: 'b' }])
+  })
+
+  it('dos loadMore en el mismo instante (onEndReached repetido antes del commit) hacen una sola request', async () => {
+    const second = deferred()
+    listMyPlans.mockResolvedValueOnce(page(['a'], 'c1')).mockReturnValueOnce(second.promise)
+    const { result } = await renderHook(() => useMyPlans({ role: 'joined', when: 'upcoming' }))
+    await waitFor(() => expect(result.current.status).toBe(LIST_STATUS.READY))
+
+    await act(async () => {
+      result.current.loadMore()
+      result.current.loadMore()
+    })
+    await act(async () => second.resolve(page(['b'])))
+
+    expect(listMyPlans).toHaveBeenCalledTimes(2)
+    expect(result.current.items.map((item) => item.id)).toEqual(['a', 'b'])
   })
 
   it('sin más páginas, loadMore no pide nada', async () => {
@@ -367,14 +606,26 @@ describe('useParticipants', () => {
     expect(listParticipants).toHaveBeenCalledWith('p1', { limit: 20 })
   })
 
-  it('cuando cambia la versión (alguien se anotó o se bajó) la pide de nuevo', async () => {
-    listParticipants.mockResolvedValue({ items: [], nextCursor: null })
-    const { rerender } = await renderHook((props) => useParticipants('p1', props), { initialProps: { enabled: true, version: 0 } })
-    await waitFor(() => expect(listParticipants).toHaveBeenCalledTimes(1))
+  it('refresh (alguien se anotó o se bajó) la pide de nuevo sin vaciarla ni pasar por "cargando"', async () => {
+    const again = deferred()
+    listParticipants.mockResolvedValueOnce({ items: [{ id: 'u1' }], nextCursor: null }).mockReturnValueOnce(again.promise)
+    const { result } = await renderHook((props) => useParticipants('p1', props), { initialProps: { enabled: true } })
+    await waitFor(() => expect(result.current.status).toBe(LIST_STATUS.READY))
 
-    await rerender({ enabled: true, version: 1 })
+    await act(async () => { result.current.refresh() })
+    expect(result.current).toMatchObject({ status: LIST_STATUS.READY, isRefreshing: true, items: [{ id: 'u1' }] })
 
-    await waitFor(() => expect(listParticipants).toHaveBeenCalledTimes(2))
+    await act(async () => again.resolve({ items: [{ id: 'u1' }, { id: 'u2' }], nextCursor: null }))
+    expect(result.current.items).toHaveLength(2)
+  })
+
+  it('sin permiso para verla, refresh no pide nada', async () => {
+    const { result } = await renderHook(() => useParticipants('p1', { enabled: false }))
+
+    await act(async () => result.current.refresh())
+
+    expect(listParticipants).not.toHaveBeenCalled()
+    expect(result.current.status).toBe(LIST_STATUS.IDLE)
   })
 })
 
@@ -390,11 +641,15 @@ describe('useMyStats', () => {
     expect(result.current).toMatchObject({ reputation: 3, noShowCount: 1 })
   })
 
-  it('si falla se queda con lo último conocido; reload lo vuelve a pedir', async () => {
+  it('si falla se queda con lo último conocido (y lo loguea en desarrollo); reload lo vuelve a pedir', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
     getMe.mockRejectedValueOnce(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR)).mockResolvedValueOnce({ reputation: 5, noShowCount: 0 })
     const { result } = await renderHook(() => useMyStats({ reputation: 2 }))
     await waitFor(() => expect(getMe).toHaveBeenCalledTimes(1))
     expect(result.current.reputation).toBe(2)
+    // Solo `code` y `requestId`: nunca el body ni datos del usuario.
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.any(String), { code: CLIENT_ERROR_CODES.NETWORK_ERROR, requestId: 'r1' }))
+    warn.mockRestore()
 
     await act(async () => result.current.reload())
 

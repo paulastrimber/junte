@@ -1,4 +1,4 @@
-import { formatNoShows, formatReputation, looksLikeQrToken, planActions, qrRefreshDelay } from './attendance.js'
+import { formatNoShows, formatReputation, isQrExpired, localQrExpiry, looksLikeQrToken, planActions, qrRefreshDelay } from './attendance.js'
 
 const NOW = new Date('2026-10-25T21:00:00.000Z')
 const MINUTE_MS = 60 * 1000
@@ -85,11 +85,52 @@ describe('planActions', () => {
   })
 })
 
+describe('planActions: chat', () => {
+  it('lo ven el creador y quienes están anotados', () => {
+    expect(planActions(plan({ isCreator: true }), NOW).canChat).toBe(true)
+    expect(planActions(plan({ myParticipation: joined() }), NOW).canChat).toBe(true)
+  })
+
+  it('no lo ven quienes no participan ni quienes se dieron de baja', () => {
+    expect(planActions(plan(), NOW).canChat).toBe(false)
+    expect(planActions(plan({ myParticipation: joined({ status: 'cancelled' }) }), NOW).canChat).toBe(false)
+  })
+})
+
 describe('qrRefreshDelay', () => {
   it('15 segundos antes de que venza, con un mínimo de 5 segundos', () => {
     expect(qrRefreshDelay(new Date(NOW.getTime() + 90_000).toISOString(), NOW)).toBe(75_000)
     expect(qrRefreshDelay(new Date(NOW.getTime() + 10_000).toISOString(), NOW)).toBe(5_000)
     expect(qrRefreshDelay(new Date(NOW.getTime() - 60_000).toISOString(), NOW)).toBe(5_000)
+  })
+})
+
+describe('isQrExpired', () => {
+  const inSeconds = (seconds) => new Date(NOW.getTime() + seconds * 1000).toISOString()
+
+  it('vigente hasta el instante en que vence', () => {
+    expect(isQrExpired(inSeconds(1), NOW)).toBe(false)
+    expect(isQrExpired(inSeconds(0), NOW)).toBe(true)
+    expect(isQrExpired(inSeconds(-30), NOW)).toBe(true)
+  })
+
+  it('una fecha inválida cuenta como vencido', () => {
+    expect(isQrExpired('no es una fecha', NOW)).toBe(true)
+  })
+})
+
+describe('localQrExpiry', () => {
+  const EXPIRES = new Date(NOW.getTime() + 90_000).toISOString()
+
+  it('cuenta la vida del QR según el servidor desde que llegó la respuesta, aunque el teléfono esté corrido', () => {
+    const phoneAhead = new Date(NOW.getTime() + 120_000)
+
+    expect(localQrExpiry(EXPIRES, NOW.toUTCString(), phoneAhead)).toBe(new Date(phoneAhead.getTime() + 90_000).toISOString())
+  })
+
+  it('sin header Date (o ilegible) usa expiresAt tal cual', () => {
+    expect(localQrExpiry(EXPIRES, null, NOW)).toBe(EXPIRES)
+    expect(localQrExpiry(EXPIRES, 'cualquier cosa', NOW)).toBe(EXPIRES)
   })
 })
 

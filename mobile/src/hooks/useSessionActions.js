@@ -1,12 +1,12 @@
 import { useState } from 'react'
 
-import { messageForError } from '../utils/errorMessages.js'
+import { toViewError } from '../utils/errorMessages.js'
 import { useAuth } from './useAuth.js'
 
 /**
  * Cerrar sesión en este dispositivo o en todos. Cerrar en este dispositivo nunca falla (la sesión local
  * se borra aunque no haya conexión); cerrar en todos necesita al servidor y muestra el error si no responde.
- * @returns {{ signOut: () => Promise<void>, signOutAll: () => Promise<void>, isWorking: boolean, error: string | null }}
+ * @returns {{ signOut: () => Promise<void>, signOutAll: () => Promise<void>, isWorking: boolean, error: import('../utils/errorMessages.js').ViewError | null }}
  */
 export function useSessionActions () {
   const { signOut, signOutAll } = useAuth()
@@ -20,7 +20,7 @@ export function useSessionActions () {
     try {
       await action()
     } catch (failure) {
-      setError(messageForError(failure))
+      setError(toViewError(failure))
       setIsWorking(false)
     }
     // Si salió bien, la pantalla se desmonta (la navegación pasa al login): no hay estado que volver a tocar.

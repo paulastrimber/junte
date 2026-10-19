@@ -4,27 +4,32 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { Icon } from '../components/Icon.jsx'
 import { AUTH_STATUS } from '../contexts/AuthContext.jsx'
 import { useAuth } from '../hooks/useAuth.js'
-import CheckInScreen, { TEXTS as CHECK_IN_TEXTS } from '../screens/CheckInScreen.jsx'
-import CreatePlanScreen, { TEXTS as CREATE_TEXTS } from '../screens/CreatePlanScreen.jsx'
-import HealthScreen, { TEXTS as HEALTH_TEXTS } from '../screens/HealthScreen.jsx'
+import ChatScreen, { TEXTS as CHAT_TEXTS } from '../screens/ChatScreen.jsx'
 import HomeScreen, { TEXTS as HOME_TEXTS } from '../screens/HomeScreen.jsx'
 import LoadingScreen from '../screens/LoadingScreen.jsx'
 import LoginScreen, { TEXTS as LOGIN_TEXTS } from '../screens/LoginScreen.jsx'
 import MyPlansScreen, { TEXTS as MY_PLANS_TEXTS } from '../screens/MyPlansScreen.jsx'
-import OnboardingScreen from '../screens/OnboardingScreen.jsx'
-import PlanQrScreen, { TEXTS as QR_TEXTS } from '../screens/PlanQrScreen.jsx'
+import OnboardingScreen, { TEXTS as ONBOARDING_TEXTS } from '../screens/OnboardingScreen.jsx'
 import PlanScreen, { TEXTS as PLAN_TEXTS } from '../screens/PlanScreen.jsx'
-import ProfileScreen from '../screens/ProfileScreen.jsx'
+import ProfileScreen, { TEXTS as PROFILE_TEXTS } from '../screens/ProfileScreen.jsx'
 import RegisterScreen, { TEXTS as REGISTER_TEXTS } from '../screens/RegisterScreen.jsx'
 import RestoreErrorScreen from '../screens/RestoreErrorScreen.jsx'
 import { sizes, stackScreenOptions, tabScreenOptions, useTheme } from '../theme/index.js'
 import { ROUTES } from './routes.js'
+import { SCREEN_TITLES } from './titles.js'
 
 export { ROUTES }
 
 export const TAB_TITLES = Object.freeze({ feed: 'Planes', myPlans: 'Mis planes', create: 'Crear', profile: 'Perfil' })
 
 const Stack = createNativeStackNavigator()
+
+// Pantallas que se usan poco y arrastran módulos pesados (mapa, cámara, QR con su parser de SVG): se cargan recién la
+// primera vez que se abren. Junto con `inlineRequires` (metro.config.js) no se evalúan al arrancar la app.
+const loadCreatePlan = () => require('../screens/CreatePlanScreen.jsx').default
+const loadPlanQr = () => require('../screens/PlanQrScreen.jsx').default
+const loadCheckIn = () => require('../screens/CheckInScreen.jsx').default
+const loadHealth = () => require('../screens/HealthScreen.jsx').default
 const Tabs = createBottomTabNavigator()
 
 // Encabezado nativo de cada stack con los colores y la tipografía del tema (cambia con el modo claro/oscuro).
@@ -58,9 +63,11 @@ function planScreens () {
   return (
     <>
       <Stack.Screen name={ROUTES.PLAN} component={PlanScreen} options={{ title: PLAN_TEXTS.title }} />
-      <Stack.Screen name={ROUTES.EDIT_PLAN} component={CreatePlanScreen} options={{ title: CREATE_TEXTS.editTitle }} />
-      <Stack.Screen name={ROUTES.PLAN_QR} component={PlanQrScreen} options={{ title: QR_TEXTS.title }} />
-      <Stack.Screen name={ROUTES.CHECK_IN} component={CheckInScreen} options={{ title: CHECK_IN_TEXTS.title }} />
+      <Stack.Screen name={ROUTES.EDIT_PLAN} getComponent={loadCreatePlan} options={{ title: SCREEN_TITLES.editPlan }} />
+      <Stack.Screen name={ROUTES.PLAN_QR} getComponent={loadPlanQr} options={{ title: SCREEN_TITLES.planQr }} />
+      <Stack.Screen name={ROUTES.CHECK_IN} getComponent={loadCheckIn} options={{ title: SCREEN_TITLES.checkIn }} />
+      {/* El título del encabezado es el del plan (llega como parámetro). */}
+      <Stack.Screen name={ROUTES.CHAT} component={ChatScreen} options={({ route }) => ({ title: route.params?.title ?? CHAT_TEXTS.title })} />
     </>
   )
 }
@@ -88,7 +95,7 @@ function MyPlansStack () {
 function CreateStack () {
   return (
     <Stack.Navigator screenOptions={useStackOptions()} initialRouteName={ROUTES.CREATE_PLAN}>
-      <Stack.Screen name={ROUTES.CREATE_PLAN} component={CreatePlanScreen} options={{ title: CREATE_TEXTS.createTitle }} />
+      <Stack.Screen name={ROUTES.CREATE_PLAN} getComponent={loadCreatePlan} options={{ title: SCREEN_TITLES.createPlan }} />
     </Stack.Navigator>
   )
 }
@@ -96,8 +103,8 @@ function CreateStack () {
 function ProfileStack () {
   return (
     <Stack.Navigator screenOptions={useStackOptions()} initialRouteName={ROUTES.PROFILE}>
-      <Stack.Screen name={ROUTES.PROFILE} component={ProfileScreen} options={{ title: 'Mi perfil' }} />
-      <Stack.Screen name={ROUTES.HEALTH} component={HealthScreen} options={{ title: HEALTH_TEXTS.title }} />
+      <Stack.Screen name={ROUTES.PROFILE} component={ProfileScreen} options={{ title: PROFILE_TEXTS.title }} />
+      <Stack.Screen name={ROUTES.HEALTH} getComponent={loadHealth} options={{ title: SCREEN_TITLES.health }} />
     </Stack.Navigator>
   )
 }
@@ -125,7 +132,7 @@ function AppTabs () {
 function OnboardingStack () {
   return (
     <Stack.Navigator screenOptions={useStackOptions()} initialRouteName={ROUTES.ONBOARDING}>
-      <Stack.Screen name={ROUTES.ONBOARDING} component={OnboardingScreen} options={{ title: 'Bienvenido a junte', headerBackVisible: false }} />
+      <Stack.Screen name={ROUTES.ONBOARDING} component={OnboardingScreen} options={{ title: ONBOARDING_TEXTS.title, headerBackVisible: false }} />
     </Stack.Navigator>
   )
 }

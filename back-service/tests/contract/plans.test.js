@@ -445,7 +445,9 @@ describe('GET /plans (sin near: cronológico)', () => {
     ['filtro desconocido', 'status=cancelled'],
     ['operador de Mongo en el query', 'university[$ne]=um'],
     ['cursor manipulado', 'cursor=abc'],
-    ['cursor con otra forma', `cursor=${Buffer.from('{"$gt":""}').toString('base64url')}`]
+    ['cursor con otra forma', `cursor=${Buffer.from('{"$gt":""}').toString('base64url')}`],
+    // Un instante que no entra en un Date daría una fecha inválida (antes era un 500).
+    ['cursor con un instante fuera de rango', `cursor=${Buffer.from('{"s":9007199254740991,"i":"0123456789abcdef01234567"}').toString('base64url')}`]
   ])('400 VALIDATION_ERROR: %s', async (_label, query) => {
     const { signUp } = setupApi()
     const ana = await signUp()

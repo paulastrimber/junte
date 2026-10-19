@@ -1,6 +1,6 @@
 import { View } from 'react-native'
 
-import { createThemedStyles, fonts } from '../theme/index.js'
+import { borders, createThemedStyles, fonts } from '../theme/index.js'
 import { Text } from './Text.jsx'
 
 /**
@@ -23,5 +23,6 @@ export function Wordmark ({ size = 40 }) {
 const useStyles = createThemedStyles(({ colors }) => ({
   row: { flexDirection: 'row', alignItems: 'flex-end', alignSelf: 'flex-start', gap: 3 },
   word: { fontFamily: fonts.extrabold },
-  dot: { borderRadius: 999, backgroundColor: colors.accent }
+  // En claro, el lima sobre el fondo casi no se ve: lleva un borde (`accentEdge`). En oscuro el borde es del mismo lima.
+  dot: { borderRadius: 999, backgroundColor: colors.accent, borderWidth: borders.thin, borderColor: colors.accentEdge }
 }))

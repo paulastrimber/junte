@@ -1,5 +1,6 @@
 import { Camera } from 'expo-camera'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native'
+import { AppState } from 'react-native'
 
 import { COMPLETE_USER, SignedIn, createFakeAuthService, renderWithAuth, CATALOG } from '../../tests/helpers/auth.jsx'
 import { deferred } from '../../tests/helpers/deferred.js'
@@ -10,6 +11,7 @@ import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import { listMyPlans } from '../services/api/plans.js'
 import * as usersApi from '../services/api/users.js'
 import { LOCATION_STATUS, getPreciseLocation } from '../services/location.js'
+import { formatMessageTime } from '../utils/chat.js'
 import CheckInScreen, { TEXTS as CHECK_IN } from './CheckInScreen.jsx'
 import MyPlansScreen, { TEXTS as MY_PLANS } from './MyPlansScreen.jsx'
 import PlanQrScreen, { TEXTS as QR } from './PlanQrScreen.jsx'
@@ -37,6 +39,8 @@ const apiError = (status, code, message) => new ApiError({ status, code, message
 beforeEach(() => {
   jest.resetAllMocks()
   navigation.addListener.mockImplementation(() => () => {})
+  // `resetAllMocks` también le borra la implementación al mock de AppState de React Native.
+  AppState.addEventListener.mockImplementation(() => ({ remove: jest.fn() }))
 })
 
 describe('CheckInScreen', () => {
@@ -164,6 +168,146 @@ describe('PlanQrScreen (creador)', () => {
     expect(screen.queryByLabelText('p1.token-1')).not.toBeOnTheScreen()
   })
 
+  it('el QR es una imagen con nombre accesible', async () => {
+    createPlanQr.mockResolvedValue(qr(1))
+    await render(<PlanQrScreen navigation={navigation} route={route()} />)
+
+    expect(await screen.findByRole('image', { name: QR.qrLabel })).toBeOnTheScreen()
+  })
+
+  it('si no se puede renovar, deja el QR vigente con un aviso hasta cuándo vale', async () => {
+    createPlanQr.mockResolvedValueOnce(qr(1)).mockRejectedValue(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
+    await render(<PlanQrScreen navigation={navigation} route={route()} />)
+    await screen.findByLabelText('p1.token-1')
+
+    await act(async () => jest.advanceTimersByTime(75_000))
+
+    expect(screen.getByText(QR.refreshFailed(formatMessageTime(qr(1).expiresAt)))).toBeOnTheScreen()
+    expect(screen.getByLabelText('p1.token-1')).toBeOnTheScreen()
+
+    await act(async () => jest.advanceTimersByTime(15_000))
+
+    expect(screen.queryByLabelText('p1.token-1')).not.toBeOnTheScreen()
+    expect(screen.getByRole('button', { name: QR.retry })).toBeOnTheScreen()
+  })
+
+  it('el QR se encuentra por su nombre accesible', async () => {
+    createPlanQr.mockResolvedValue(qr(1))
+    await render(<PlanQrScreen navigation={navigation} route={route()} />)
+
+    expect(await screen.findByLabelText('Código QR de asistencia. Se renueva solo.')).toBeOnTheScreen()
+    expect(screen.getByRole('image', { name: 'Código QR de asistencia. Se renueva solo.' })).toBeOnTheScreen()
+  })
+
+  it('el aviso de sin conexión se anuncia (live region polite); la renovación normal no', async () => {
+    createPlanQr.mockResolvedValueOnce(qr(1))
+      .mockResolvedValueOnce({ qrToken: 'p1.token-2', expiresAt: new Date(NOW.getTime() + 170_000).toISOString() })
+      .mockRejectedValue(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
+    await render(<PlanQrScreen navigation={navigation} route={route()} />)
+    await screen.findByLabelText('p1.token-1')
+
+    // Renovación que funciona: cambia el QR sin ningún aviso.
+    await act(async () => jest.advanceTimersByTime(75_000))
+    await screen.findByLabelText('p1.token-2')
+    expect(screen.queryByText(/Sin conexión/)).not.toBeOnTheScreen()
+
+    // La siguiente (a los 155 s) falla: aparece el aviso, dentro de una región que el lector anuncia sin interrumpir.
+    await act(async () => jest.advanceTimersByTime(80_000))
+    let node = screen.getByText(/^Sin conexión\. Este QR vale hasta las \d{2}:\d{2}; reintentamos solo\.$/)
+    while (node && node.props.accessibilityLiveRegion === undefined) node = node.parent
+    expect(node?.props.accessibilityLiveRegion).toBe('polite')
+    // El QR mismo no es una región viva (no se anuncia cada renovación).
+    expect(screen.getByRole('image', { name: QR.qrLabel }).props.accessibilityLiveRegion).toBeUndefined()
+  })
+
+  it('con el aviso de sin conexión, un reintento que funciona saca el aviso y muestra el QR nuevo', async () => {
+    createPlanQr.mockResolvedValueOnce(qr(1)).mockRejectedValueOnce(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
+      .mockResolvedValueOnce({ qrToken: 'p1.token-2', expiresAt: new Date(NOW.getTime() + 170_000).toISOString() })
+    await render(<PlanQrScreen navigation={navigation} route={route()} />)
+    await screen.findByLabelText('p1.token-1')
+
+    await act(async () => jest.advanceTimersByTime(75_000))
+    expect(screen.getByText(QR.refreshFailed(formatMessageTime(qr(1).expiresAt)))).toBeOnTheScreen()
+    expect(screen.getByLabelText('p1.token-1')).toBeOnTheScreen()
+
+    await act(async () => jest.advanceTimersByTime(5_000))
+
+    expect(await screen.findByLabelText('p1.token-2')).toBeOnTheScreen()
+    expect(screen.queryByText(/Sin conexión/)).not.toBeOnTheScreen()
+    expect(screen.queryByLabelText('p1.token-1')).not.toBeOnTheScreen()
+  })
+
+  it('si vence sin red pasa a error con "Reintentar", y reintentar muestra uno nuevo', async () => {
+    createPlanQr.mockResolvedValueOnce(qr(1)).mockRejectedValue(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
+    await render(<PlanQrScreen navigation={navigation} route={route()} />)
+    await screen.findByLabelText('p1.token-1')
+
+    await act(async () => jest.advanceTimersByTime(90_000))
+
+    expect(screen.getByText(QR.errorTitle)).toBeOnTheScreen()
+    expect(screen.queryByRole('image', { name: QR.qrLabel })).not.toBeOnTheScreen()
+    expect(screen.queryByText(/Sin conexión\. Este QR/)).not.toBeOnTheScreen()
+    createPlanQr.mockResolvedValueOnce({ qrToken: 'p1.token-2', expiresAt: new Date(NOW.getTime() + 180_000).toISOString() })
+    await fireEvent.press(screen.getByRole('button', { name: 'Reintentar' }))
+
+    expect(await screen.findByLabelText('p1.token-2')).toBeOnTheScreen()
+  })
+
+  it.each(['CHECKIN_WINDOW_CLOSED', 'PLAN_CLOSED'])('si la renovación responde %s oculta el QR vigente, sin "Reintentar"', async (code) => {
+    createPlanQr.mockResolvedValueOnce(qr(1)).mockRejectedValueOnce(apiError(409, code))
+    await render(<PlanQrScreen navigation={navigation} route={route()} />)
+    await screen.findByLabelText('p1.token-1')
+
+    await act(async () => jest.advanceTimersByTime(75_000))
+
+    expect(screen.getByText(QR.errorTitle)).toBeOnTheScreen()
+    expect(screen.queryByLabelText('p1.token-1')).not.toBeOnTheScreen()
+    expect(screen.queryByRole('button', { name: QR.retry })).not.toBeOnTheScreen()
+    expect(screen.queryByText(/Sin conexión/)).not.toBeOnTheScreen()
+  })
+
+  describe('al volver de segundo plano', () => {
+    let onAppState
+    beforeEach(() => {
+      AppState.addEventListener.mockImplementation((_event, listener) => {
+        onAppState = listener
+        return { remove: jest.fn() }
+      })
+    })
+
+    it('con el QR vigente pero por renovar, no lo oculta mientras pide el siguiente', async () => {
+      const next = deferred()
+      createPlanQr.mockResolvedValueOnce(qr(1)).mockReturnValueOnce(next.promise)
+      await render(<PlanQrScreen navigation={navigation} route={route()} />)
+      await screen.findByLabelText('p1.token-1')
+
+      jest.setSystemTime(new Date(NOW.getTime() + 80_000))
+      await act(async () => onAppState('active'))
+
+      expect(createPlanQr).toHaveBeenCalledTimes(2)
+      expect(screen.getByLabelText('p1.token-1')).toBeOnTheScreen()
+      expect(screen.queryByText(QR.loading)).not.toBeOnTheScreen()
+      await act(async () => next.resolve({ qrToken: 'p1.token-2', expiresAt: new Date(NOW.getTime() + 170_000).toISOString() }))
+      expect(screen.getByLabelText('p1.token-2')).toBeOnTheScreen()
+    })
+
+    it('con el QR vencido, lo oculta y pide otro', async () => {
+      const next = deferred()
+      createPlanQr.mockResolvedValueOnce(qr(1)).mockReturnValueOnce(next.promise)
+      await render(<PlanQrScreen navigation={navigation} route={route()} />)
+      await screen.findByLabelText('p1.token-1')
+
+      jest.setSystemTime(new Date(NOW.getTime() + 120_000))
+      await act(async () => onAppState('active'))
+
+      expect(screen.queryByLabelText('p1.token-1')).not.toBeOnTheScreen()
+      expect(screen.getByText(QR.loading)).toBeOnTheScreen()
+      expect(createPlanQr).toHaveBeenCalledTimes(2)
+      await act(async () => next.resolve({ qrToken: 'p1.token-2', expiresAt: new Date(NOW.getTime() + 210_000).toISOString() }))
+      expect(screen.getByLabelText('p1.token-2')).toBeOnTheScreen()
+    })
+  })
+
   it('fuera del horario de asistencia lo explica, sin QR ni reintento', async () => {
     createPlanQr.mockRejectedValue(apiError(409, 'CHECKIN_WINDOW_CLOSED'))
 
@@ -279,25 +423,57 @@ describe('MyPlansScreen', () => {
     const pending = deferred()
     listMyPlans.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(page([plan()]))
     await render(<MyPlansScreen navigation={navigation} />)
-    expect(screen.getByText(MY_PLANS.loading)).toBeOnTheScreen()
+    expect(screen.getByRole('progressbar', { name: MY_PLANS.loading })).toBeOnTheScreen()
 
     await act(async () => pending.reject(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR)))
-    expect(await screen.findByText(MY_PLANS.errorTitle)).toBeOnTheScreen()
+    expect(await screen.findByRole('header', { name: MY_PLANS.errorTitle })).toBeOnTheScreen()
+    expect(screen.getByText(/No pudimos conectarnos/)).toBeOnTheScreen()
+    // Los selectores siguen arriba del error para poder cambiar de lista.
+    expect(screen.getByRole('radio', { name: 'Organizo' })).toBeOnTheScreen()
 
     await fireEvent.press(button(MY_PLANS.retry))
 
     expect(await screen.findByText('Fútbol 5 en Parque Rodó')).toBeOnTheScreen()
   })
 
-  it('al volver a la pestaña (foco) refresca la lista', async () => {
+  it('al entrar pide la lista una vez; al volver a la pestaña (foco) la refresca', async () => {
     listMyPlans.mockResolvedValue(page([plan()]))
     await render(<MyPlansScreen navigation={navigation} />)
     await screen.findByText('Fútbol 5 en Parque Rodó')
     const onFocus = navigation.addListener.mock.calls.filter(([event]) => event === 'focus').at(-1)[1]
 
+    // El `focus` del montaje no vuelve a pedir (antes la primera carga se hacía dos veces).
+    await act(async () => onFocus())
+    expect(listMyPlans).toHaveBeenCalledTimes(1)
+
     await act(async () => onFocus())
 
     await waitFor(() => expect(listMyPlans).toHaveBeenCalledTimes(2))
+  })
+
+  it('con datos, si falla el refresco los conserva y deja reintentar arriba', async () => {
+    listMyPlans.mockResolvedValueOnce(page([plan()])).mockRejectedValueOnce(apiError(500, 'INTERNAL')).mockResolvedValueOnce(page([plan({ title: 'Otro plan' })]))
+    await render(<MyPlansScreen navigation={navigation} />)
+    await screen.findByText('Fútbol 5 en Parque Rodó')
+
+    await act(async () => screen.getByTestId('my-plans-list').props.onRefresh())
+
+    expect(await screen.findByText(MY_PLANS.refreshError)).toBeOnTheScreen()
+    expect(screen.queryByText(MY_PLANS.loadMoreError)).not.toBeOnTheScreen()
+    expect(screen.getByText('Fútbol 5 en Parque Rodó')).toBeOnTheScreen()
+
+    await fireEvent.press(button(MY_PLANS.retry))
+
+    expect(await screen.findByText('Otro plan')).toBeOnTheScreen()
+  })
+
+  it('el vacío de "Voy · Próximos" lleva a buscar planes', async () => {
+    listMyPlans.mockResolvedValue(page([]))
+    await render(<MyPlansScreen navigation={navigation} />)
+
+    await fireEvent.press(await screen.findByRole('button', { name: MY_PLANS.findPlans }))
+
+    expect(navigation.navigate).toHaveBeenCalledWith('FeedTab')
   })
 })
 

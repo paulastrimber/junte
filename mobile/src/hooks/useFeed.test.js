@@ -6,7 +6,7 @@ import { getFeed } from '../services/api/feed.js'
 import { listPlans } from '../services/api/plans.js'
 import { readBusySlots } from '../services/calendar.js'
 import { getCurrentCoordinates } from '../services/location.js'
-import { FEED_MODE, FEED_STATUS, useFeed } from './useFeed.js'
+import { CONTEXT_TTL_MS, FEED_MODE, FEED_STATUS, FILTERS_DEBOUNCE_MS, LOCATION_NOTICE, useFeed } from './useFeed.js'
 
 jest.mock('../services/api/feed.js', () => ({ getFeed: jest.fn() }))
 jest.mock('../services/api/plans.js', () => ({ listPlans: jest.fn() }))
@@ -22,6 +22,8 @@ const QUERY = Object.freeze({ availability: 'available', datePreset: 'any' })
 const plan = (id) => ({ id, title: `Plan ${id}` })
 const page = (ids, nextCursor = null) => ({ items: ids.map(plan), nextCursor })
 const ids = (result) => result.current.items.map((item) => item.id)
+// Cada request lleva la señal de su carga: una carga nueva la cancela.
+const SIGNAL = { signal: expect.any(AbortSignal) }
 
 const withLocation = () => getCurrentCoordinates.mockResolvedValue({ status: 'granted', coordinates: NEAR })
 const withoutLocation = (status = 'denied') => getCurrentCoordinates.mockResolvedValue({ status, coordinates: null })
@@ -52,7 +54,7 @@ describe('useFeed', () => {
 
       await act(async () => pending.resolve(page(['a', 'b'], 'cursor-1')))
 
-      expect(getFeed).toHaveBeenCalledWith({ availability: 'available', interests: ['futbol'], near: NEAR, radiusKm: 5, limit: 20, calendar: CALENDAR })
+      expect(getFeed).toHaveBeenCalledWith({ availability: 'available', interests: ['futbol'], near: NEAR, radiusKm: 5, limit: 20, calendar: CALENDAR }, SIGNAL)
       expect(result.current).toMatchObject({ status: FEED_STATUS.READY, mode: FEED_MODE.NEARBY, hasMore: true, locationStatus: 'granted' })
       expect(ids(result)).toEqual(['a', 'b'])
       expect(listPlans).not.toHaveBeenCalled()
@@ -76,8 +78,10 @@ describe('useFeed', () => {
       const { result } = await renderFeed()
       await waitFor(() => expect(result.current.status).toBe(FEED_STATUS.READY))
 
-      expect(listPlans).toHaveBeenCalledWith({ availability: 'available', limit: 20 })
+      expect(listPlans).toHaveBeenCalledWith({ availability: 'available', limit: 20 }, SIGNAL)
       expect(result.current).toMatchObject({ mode: FEED_MODE.BY_DATE, locationStatus: status, hasMore: false })
+      // La pantalla no interpreta el permiso: recibe el motivo ya resuelto.
+      expect(result.current.locationNotice).toBe(status === 'denied' ? LOCATION_NOTICE.DENIED : LOCATION_NOTICE.UNAVAILABLE)
       expect(getFeed).not.toHaveBeenCalled()
       expect(readBusySlots).not.toHaveBeenCalled()
     })
@@ -128,7 +132,7 @@ describe('useFeed', () => {
 
       await act(async () => result.current.loadMore())
 
-      expect(getFeed).toHaveBeenLastCalledWith({ availability: 'available', near: NEAR, radiusKm: 10, limit: 20, calendar: CALENDAR, cursor: 'cursor-1' })
+      expect(getFeed).toHaveBeenLastCalledWith({ availability: 'available', near: NEAR, radiusKm: 10, limit: 20, calendar: CALENDAR, cursor: 'cursor-1' }, SIGNAL)
       expect(ids(result)).toEqual(['a', 'b', 'c'])
       expect(result.current.hasMore).toBe(false)
       // La ubicación y el calendario se leen una sola vez por recorrido.
@@ -157,6 +161,23 @@ describe('useFeed', () => {
       await act(async () => { result.current.loadMore() })
       expect(result.current.isLoadingMore).toBe(true)
       await act(async () => { result.current.loadMore() })
+      await act(async () => second.resolve(page(['b'])))
+
+      expect(listPlans).toHaveBeenCalledTimes(2)
+      expect(ids(result)).toEqual(['a', 'b'])
+    })
+
+    it('dos loadMore en el mismo instante (antes de que React actualice el estado) hacen una sola request', async () => {
+      withoutLocation()
+      const second = deferred()
+      listPlans.mockResolvedValueOnce(page(['a'], 'cursor-1')).mockReturnValueOnce(second.promise)
+      const { result } = await renderFeed()
+      await waitFor(() => expect(result.current.status).toBe(FEED_STATUS.READY))
+
+      await act(async () => {
+        result.current.loadMore()
+        result.current.loadMore()
+      })
       await act(async () => second.resolve(page(['b'])))
 
       expect(listPlans).toHaveBeenCalledTimes(2)
@@ -210,7 +231,7 @@ describe('useFeed', () => {
 
       expect(result.current.isRefreshing).toBe(false)
       expect(ids(result)).toEqual(['z'])
-      expect(listPlans).toHaveBeenLastCalledWith({ availability: 'available', limit: 20 })
+      expect(listPlans).toHaveBeenLastCalledWith({ availability: 'available', limit: 20 }, SIGNAL)
     })
 
     it('si el refresco falla se queda con lo que ya mostraba', async () => {
@@ -223,7 +244,8 @@ describe('useFeed', () => {
 
       expect(result.current).toMatchObject({ status: FEED_STATUS.READY, isRefreshing: false })
       expect(ids(result)).toEqual(['a'])
-      expect(result.current.loadMoreError).toMatchObject({ code: CLIENT_ERROR_CODES.NETWORK_ERROR })
+      expect(result.current.refreshError).toEqual({ code: CLIENT_ERROR_CODES.NETWORK_ERROR, message: 'No pudimos conectarnos con el servidor. Revisá tu conexión.', requestId: null })
+      expect(result.current.loadMoreError).toBeNull()
     })
   })
 
@@ -244,6 +266,44 @@ describe('useFeed', () => {
       expect(getFeed.mock.calls[2][0]).toMatchObject({ radiusKm: 25 })
     })
 
+    it('cambiar 3 filtros seguidos pide la ubicación y el calendario una sola vez, y el feed con los filtros finales', async () => {
+      withLocation()
+      readBusySlots.mockResolvedValue(CALENDAR)
+      getFeed.mockResolvedValue(page(['a']))
+      const { result, rerender } = await renderFeed()
+      await waitFor(() => expect(result.current.status).toBe(FEED_STATUS.READY))
+
+      await rerender({ query: { ...QUERY, interests: ['futbol'] }, radiusKm: 10 })
+      await rerender({ query: { ...QUERY, interests: ['futbol', 'cine'] }, radiusKm: 10 })
+      await rerender({ query: { ...QUERY, interests: ['futbol', 'cine'] }, radiusKm: 5 })
+      await waitFor(() => expect(getFeed).toHaveBeenLastCalledWith(expect.objectContaining({ interests: ['futbol', 'cine'], radiusKm: 5, near: NEAR, calendar: CALENDAR }), SIGNAL))
+
+      expect(getCurrentCoordinates).toHaveBeenCalledTimes(1)
+      expect(readBusySlots).toHaveBeenCalledTimes(1)
+
+      // El pull-to-refresh sí vuelve a pedir la ubicación (la persona se pudo mover).
+      await act(async () => result.current.refresh())
+      expect(getCurrentCoordinates).toHaveBeenCalledTimes(2)
+    })
+
+    it('pasado CONTEXT_TTL_MS, un cambio de filtro vuelve a pedir la ubicación', async () => {
+      const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000)
+      try {
+        withLocation()
+        getFeed.mockResolvedValue(page(['a']))
+        const { result, rerender } = await renderFeed()
+        await waitFor(() => expect(result.current.status).toBe(FEED_STATUS.READY))
+
+        now.mockReturnValue(1_000_000 + CONTEXT_TTL_MS + 1)
+        await rerender({ query: { ...QUERY, availability: 'full' }, radiusKm: 10 })
+        await waitFor(() => expect(getFeed).toHaveBeenCalledTimes(2))
+
+        expect(getCurrentCoordinates).toHaveBeenCalledTimes(2)
+      } finally {
+        now.mockRestore()
+      }
+    })
+
     it('un render con los mismos filtros (otro objeto, mismo contenido) no vuelve a pedir', async () => {
       withoutLocation()
       listPlans.mockResolvedValue(page(['a']))
@@ -253,6 +313,71 @@ describe('useFeed', () => {
       await rerender({ query: { ...QUERY }, radiusKm: 10 })
 
       expect(listPlans).toHaveBeenCalledTimes(1)
+    })
+
+    it('cuatro cambios seguidos en menos de FILTERS_DEBOUNCE_MS hacen una sola consulta y cancelan la anterior', async () => {
+      jest.useFakeTimers()
+      try {
+        withoutLocation()
+        const first = deferred()
+        listPlans.mockReturnValueOnce(first.promise).mockResolvedValue(page(['x']))
+        const { result, rerender } = await renderFeed()
+        const firstSignal = listPlans.mock.calls[0][1].signal
+
+        for (const interests of [['a'], ['a', 'b'], ['a', 'b', 'c'], ['a', 'c']]) {
+          await rerender({ query: { ...QUERY, interests }, radiusKm: 10 })
+          await act(async () => jest.advanceTimersByTimeAsync(FILTERS_DEBOUNCE_MS / 4))
+        }
+        expect(listPlans).toHaveBeenCalledTimes(1)
+
+        await act(async () => jest.advanceTimersByTimeAsync(FILTERS_DEBOUNCE_MS))
+
+        expect(listPlans).toHaveBeenCalledTimes(2)
+        expect(listPlans.mock.calls[1][0]).toMatchObject({ interests: ['a', 'c'] })
+        expect(firstSignal.aborted).toBe(true)
+        expect(ids(result)).toEqual(['x'])
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it('cambiar de sección ("Con cupo" / "Llenos") consulta sin esperar', async () => {
+      jest.useFakeTimers()
+      try {
+        withoutLocation()
+        listPlans.mockResolvedValue(page(['a']))
+        const { rerender } = await renderFeed()
+        await act(async () => jest.advanceTimersByTimeAsync(0))
+
+        await rerender({ query: { ...QUERY, availability: 'full' }, radiusKm: 10 })
+        await act(async () => jest.advanceTimersByTimeAsync(0))
+
+        expect(listPlans).toHaveBeenCalledTimes(2)
+        expect(listPlans.mock.calls[1][0]).toMatchObject({ availability: 'full' })
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it('con planes en pantalla, un cambio de filtro los conserva (isReloading) hasta que llega la respuesta', async () => {
+      withoutLocation()
+      const next = deferred()
+      listPlans.mockResolvedValueOnce(page(['a'], 'cursor-1')).mockReturnValueOnce(next.promise)
+      const { result, rerender } = await renderFeed()
+      await waitFor(() => expect(result.current.status).toBe(FEED_STATUS.READY))
+
+      await rerender({ query: { ...QUERY, interests: ['cine'] }, radiusKm: 10 })
+      await waitFor(() => expect(result.current.isReloading).toBe(true))
+      expect(result.current.status).toBe(FEED_STATUS.READY)
+      expect(ids(result)).toEqual(['a'])
+      // Mientras tanto no se pide la página siguiente de la consulta vieja.
+      await act(async () => result.current.loadMore())
+      expect(listPlans).toHaveBeenCalledTimes(2)
+
+      await act(async () => next.resolve(page(['b'])))
+
+      expect(result.current.isReloading).toBe(false)
+      expect(ids(result)).toEqual(['b'])
     })
 
     it('descarta la respuesta de una consulta vieja que llega después de la nueva', async () => {
@@ -279,5 +404,6 @@ describe('useFeed', () => {
     await act(async () => pending.resolve(page(['tarde'])))
 
     expect(result.current.status).toBe(FEED_STATUS.LOADING)
+    expect(listPlans.mock.calls[0][1].signal.aborted).toBe(true)
   })
 })

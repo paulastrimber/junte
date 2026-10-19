@@ -10,6 +10,13 @@ const MAX_CURSOR_LENGTH = 512
 
 export const limitField = z.coerce.number().int().min(1).max(MAX_LIMIT).default(DEFAULT_LIMIT)
 
+// Mayor instante que admite un Date de JavaScript: un número más grande daría una fecha inválida y la query fallaría
+// con un 500 en lugar del 400 de un cursor manipulado.
+const MAX_DATE_MS = 8.64e15
+
+/** Instante (ms) dentro de un cursor: lo usan todos los listados que ordenan por una fecha. */
+export const cursorInstantField = z.number().int().nonnegative().max(MAX_DATE_MS)
+
 /** Forma del cursor en la request (se decodifica después, con el esquema de cada listado). */
 export const cursorField = z.string().regex(/^[A-Za-z0-9_-]+$/, { error: 'El cursor no es válido' }).max(MAX_CURSOR_LENGTH)
 
