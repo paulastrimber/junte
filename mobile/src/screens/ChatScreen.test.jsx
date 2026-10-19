@@ -16,6 +16,7 @@ jest.mock('../services/socket.js', () => ({
 
 const ME = { id: COMPLETE_USER.id, name: COMPLETE_USER.name, photoUrl: null, reputation: 0 }
 const BETO = { id: 'u2', name: 'Beto', photoUrl: null, reputation: 1 }
+const TODAY = new Date()
 const message = (n, extra = {}) => ({
   id: `m${n}`,
   planId: 'p1',
@@ -23,7 +24,9 @@ const message = (n, extra = {}) => ({
   type: 'text',
   text: `Mensaje ${n}`,
   clientId: null,
-  createdAt: new Date(2026, 9, 14, 10, n).toISOString(),
+  // Hoy a las 10:n: formatMessageTime muestra solo la hora en los mensajes del día (con una fecha fija, el test
+  // dejaba de pasar al día siguiente porque la hora pasaba a mostrarse con día y mes).
+  createdAt: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 10, n).toISOString(),
   ...extra
 })
 const apiError = (status, code) => new ApiError({ status, code, requestId: 'r1' })
