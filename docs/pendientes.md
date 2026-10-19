@@ -106,6 +106,9 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 **Propuesta:** ElastiCache (Redis/Valkey) con réplica en la otra AZ. Si Redis cae, el chat sigue por polling REST.
 **Bloquea:** S1 (infra).
 
+✅ **Decidido (2026-10-19): Redis no decide el health check.** `/internal/health` respondía 503 si Redis no contestaba; detrás del ALB interno eso sacaba a todas las instancias del back y tiraba la API entera, en contra de "si Redis cae, el chat sigue por polling". Ahora el código HTTP depende solo de MongoDB (503 si no responde) y Redis se sigue informando en `checks`, con `status: 'degraded'` y 200 cuando está caído. Sin Redis tampoco corren los jobs ([sección G](#g-notas-del-sprint-4-inscripciones-asistencia-y-reputación)): se ponen al día cuando vuelve. Para enterarse de que Redis cayó hay que mirar el cuerpo del health (o una alarma de ElastiCache en S6), no el estado de los destinos del ALB.
+**Pendiente para la app:** `services/api/health.js` decide "degradado" solo por el 503, así que con Redis caído la pantalla de diagnóstico muestra "Todo funciona". Para que muestre degradado tiene que leer también `status: 'degraded'` en un 200.
+
 ### TLS interno
 **Problema:** tramos internos en HTTP. El informe lo reconoce.
 **Propuesta:** límite documentado para la entrega; TLS en MongoDB primero si hay tiempo.
@@ -132,7 +135,7 @@ Lo que apareció al implementar el sprint 1 y queda para revisar con el equipo.
 - **413 sin código propio:** body > 100kb responde `413` con `code: VALIDATION_ERROR` (el catálogo no tiene un code para "payload demasiado grande"). Propuesta: dejarlo así o agregar `PAYLOAD_TOO_LARGE` al catálogo y a la app.
 - **Orden de middlewares:** `httpLogger` va **antes** de `express.json` (03 los lista al revés) para que una request con JSON malformado también quede logueada con su `requestId`. Propuesta: actualizar la lista de [03](arquitectura/03-back-service.md#middlewares-orden-en-appjs).
 - **`MONGO_DB_NAME` es obligatoria** (sin default), igual que `MONGO_URI`, `REDIS_URL` y `JWT_SECRET`. `NODE_ENV`, `PORT` y `LOG_LEVEL` tienen default (`development`, `3000`, `info`). `FEED_WEIGHTS` se acepta y se pasa sin interpretar (`config.feed.weightsRaw`) hasta que se cierre [Pesos del feed](#pesos-del-feed).
-- **Cuerpo de `/internal/health`:** `{ status: 'ok' | 'unavailable', checks: { mongo: 'up' | 'down', redis: 'up' | 'down' } }`, con timeout de 2 s por ping. Si 06-api.md debe documentarlo, falta agregarlo ahí.
+- **Cuerpo de `/internal/health`:** `{ status: 'ok' | 'degraded' | 'unavailable', checks: { mongo: 'up' | 'down', redis: 'up' | 'down' } }`, con timeout de 2 s por ping. Documentado en [06-api.md](arquitectura/06-api.md#salud); desde 2026-10-19 Redis caído es 200 `degraded` (ver [Redis](#redis)).
 - **`keepAliveTimeout` de Node en 305 s** (mayor que el idle de 300 s del ALB interno) para evitar 502 intermitentes por conexiones que Node cierra antes que el ALB.
 - **Rutas de módulos:** `createApp({ logger, health, routes })` monta cada `{ path, router }` de `routes` bajo `/internal`; los módulos se registran en `src/container.js`.
 

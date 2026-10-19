@@ -377,7 +377,17 @@ Un usuario sin rol admin recibe **403** en cualquier `/admin/*` (exista la ruta 
 | Ruta | Quién responde | Uso |
 |------|---------------|-----|
 | `GET /health` (sin prefijo, puerto 8080) | Nginx | Health check del ALB público |
-| `GET /internal/health` | Express | Health check del ALB interno; 200/503 según Mongo y Redis |
+| `GET /internal/health` | Express | Health check del ALB interno; 503 solo si MongoDB no responde (la app lo llama como `GET /api/v1/health`, sin token) |
+
+Respuesta de `GET /internal/health` (`Cache-Control: no-store`, timeout de 2 s por componente; nunca incluye mensajes de error ni hosts):
+
+| MongoDB | Redis | HTTP | Cuerpo |
+|---------|-------|------|--------|
+| up | up | 200 | `{ "status": "ok", "checks": { "mongo": "up", "redis": "up" } }` |
+| up | down | 200 | `{ "status": "degraded", "checks": { "mongo": "up", "redis": "down" } }` |
+| down | cualquiera | 503 | `{ "status": "unavailable", "checks": { "mongo": "down", "redis": "up" \| "down" } }` |
+
+Redis no decide el código: sin Redis la API sigue funcionando (el chat pasa a polling y los jobs esperan), y un 503 haría que el ALB interno saque a todas las instancias. El estado `degraded` solo se ve en el cuerpo.
 
 ## Ejemplo: crear un plan
 
