@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { toApiError } from '../services/api/client.js'
-import { CLIENT_ERROR_CODES } from '../services/api/errors.js'
+import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import { listMessages, sendMessage } from '../services/api/messages.js'
+import { OUTBOX_STATUS, OUTBOX_TYPE, connectivity, isTransportFailure, outbox, readCache, readThrough } from '../services/offline/index.js'
 import { SOCKET_STATUS, socketService } from '../services/socket.js'
 import { MESSAGE_STATUS, createClientId, mergeMessages, mergeRecoveredPage, sortMessages } from '../utils/chat.js'
+import { useIsForeground } from './useOffline.js'
 
 export const CHAT_STATUS = Object.freeze({ LOADING: 'loading', READY: 'ready', ERROR: 'error' })
 
@@ -26,25 +28,55 @@ const INITIAL_STATE = Object.freeze({
   nextCursor: null,
   error: null,
   isLoadingOlder: false,
-  loadOlderError: null
+  loadOlderError: null,
+  savedAt: null
 })
+
+const authorView = (author) => (author ? { id: author.id, name: author.name ?? null, photoUrl: author.photoUrl ?? null, reputation: author.reputation ?? 0 } : null)
+
+/** Un mensaje de la cola de pendientes (S6-MOB-02) como mensaje de la lista: pendiente, o fallido con su error. */
+function fromOutbox (item, author) {
+  const failed = item.status === OUTBOX_STATUS.FAILED
+  return {
+    id: `local-${item.payload.clientId}`,
+    planId: item.payload.planId,
+    sender: authorView(author),
+    type: 'text',
+    text: item.payload.text,
+    clientId: item.payload.clientId,
+    createdAt: item.createdAt,
+    status: failed ? MESSAGE_STATUS.FAILED : MESSAGE_STATUS.PENDING,
+    queued: !failed,
+    error: item.error ? new ApiError(item.error) : null
+  }
+}
+
+/** Suma los pendientes de la cola que la lista todavía no tiene (p. ej. al reabrir la app). */
+function withQueued (messages, queued) {
+  const known = new Set(messages.map((message) => message.clientId).filter(Boolean))
+  return sortMessages([...messages, ...queued.filter((message) => !known.has(message.clientId))])
+}
 
 /**
  * Chat de un plan: historial por REST, mensajes nuevos por Socket.io y respaldo por REST.
  * - Lista ordenada del más nuevo al más viejo (para una lista invertida), sin duplicados: se fusiona por `id` y por
  *   `clientId` (el mensaje propio pendiente se reemplaza por el confirmado).
  * - `send` muestra el mensaje enseguida como pendiente y lo manda por el socket; si no hay conexión o el ack no llega,
- *   por REST con el mismo `clientId`. Si falla queda marcado para reintentar.
+ *   por REST con el mismo `clientId`. Si tampoco hay red, queda en la cola de pendientes y se manda solo cuando vuelve
+ *   (S6-MOB-02). Si el servidor lo rechaza, queda marcado para reintentar.
  * - Al reconectar vuelve a pedir la primera página (recupera lo que pasó mientras no había conexión). Si el WebSocket
- *   no se sostiene, hace polling mientras la pantalla esté activa.
+ *   no se sostiene, hace polling mientras la pantalla esté activa. Con la app en segundo plano no hay socket ni polling.
+ * - Sin conexión muestra el último historial guardado (`savedAt`). Un mensaje que oculta un admin desaparece solo.
  * @param {string} planId
  * @param {object} options
  * @param {{ id: string, name: string | null, photoUrl: string | null, reputation?: number } | null} options.user  Quien escribe (autor de los pendientes).
  * @param {boolean} [options.isActive]  La pantalla está en primer plano: solo entonces hace polling.
+ * @param {string} [options.planTitle]  Para mostrar los pendientes fuera del chat.
  */
-export function useChat (planId, { user, isActive = true }) {
+export function useChat (planId, { user, isActive = true, planTitle = null }) {
   const [state, setState] = useState(INITIAL_STATE)
   const [socketStatus, setSocketStatus] = useState(() => socketService.getStatus())
+  const isForeground = useIsForeground()
   // Las funciones estables leen el estado más reciente sin recrearse en cada render.
   const stateRef = useRef(state)
   const userRef = useRef(user)
@@ -56,20 +88,39 @@ export function useChat (planId, { user, isActive = true }) {
     userRef.current = user
   })
 
+  const cacheKey = `chat:${planId}`
+
+  /** Los mensajes de este plan que esperan en la cola de pendientes. */
+  const queuedMessages = useCallback(async () => {
+    const items = await outbox.list()
+    return items
+      .filter((item) => item.type === OUTBOX_TYPE.MESSAGE && item.payload.planId === planId)
+      .map((item) => fromOutbox(item, userRef.current))
+  }, [planId])
+
   const load = useCallback(async () => {
     const generation = ++generationRef.current
     // Un "Reintentar" no pierde lo que la persona escribió y todavía no se confirmó (solo de este plan).
     setState((current) => ({ ...INITIAL_STATE, messages: current.messages.filter((message) => isUnsent(message) && message.planId === planId) }))
     try {
-      const page = await listMessages(planId, { limit: PAGE_SIZE })
+      const [{ data: page, savedAt }, queued] = await Promise.all([
+        readThrough({ key: cacheKey, fetch: () => listMessages(planId, { limit: PAGE_SIZE }), cache: readCache, connectivity }),
+        queuedMessages()
+      ])
       if (generation !== generationRef.current) return
-      // Pudo llegar algún mensaje por el socket mientras cargaba: se conserva.
-      setState((current) => ({ ...INITIAL_STATE, status: CHAT_STATUS.READY, messages: mergeMessages(current.messages, page.items), nextCursor: page.nextCursor }))
+      // Pudo llegar algún mensaje por el socket mientras cargaba: se conserva. Lo guardado no se pagina hacia atrás.
+      setState((current) => ({
+        ...INITIAL_STATE,
+        status: CHAT_STATUS.READY,
+        messages: mergeMessages(withQueued(current.messages, queued), page.items),
+        nextCursor: savedAt ? null : page.nextCursor,
+        savedAt
+      }))
     } catch (failure) {
       if (generation !== generationRef.current) return
       setState((current) => ({ ...INITIAL_STATE, status: CHAT_STATUS.ERROR, messages: current.messages, error: toApiError(failure) }))
     }
-  }, [planId])
+  }, [planId, cacheKey, queuedMessages])
 
   useEffect(() => {
     const generations = generationRef
@@ -80,37 +131,50 @@ export function useChat (planId, { user, isActive = true }) {
 
   // Vuelve a pedir la primera página y la fusiona. Es un trabajo de fondo: si falla se conserva lo que se ve y el
   // próximo intento (otra reconexión o el siguiente tick del polling) lo vuelve a pedir; solo importa perder el acceso.
+  // De paso manda lo que haya quedado en la cola de pendientes.
   const recover = useCallback(async () => {
     const generation = generationRef.current
+    outbox.flush()
     try {
       const page = await listMessages(planId, { limit: PAGE_SIZE })
       if (generation !== generationRef.current) return
+      readCache.save(cacheKey, page)
       setState((current) => {
         const { messages, isReplaced } = mergeRecoveredPage(current.messages, page)
-        return { ...current, messages, nextCursor: isReplaced ? page.nextCursor : current.nextCursor }
+        // Si se estaba mostrando lo guardado, el cursor para ir hacia atrás es el de la página nueva.
+        const nextCursor = isReplaced || current.savedAt ? page.nextCursor : current.nextCursor
+        return { ...current, messages, nextCursor, savedAt: null }
       })
     } catch (failure) {
       if (generation !== generationRef.current) return
       const error = toApiError(failure)
       if (ACCESS_LOST.has(error.code)) setState((current) => ({ ...current, status: CHAT_STATUS.ERROR, error }))
     }
-  }, [planId])
+  }, [planId, cacheKey])
 
+  // El socket vive solo con la app en primer plano (S6-MOB-04): en segundo plano se suelta la sala (y, si era la
+  // última, la conexión) y al volver se reconecta y recupera lo que pasó mientras tanto.
   useEffect(() => {
+    if (!isForeground) {
+      setSocketStatus(SOCKET_STATUS.IDLE)
+      return undefined
+    }
     const stopStatus = socketService.onStatusChange(setSocketStatus)
     const unsubscribe = socketService.subscribe(
       planId,
       (message) => setState((current) => ({ ...current, messages: mergeMessages(current.messages, [message]) })),
       (error) => {
         if (ACCESS_LOST.has(error.code)) setState((current) => ({ ...current, status: CHAT_STATUS.ERROR, error }))
-      }
+      },
+      // Un admin lo ocultó: deja de verse (el historial ya no lo trae).
+      (messageId) => setState((current) => ({ ...current, messages: current.messages.filter((message) => message.id !== messageId) }))
     )
     setSocketStatus(socketService.getStatus())
     return () => {
       stopStatus()
       unsubscribe()
     }
-  }, [planId])
+  }, [planId, isForeground])
 
   // Cada vez que el socket se conecta (la primera, o después de una caída) se recupera el historial reciente.
   useEffect(() => {
@@ -119,10 +183,10 @@ export function useChat (planId, { user, isActive = true }) {
 
   const isPolling = socketStatus === SOCKET_STATUS.UNAVAILABLE
   useEffect(() => {
-    if (!isPolling || !isActive) return undefined
+    if (!isPolling || !isActive || !isForeground) return undefined
     const timer = setInterval(recover, POLL_INTERVAL_MS)
     return () => clearInterval(timer)
-  }, [isPolling, isActive, recover])
+  }, [isPolling, isActive, isForeground, recover])
 
   const loadOlder = useCallback(async () => {
     const { status, nextCursor } = stateRef.current
@@ -149,7 +213,29 @@ export function useChat (planId, { user, isActive = true }) {
     }))
   }, [])
 
+  const showAccessLost = useCallback((error) => {
+    // Ya no tiene acceso (p. ej. se dio de baja con el chat abierto): reintentar no sirve, se muestra el error.
+    if (ACCESS_LOST.has(error.code)) setState((current) => ({ ...current, status: CHAT_STATUS.ERROR, error }))
+  }, [])
+
+  // Lo que manda la cola de pendientes cuando vuelve la conexión.
+  useEffect(() => outbox.onSettled((item, outcome) => {
+    if (item.type !== OUTBOX_TYPE.MESSAGE || item.payload.planId !== planId) return
+    if (outcome.ok) {
+      if (outcome.result) setState((current) => ({ ...current, messages: mergeMessages(current.messages, [outcome.result]) }))
+      return
+    }
+    markUnsent(item.payload.clientId, { status: MESSAGE_STATUS.FAILED, queued: false, error: outcome.error })
+    showAccessLost(outcome.error)
+  }), [planId, markUnsent, showAccessLost])
+
   const deliver = useCallback(async ({ clientId, text }) => {
+    const enqueue = async () => {
+      markUnsent(clientId, { status: MESSAGE_STATUS.PENDING, queued: true, error: null })
+      await outbox.enqueue(OUTBOX_TYPE.MESSAGE, { planId, planTitle, text, clientId })
+    }
+    // Sin conexión ni se intenta: va directo a la cola.
+    if (!connectivity.isOnline()) return enqueue()
     try {
       let saved
       try {
@@ -161,26 +247,26 @@ export function useChat (planId, { user, isActive = true }) {
       setState((current) => ({ ...current, messages: mergeMessages(current.messages, [saved]) }))
     } catch (failure) {
       const error = toApiError(failure)
-      markUnsent(clientId, { status: MESSAGE_STATUS.FAILED, error })
-      // Ya no tiene acceso (p. ej. se dio de baja con el chat abierto): reintentar no sirve, se muestra el error.
-      if (ACCESS_LOST.has(error.code)) setState((current) => ({ ...current, status: CHAT_STATUS.ERROR, error }))
+      if (isTransportFailure(error)) return enqueue()
+      markUnsent(clientId, { status: MESSAGE_STATUS.FAILED, queued: false, error })
+      showAccessLost(error)
     }
-  }, [planId, markUnsent])
+  }, [planId, planTitle, markUnsent, showAccessLost])
 
   const send = useCallback((text) => {
     const trimmed = text.trim()
     if (!trimmed) return
     const clientId = createClientId()
-    const author = userRef.current
     const pending = {
       id: `local-${clientId}`,
       planId,
-      sender: author ? { id: author.id, name: author.name ?? null, photoUrl: author.photoUrl ?? null, reputation: author.reputation ?? 0 } : null,
+      sender: authorView(userRef.current),
       type: 'text',
       text: trimmed,
       clientId,
       createdAt: new Date().toISOString(),
       status: MESSAGE_STATUS.PENDING,
+      queued: false,
       error: null
     }
     setState((current) => ({ ...current, messages: sortMessages([pending, ...current.messages]) }))
@@ -188,9 +274,12 @@ export function useChat (planId, { user, isActive = true }) {
   }, [planId, deliver])
 
   /** Reintenta un envío fallido con el mismo `clientId`: si en realidad el servidor lo había guardado, no se duplica. */
-  const retrySend = useCallback((clientId) => {
+  const retrySend = useCallback(async (clientId) => {
     const failed = stateRef.current.messages.find((message) => message.clientId === clientId && message.status === MESSAGE_STATUS.FAILED)
     if (!failed) return
+    // Si falló desde la cola de pendientes, se saca de ahí: el reintento va directo.
+    const queued = (await outbox.list()).find((item) => item.type === OUTBOX_TYPE.MESSAGE && item.payload.clientId === clientId)
+    if (queued) await outbox.remove(queued.id)
     markUnsent(clientId, { status: MESSAGE_STATUS.PENDING, error: null })
     deliver({ clientId, text: failed.text })
   }, [markUnsent, deliver])
@@ -202,6 +291,7 @@ export function useChat (planId, { user, isActive = true }) {
     hasMore: state.nextCursor !== null,
     isLoadingOlder: state.isLoadingOlder,
     loadOlderError: state.loadOlderError,
+    savedAt: state.savedAt,
     isPolling,
     send,
     retrySend,

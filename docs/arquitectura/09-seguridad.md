@@ -13,7 +13,7 @@ Referencia: OWASP Top 10 (web) y OWASP API Security Top 10. Cada control indica 
 | Refresh token | JWT HS256 con `typ: 'refresh'`, `sid`, `jti` aleatorio, vida larga (30 días). Se guarda **solo su hash** (sha256) en `sessions.refreshTokenHash` |
 | Sesiones | Una por login/dispositivo, en la colección `sessions` ([ADR-0008](adr/0008-sesiones-multiples.md)). Máximo 5 activas por usuario: al abrir la sexta se revoca la más antigua. `POST /auth/logout` cierra la sesión del access token; `POST /auth/logout-all` cierra todas |
 | Rotación | Cada `/auth/refresh` emite un par nuevo y reemplaza el hash **de esa sesión** con una actualización condicional sobre el hash vigente (sin "consultar y después actualizar"). Si llega un refresh con firma válida pero que **no coincide** con el hash vigente (reuso de uno viejo), o la sesión está revocada o vencida → se revoca **solo esa sesión** y 401. Dos refresh simultáneos con el mismo token: gana uno, el otro se trata como reuso |
-| Usuario suspendido | `authenticate` responde 401 `ACCOUNT_SUSPENDED`; login y refresh revocan **todas** sus sesiones. Cuando un admin suspende (S6) debe llamar a `authService.revokeAllSessions(userId)` |
+| Usuario suspendido | `authenticate` responde 401 `ACCOUNT_SUSPENDED` (en cada request: la suspensión vale en el acto, aunque el access token no haya vencido); login y refresh revocan **todas** sus sesiones. Cuando un admin suspende (S6) se llama a `authService.revokeAllSessions(userId)` y se cierran sus conexiones de Socket.io en todas las instancias. Nadie se suspende a sí mismo y una cuenta admin no se suspende desde el panel |
 | Firma | Secreto fuerte (≥ 32 caracteres) de Secrets Manager. Al verificar se **fija el algoritmo** (`algorithms: ['HS256']`) para impedir `alg: none` o confusión de algoritmos |
 | Verificación | Middleware `authenticate`: firma, algoritmo, `exp`, `typ === 'access'`, usuario existe y `status === 'active'`. Decodificar sin verificar **no** autentica. Un access vencido es `TOKEN_EXPIRED`; un refresh vencido es `UNAUTHENTICATED` (para que la app no reintente el refresh) |
 
@@ -27,8 +27,9 @@ Referencia: OWASP Top 10 (web) y OWASP API Security Top 10. Cada control indica 
 | Solo el creador edita el plan, sube su foto y genera el QR | Servicio (`assertCreator`) |
 | Chat: participante activo o creador | Servicio (HTTP y Socket.io usan el mismo) |
 | Check-in: inscripción activa + ventana + QR + distancia | Servicio de check-in |
-| Reportes nunca visibles para otros usuarios | Servicio |
-| `/admin/*` requiere `role: 'admin'` | Middleware `requireRole('admin')` + servicio |
+| Reportes nunca visibles para otros usuarios; el objetivo tiene que ser accesible para quien reporta (si no, 404) | Servicio (no existe `GET /reports`) |
+| `/admin/*` requiere `role: 'admin'` | Middleware `requireRole('admin')` + servicio (`requireAdmin` en cada operación) |
+| El rol admin no se da por la API | Script operativo `npm run admin` (S6-BE-04), migración o seed |
 
 Las comprobaciones de **propiedad** van en el servicio (no en el controlador), así se testean sin HTTP y Socket.io las reutiliza. Un recurso ajeno que el usuario no debería ni saber que existe responde 404, no 403 (p. ej. reportes).
 
@@ -78,7 +79,7 @@ IP real vía `X-Forwarded-For` (sin esto el rate limit es global), rate limiting
 
 ## Logs
 
-Incluyen `requestId`, método, ruta, status, duración, `userId` cuando hay. **Nunca**: contraseñas, tokens, `Authorization`, coordenadas exactas, cuerpos completos, `qrToken`, URLs firmadas de S3, y los datos personales del perfil (`birthDate`, `neighborhood`, `city`). Ver [errores-y-logs.md](../practicas/errores-y-logs.md).
+Incluyen `requestId`, método, ruta, status, duración, `userId` cuando hay. **Nunca**: contraseñas, tokens, `Authorization`, coordenadas exactas, cuerpos completos, `qrToken`, URLs firmadas de S3, los datos personales del perfil (`birthDate`, `neighborhood`, `city`), el email, el texto del chat ni la descripción de un reporte (S6-BE-05: además de no loguearlos, `redact` los censura si aparecen). En AWS, `LOG_LEVEL=info` (el valor por defecto). Ver [errores-y-logs.md](../practicas/errores-y-logs.md).
 
 ## Red
 
@@ -87,7 +88,7 @@ Ninguna EC2 con IP pública ni puerto 22 abierto (Session Manager). Cadena de Se
 ## Checklist de verificación (sprint 7)
 
 - [ ] Internet no alcanza 8080, 3000, 6379, 27017 ni 22.
-- [ ] Token vencido → 401; plan ajeno → 403; reporte ajeno → 404.
+- [ ] Token vencido → 401; plan ajeno → 403; reporte ajeno → 404 *(cubierto por tests de contrato desde S6; falta verificarlo en AWS)*.
 - [ ] Ráfaga de requests → 429 desde Nginx con `requestId`, sin afectar a otros usuarios.
 - [ ] Body con operador Mongo (`$ne`, `$gt`) → 400.
 - [ ] Campos solo-backend en el body → 400.

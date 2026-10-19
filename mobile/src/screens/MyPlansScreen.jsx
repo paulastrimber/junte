@@ -5,8 +5,11 @@ import { Button } from '../components/Button.jsx'
 import { ChipGroup } from '../components/ChipGroup.jsx'
 import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorBanner } from '../components/ErrorBanner.jsx'
+import { ErrorState } from '../components/ErrorState.jsx'
+import { OfflineNotice } from '../components/OfflineNotice.jsx'
 import { PlanCard } from '../components/PlanCard.jsx'
 import { MY_PLANS_ROLE, MY_PLANS_WHEN, useMyPlans } from '../hooks/useMyPlans.js'
+import { useOfflineStatus } from '../hooks/useOffline.js'
 import { LIST_STATUS } from '../hooks/usePagedList.js'
 import { ROUTES } from '../navigation/routes.js'
 import { messageForError } from '../utils/errorMessages.js'
@@ -61,6 +64,7 @@ export default function MyPlansScreen ({ navigation }) {
   const [role, setRole] = useState(MY_PLANS_ROLE.JOINED)
   const [when, setWhen] = useState(MY_PLANS_WHEN.UPCOMING)
   const plans = useMyPlans({ role, when })
+  const offline = useOfflineStatus()
   const { loadMore, refresh, retry } = plans
 
   // Al volver a la pestaña la lista pudo cambiar (inscripciones, bajas, asistencia).
@@ -83,6 +87,13 @@ export default function MyPlansScreen ({ navigation }) {
 
   const header = (
     <View style={styles.header}>
+      <OfflineNotice
+        savedAt={plans.savedAt}
+        isOnline={offline.isOnline}
+        pendingCount={offline.pendingCount}
+        failedCount={offline.failedCount}
+        onOpenPending={() => navigation.navigate(ROUTES.PENDING_ACTIONS)}
+      />
       <ChipGroup label={TEXTS.role} options={ROLES} selected={[role]} onSelect={setRole} />
       <ChipGroup label={TEXTS.when} options={WHENS} selected={[when]} onSelect={setWhen} />
     </View>
@@ -117,9 +128,7 @@ export default function MyPlansScreen ({ navigation }) {
         ? (
           <View style={styles.center}>
             {header}
-            <Text style={styles.errorTitle}>{TEXTS.errorTitle}</Text>
-            <ErrorBanner message={messageForError(plans.error)} requestId={plans.error?.requestId} />
-            <Button title={TEXTS.retry} onPress={retry} />
+            <ErrorState title={TEXTS.errorTitle} error={plans.error} onRetry={retry} retryTitle={TEXTS.retry} />
           </View>
           )
         : null}
@@ -151,6 +160,5 @@ const styles = StyleSheet.create({
   center: { padding: 16, gap: 12 },
   header: { gap: 12, marginBottom: 4 },
   list: { padding: 16, gap: 12 },
-  errorTitle: { fontSize: 16, fontWeight: '600', color: '#b42318' },
   footer: { paddingVertical: 16, gap: 8 }
 })

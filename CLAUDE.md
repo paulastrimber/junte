@@ -93,7 +93,7 @@ Flujo: `ruta → middlewares → controlador → servicio → repositorio/modelo
 - Paginación: `limit` (20, máx 100) + `cursor` opaco → `{ items, nextCursor }` (`null` al final).
 - Todas las rutas de negocio requieren `Authorization: Bearer <access_token>`. Públicas: `/auth/register`, `/auth/login`, `/auth/refresh` y `GET /health` (sin prefijo, 200/503).
 - Códigos: 400 validación, 401 token ausente/inválido/vencido, 403 sin permiso, 404 inexistente, 409 conflicto (cupo, duplicado, estado), 429 rate limit, 500 sin detalles sensibles.
-- Endpoints: `auth/*` (`register`, `login`, `refresh`, `logout`, `logout-all`), `users/me` (+ `/photo`, `/plans`), `catalogs`, `plans` (GET/POST), `plans/filters`, `feed` (POST), `plans/:id` (GET/PATCH), `plans/:id/join` (POST/DELETE), `plans/:id/participants`, `plans/:id/qr`, `plans/:id/check-in`, `plans/:id/messages` (GET/POST), `plans/:id/photo`, `reports`, `uploads/presign`. Parámetros y permisos en [06-api.md](docs/arquitectura/06-api.md).
+- Endpoints: `auth/*` (`register`, `login`, `refresh`, `logout`, `logout-all`), `users/me` (+ `/photo`, `/plans`), `catalogs`, `plans` (GET/POST), `plans/filters`, `feed` (POST), `plans/:id` (GET/PATCH), `plans/:id/join` (POST/DELETE), `plans/:id/participants`, `plans/:id/qr`, `plans/:id/check-in`, `plans/:id/messages` (GET/POST), `plans/:id/photo`, `reports`, `uploads/presign` y, solo con rol admin, `admin/reports`, `admin/messages/:id`, `admin/users/:id`, `admin/metrics`, `admin/catalogs/:catalog`. Parámetros y permisos en [06-api.md](docs/arquitectura/06-api.md).
 
 ## Modelo de datos
 
@@ -151,6 +151,7 @@ task up           # entorno local (Nginx, back, Mongo RS, Redis)
 task db:migrate   # migraciones
 task db:catalogs:sync # suma a la base entradas nuevas de back-service/catalogs/ (solo inserta)
 task db:seed      # datos de desarrollo (usa SEED_PASSWORD de back-service/.env; `task setup` la genera)
+task db:admin -- promote <email>   # da el rol admin (sin API; `create` toma ADMIN_PASSWORD del entorno)
 task ci           # lint + tests + migraciones + nginx -t (antes de cada PR)
 task front:smoke  # smoke test de Nginx contra el entorno local
 task --list       # todo lo demás

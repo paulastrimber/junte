@@ -5,10 +5,13 @@ import { Button } from '../components/Button.jsx'
 import { ChipGroup } from '../components/ChipGroup.jsx'
 import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorBanner } from '../components/ErrorBanner.jsx'
+import { ErrorState } from '../components/ErrorState.jsx'
 import { FeedFilters } from '../components/FeedFilters.jsx'
+import { OfflineNotice } from '../components/OfflineNotice.jsx'
 import { PlanCard } from '../components/PlanCard.jsx'
 import { FEED_MODE, FEED_STATUS, useFeed } from '../hooks/useFeed.js'
 import { useFeedFilters } from '../hooks/useFeedFilters.js'
+import { useOfflineStatus } from '../hooks/useOffline.js'
 import { ROUTES } from '../navigation/routes.js'
 import { LOCATION_STATUS } from '../services/location.js'
 import { messageForError } from '../utils/errorMessages.js'
@@ -46,6 +49,7 @@ export default function HomeScreen ({ navigation }) {
   const filters = useFeedFilters()
   const feed = useFeed({ query: filters.query, radiusKm: filters.radiusKm })
   const [areFiltersOpen, setAreFiltersOpen] = useState(false)
+  const offline = useOfflineStatus()
   // Los manejadores se pasan como identificadores sueltos (regla react/jsx-handler-names).
   const { loadMore, refresh, retry } = feed
   const { setValue, toggleInterest, togglePriceRange, reset } = filters
@@ -70,6 +74,13 @@ export default function HomeScreen ({ navigation }) {
 
   const header = (
     <View style={styles.header}>
+      <OfflineNotice
+        savedAt={feed.savedAt}
+        isOnline={offline.isOnline}
+        pendingCount={offline.pendingCount}
+        failedCount={offline.failedCount}
+        onOpenPending={() => navigation.navigate(ROUTES.PENDING_ACTIONS)}
+      />
       <ChipGroup label={TEXTS.section} options={SECTIONS} selected={[filters.values.availability]} onSelect={(key) => setValue('availability', key)} />
       <Button title={filtersTitle} variant='secondary' onPress={() => setAreFiltersOpen(true)} />
       {isFullSection ? <Text style={styles.notice}>{TEXTS.fullHint}</Text> : null}
@@ -113,9 +124,7 @@ export default function HomeScreen ({ navigation }) {
         ? (
           <View style={styles.center}>
             {header}
-            <Text style={styles.errorTitle}>{TEXTS.errorTitle}</Text>
-            <ErrorBanner message={messageForError(feed.error)} requestId={feed.error?.requestId} />
-            <Button title={TEXTS.retry} onPress={retry} />
+            <ErrorState title={TEXTS.errorTitle} error={feed.error} onRetry={retry} retryTitle={TEXTS.retry} />
           </View>
           )
         : null}
@@ -160,7 +169,6 @@ const styles = StyleSheet.create({
   header: { gap: 12, marginBottom: 4 },
   list: { padding: 16, gap: 12 },
   notice: { fontSize: 13, color: '#8a5a00', backgroundColor: '#fff6e0', padding: 10, borderRadius: 8 },
-  errorTitle: { fontSize: 16, fontWeight: '600', color: '#b42318' },
   footer: { paddingVertical: 16, gap: 8 },
   end: { textAlign: 'center', color: '#777', paddingVertical: 16 }
 })

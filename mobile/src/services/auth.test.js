@@ -85,6 +85,29 @@ describe('restore (al abrir la app)', () => {
     await expect(service.restore()).rejects.toMatchObject({ code: CLIENT_ERROR_CODES.NETWORK_ERROR })
     expect(secureStore.data.size).toBe(2)
   })
+
+  it('sin conexión, con un perfil guardado, entra con ese perfil (S6: la app se abre sin red)', async () => {
+    const saved = []
+    const profileCache = { save: jest.fn(async (user) => { saved.push(user) }), load: jest.fn(async () => saved.at(-1) ?? null) }
+    const secureStore = createMemorySecureStore(SAVED)
+    const api = { getMe: jest.fn().mockResolvedValueOnce(USER).mockRejectedValueOnce(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.TIMEOUT })) }
+    const service = createAuthService({ tokenStorage: createTokenStorage({ secureStore }), api, deviceLabel: 'android', profileCache })
+
+    expect(await service.restore()).toEqual(USER)
+    expect(await service.restore()).toEqual(USER)
+    expect(profileCache.save).toHaveBeenCalledWith(USER)
+    expect(secureStore.data.size).toBe(2)
+  })
+
+  it('un 401 nunca entra con el perfil guardado: la sesión terminó', async () => {
+    const profileCache = { save: jest.fn(), load: jest.fn(async () => USER) }
+    const secureStore = createMemorySecureStore(SAVED)
+    const api = { getMe: jest.fn().mockRejectedValue(unauthorized()) }
+    const service = createAuthService({ tokenStorage: createTokenStorage({ secureStore }), api, deviceLabel: 'android', profileCache })
+
+    expect(await service.restore()).toBeNull()
+    expect(profileCache.load).not.toHaveBeenCalled()
+  })
 })
 
 describe('refreshSession', () => {

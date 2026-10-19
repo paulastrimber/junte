@@ -24,6 +24,11 @@ export const CHAT_ERROR_MESSAGES = Object.freeze({
 
 const GENERIC = 'Ocurrió un error inesperado. Probá de nuevo.'
 
+/** No hubo respuesta del servidor (sin conexión o se demoró demasiado): se muestra como "sin conexión". */
+export function isOfflineError (error) {
+  return isApiError(error) && (error.code === CLIENT_ERROR_CODES.NETWORK_ERROR || error.code === CLIENT_ERROR_CODES.TIMEOUT)
+}
+
 /**
  * @param {unknown} error
  * @param {Record<string, string>} [overrides]  Textos propios de una acción (inscribirse, check-in…): el mismo `code`

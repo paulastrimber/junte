@@ -35,7 +35,7 @@ Estos casos salen del informe (7.5) y de las reglas de negocio. Cada uno tiene s
 - [x] Usuario `suspended` → 401.
 - [x] Refresh reutilizado tras rotación → 401 y sesión revocada *(solo esa sesión; 10 refresh simultáneos → 1 éxito)*.
 - [x] `PATCH /plans/:id` de un plan ajeno → 403. *(tests/contract/plans.test.js, src/modules/plans/plan.service.test.js; también `PUT …/photo` y `presign` con `planId`)*
-- [ ] `/admin/*` sin rol admin → 403. *(`requireRole` ya está probado con una ruta de prueba: falta repetirlo sobre las rutas reales de `/admin` en S6)*
+- [x] `/admin/*` sin rol admin → 403. *(tests/contract/admin.test.js: cada ruta real con un usuario común, sin token → 401, y el servicio también lo rechaza)*
 
 **Validación**
 - [x] Campos solo-backend en el body (`creatorId`, `reputation`, `participantCount`, `role`…) → 400. *(`/auth` y `/users/me`: `role`, `status`, `reputation`, `age`, `photoKey`, `passwordHash`; `/plans`: `creatorId`, `participantCount`, `university`, `status`, `photoKey`, `qrNonceHash`)*
@@ -72,7 +72,7 @@ Estos casos salen del informe (7.5) y de las reglas de negocio. Cada uno tiene s
 - [x] No participante → 403 por REST y por Socket.io. *(tests/contract/messages.test.js, chat-socket.test.js; también después de darse de baja, y la baja lo saca de la sala)*
 - [x] Texto vacío o > 2000 → 400. *(también de solo espacios; por REST y por socket)*
 - [x] Reintento de `chat:send` con el mismo `clientId` → un solo mensaje. *(también reintentos simultáneos por REST y socket + REST con el mismo `clientId`; índice en tests/integration/indexes-and-validators.test.js)*
-- [ ] Reportes (S5/S6).
+- [x] Reportes (S6). *(tests/contract/reports.test.js: 404 si no lo puede ver, 400 si es propio, pendiente repetido → mismo reporte, nunca listable por usuarios; la descripción no va al log)*
 - [x] Un mensaje enviado a la instancia A llega a un cliente conectado a la B. *(`task chat:two-instances` contra docker-compose; corrido OK el 2026-10-14)*
 
 **Contrato general**

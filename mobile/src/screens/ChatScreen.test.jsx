@@ -100,11 +100,11 @@ describe('ChatScreen: estados', () => {
     expect(screen.getByText('Mensaje 1')).toBeOnTheScreen()
   })
 
-  it('error: muestra el motivo y permite reintentar', async () => {
+  it('error: muestra el motivo y permite reintentar (sin conexión lo dice así)', async () => {
     listMessages.mockRejectedValueOnce(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR)).mockResolvedValueOnce({ items: [message(1)], nextCursor: null })
 
     await renderChat()
-    expect(await screen.findByText(TEXTS.errorTitle)).toBeOnTheScreen()
+    expect(await screen.findByText('Sin conexión')).toBeOnTheScreen()
     expect(screen.getByText('No pudimos conectarnos con el servidor. Revisá tu conexión.')).toBeOnTheScreen()
     await fireEvent.press(screen.getByRole('button', { name: TEXTS.retry }))
 

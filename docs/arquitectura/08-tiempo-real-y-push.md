@@ -27,7 +27,10 @@ App ──WSS /api/v1/socket.io──▶ ALB público ──▶ Nginx (rewrite) 
 | `chat:leave` | C → S | `{ planId }` | `{ ok }` |
 | `chat:send` | C → S | `{ planId, text, clientId }` | `{ ok, message }`; persiste y emite `chat:message` a la sala |
 | `chat:message` | S → C | mensaje serializado | — |
-| `chat:hidden` | S → C | `{ messageId }` | Un admin ocultó un mensaje |
+| `chat:hidden` | S → C | `{ planId, messageId }` | Un admin ocultó un mensaje (S6): la app lo saca de la lista. Volver a mostrarlo no emite nada (aparece al recargar el historial) |
+
+- **Suspensión (S6):** cuando un admin suspende una cuenta, además de cerrar sus sesiones se cierran todas sus conexiones en todas las instancias (`io.in('user:<id>').disconnectSockets(true)`); al reconectar, el handshake la rechaza con `ACCOUNT_SUSPENDED`. Cierra el punto de [pendientes · H](../pendientes.md#h-notas-del-sprint-5-chat) para la suspensión (no para `logout`/`logout-all`, que sigue igual).
+- **Segundo plano (S6-MOB-04):** con la app en segundo plano la app suelta la sala (y, si era la última, la conexión) y no hace polling; al volver se reconecta y recupera el historial.
 
 - `chat:send` usa **acknowledgements** y un `clientId` generado en el teléfono para que un reintento no duplique el mensaje (idempotencia): un reintento responde `{ ok, message }` con el mensaje ya creado y no se vuelve a emitir. El mismo `clientId` sirve para el fallback por REST.
 - Mismo servicio y mismas validaciones que `POST /plans/:id/messages`: los handlers de socket son solo otro "controlador". `chat:message` es el mismo JSON que devuelve REST ([06](06-api.md#chat)) y llega también a quien lo mandó (la app fusiona por `id`/`clientId`). Un mensaje enviado por REST también se emite a la sala.

@@ -72,6 +72,19 @@ export function createCheckInRepository (CheckInModel) {
       if (!mongoose.isValidObjectId(userId) || valid.length === 0) return []
       const docs = await CheckInModel.find({ userId, planId: { $in: valid } }).lean()
       return docs.map(toEntity)
+    },
+
+    /**
+     * Para las métricas del panel.
+     * @param {{ since: Date }} params
+     * @returns {Promise<{ total: number, createdSince: number }>}
+     */
+    async countMetrics ({ since }) {
+      const [total, createdSince] = await Promise.all([
+        CheckInModel.countDocuments({}),
+        CheckInModel.countDocuments({ checkedInAt: { $gte: since } })
+      ])
+      return { total, createdSince }
     }
   }
 }

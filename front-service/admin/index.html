@@ -3,12 +3,41 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
   <title>junte · admin</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+  <script type="module" src="/admin/app.js"></script>
 </head>
 <body>
-  <main>
-    <h1>junte · panel de administración</h1>
-    <p>En construcción (sprint 6). Las operaciones van a <code>/api/v1/admin/*</code> y requieren un usuario con <code>role: admin</code>.</p>
+  <!-- Panel estático (S6-NG-01). Las operaciones van a /api/v1/admin/* y la autorización la decide el back
+       (rol admin). El token vive solo en memoria: al recargar la página hay que volver a iniciar sesión. -->
+  <header class="topbar">
+    <div class="brand">junte <span class="brand-tag">admin</span></div>
+    <nav class="tabs" id="nav" hidden>
+      <button type="button" class="tab" data-view="reports">Reportes</button>
+      <button type="button" class="tab" data-view="metrics">Métricas</button>
+      <button type="button" class="tab" data-view="catalogs">Catálogos</button>
+    </nav>
+    <div class="session" id="session" hidden>
+      <span id="session-email"></span>
+      <button type="button" class="link" id="logout">Cerrar sesión</button>
+    </div>
+  </header>
+
+  <div class="banner" id="banner" role="alert" hidden></div>
+
+  <main id="main">
+    <section class="login" id="login-view">
+      <h1>Panel de administración</h1>
+      <p class="muted">Ingresá con una cuenta que tenga el rol de administración.</p>
+      <form id="login-form" autocomplete="on">
+        <label>Email <input type="email" name="email" required autocomplete="username"></label>
+        <label>Contraseña <input type="password" name="password" required autocomplete="current-password"></label>
+        <button type="submit" class="primary">Ingresar</button>
+      </form>
+    </section>
+    <section id="app-view" hidden></section>
   </main>
+  <noscript>El panel necesita JavaScript.</noscript>
 </body>
 </html>

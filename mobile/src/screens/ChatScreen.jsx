@@ -1,16 +1,20 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, TextInput, View } from 'react-native'
+import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Pressable, TextInput, View } from 'react-native'
 
 import { Avatar } from '../components/Avatar.jsx'
 import { Button } from '../components/Button.jsx'
 import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorBanner } from '../components/ErrorBanner.jsx'
+import { ErrorState } from '../components/ErrorState.jsx'
 import { Icon } from '../components/Icon.jsx'
 import { LoadingState } from '../components/LoadingState.jsx'
 import { Notice } from '../components/Notice.jsx'
+import { OfflineNotice } from '../components/OfflineNotice.jsx'
 import { Text } from '../components/Text.jsx'
 import { CHAT_STATUS, POLL_INTERVAL_MS, useChat } from '../hooks/useChat.js'
 import { useAuth } from '../hooks/useAuth.js'
+import { useIsOnline } from '../hooks/useOffline.js'
+import { ROUTES } from '../navigation/routes.js'
 import { MAX_MESSAGE_LENGTH, MESSAGE_STATUS, formatMessageTime } from '../utils/chat.js'
 import { CHAT_ERROR_MESSAGES, messageForError } from '../utils/errorMessages.js'
 import { createThemedStyles, radius, sizes, spacing, typography, useTheme } from '../theme/index.js'
@@ -32,7 +36,13 @@ export const TEXTS = Object.freeze({
   unsupported: 'Mensaje no compatible con esta versión de la app',
   loadingOlder: 'Cargando mensajes anteriores…',
   loadOlderError: 'No pudimos cargar los mensajes anteriores.',
-  polling: `Sin conexión en tiempo real: actualizamos cada ${POLL_INTERVAL_MS / 1000} s`
+  polling: `Sin conexión en tiempo real: actualizamos cada ${POLL_INTERVAL_MS / 1000} s`,
+  queued: 'Pendiente: se envía cuando vuelva la conexión',
+  messageActions: 'Mensaje',
+  reportMessage: 'Reportar mensaje',
+  reportLabel: (name) => `el mensaje de ${name ?? 'esta persona'}`,
+  cancel: 'Cancelar',
+  longPressHint: 'Mantené presionado para reportarlo'
 })
 
 // El contador aparece cerca del límite, no en cada mensaje.
@@ -41,7 +51,7 @@ const COUNTER_FROM = 1800
 const keyOf = (message) => message.clientId ?? message.id
 
 /** Una burbuja: propia a la derecha, ajena a la izquierda con foto y nombre. Presentacional. */
-const MessageRow = memo(function MessageRow ({ message, isOwn, onRetry }) {
+const MessageRow = memo(function MessageRow ({ message, isOwn, onRetry, onLongPress }) {
   const styles = useStyles()
   const isPending = message.status === MESSAGE_STATUS.PENDING
   const isFailed = message.status === MESSAGE_STATUS.FAILED
@@ -55,13 +65,18 @@ const MessageRow = memo(function MessageRow ({ message, isOwn, onRetry }) {
     <View style={[styles.row, isOwn && styles.rowOwn]}>
       {isOwn ? null : <Avatar photoUrl={message.sender?.photoUrl} name={message.sender?.name} size={32} />}
       <View style={styles.column}>
-        <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther, isPending && styles.pending, isFailed && styles.bubbleFailed]}>
+        <Pressable
+          // Los mensajes de otros se pueden reportar (S6-MOB-03). Los propios y los no confirmados, no.
+          onLongPress={onLongPress ? () => onLongPress(message) : undefined}
+          accessibilityHint={onLongPress ? TEXTS.longPressHint : undefined}
+          style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther, isPending && styles.pending, isFailed && styles.bubbleFailed]}
+        >
           {isOwn ? null : <Text variant='label' color='primary'>{name}</Text>}
           {isText
             ? <Text color={bodyColor} selectable>{message.text}</Text>
             : <Text color={metaColor} variant='caption'>{TEXTS.unsupported}</Text>}
-          <Text variant='caption' color={metaColor} style={styles.time}>{isPending ? TEXTS.sending : formatMessageTime(message.createdAt)}</Text>
-        </View>
+          <Text variant='caption' color={metaColor} style={styles.time}>{isPending ? (message.queued ? TEXTS.queued : TEXTS.sending) : formatMessageTime(message.createdAt)}</Text>
+        </Pressable>
         {isFailed
           ? (
             <View style={[styles.failed, isOwn && styles.failedOwn]}>
@@ -151,11 +166,12 @@ function useIsFocused (navigation) {
 }
 
 export default function ChatScreen ({ navigation, route }) {
-  const { planId } = route.params
+  const { planId, title } = route.params
   const styles = useStyles()
   const { user } = useAuth()
+  const isOnline = useIsOnline()
   const isFocused = useIsFocused(navigation)
-  const chat = useChat(planId, { user, isActive: isFocused })
+  const chat = useChat(planId, { user, isActive: isFocused, planTitle: title ?? null })
   const { loadOlder, retrySend, send, reload } = chat
   const userId = user?.id
 
@@ -166,9 +182,19 @@ export default function ChatScreen ({ navigation, route }) {
     containerRef.current?.measureInWindow?.((_x, y) => setKeyboardOffset(y))
   }, [])
 
-  const renderMessage = useCallback(({ item }) => (
-    <MessageRow message={item} isOwn={item.sender?.id === userId} onRetry={retrySend} />
-  ), [userId, retrySend])
+  // Pulsación larga sobre un mensaje de otra persona: reportarlo.
+  const openMessageActions = useCallback((message) => {
+    Alert.alert(TEXTS.messageActions, message.text, [
+      { text: TEXTS.reportMessage, style: 'destructive', onPress: () => navigation.navigate(ROUTES.REPORT, { targetType: 'message', targetId: message.id, label: TEXTS.reportLabel(message.sender?.name) }) },
+      { text: TEXTS.cancel, style: 'cancel' }
+    ])
+  }, [navigation])
+
+  const renderMessage = useCallback(({ item }) => {
+    const isOwn = item.sender?.id === userId
+    const canReport = !isOwn && item.status === MESSAGE_STATUS.SENT
+    return <MessageRow message={item} isOwn={isOwn} onRetry={retrySend} onLongPress={canReport ? openMessageActions : undefined} />
+  }, [userId, retrySend, openMessageActions])
 
   function olderFooter () {
     if (chat.isLoadingOlder) {
@@ -192,17 +218,14 @@ export default function ChatScreen ({ navigation, route }) {
   function body () {
     if (chat.status === CHAT_STATUS.LOADING) return <LoadingState label={TEXTS.loading} fill />
     if (chat.status === CHAT_STATUS.ERROR) {
-      return (
-        <View style={styles.error}>
-          <Text variant='heading' center>{TEXTS.errorTitle}</Text>
-          <ErrorBanner message={messageForError(chat.error, CHAT_ERROR_MESSAGES)} requestId={chat.error?.requestId} />
-          <Button title={TEXTS.retry} onPress={reload} />
-        </View>
-      )
+      return <ErrorState title={TEXTS.errorTitle} error={chat.error} messages={CHAT_ERROR_MESSAGES} onRetry={reload} retryTitle={TEXTS.retry} fill />
     }
     return (
       <>
-        {chat.isPolling ? <View style={styles.banner}><Notice tone='warning' message={TEXTS.polling} /></View> : null}
+        {chat.savedAt || !isOnline
+          ? <View style={styles.banner}><OfflineNotice savedAt={chat.savedAt} isOnline={isOnline} /></View>
+          : null}
+        {chat.isPolling && isOnline ? <View style={styles.banner}><Notice tone='warning' message={TEXTS.polling} /></View> : null}
         {chat.messages.length === 0
           // Una lista invertida también da vuelta su "vacío": por eso va aparte.
           ? <View style={styles.empty}><EmptyState icon='chatbubbles-outline' title={TEXTS.emptyTitle} message={TEXTS.emptyMessage} /></View>
@@ -240,7 +263,6 @@ const useStyles = createThemedStyles(({ colors }) => ({
   screen: { flex: 1, backgroundColor: colors.background },
   list: { padding: spacing.lg, gap: spacing.sm },
   empty: { flex: 1, justifyContent: 'center' },
-  error: { flex: 1, justifyContent: 'center', padding: spacing.xl, gap: spacing.md },
   banner: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
   footer: { paddingVertical: spacing.md, gap: spacing.sm },
 
