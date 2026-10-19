@@ -135,7 +135,7 @@ Access log en JSON: `time`, `requestId`, `remoteAddr` (IP real), `method`, `path
 ## Health checks
 
 - `GET /health` lo responde Nginx: indica que **Nginx** está vivo, no que el back lo esté.
-- `GET /internal/health` lo responde Express: 200 si MongoDB (y Redis) responden, 503 si no. Lo usa el ALB interno.
+- `GET /internal/health` lo responde Express: 503 si MongoDB no responde; si Redis está caído responde 200 con `status: 'degraded'` ([06-api.md](06-api.md#salud)). Lo usa el ALB interno.
 - `/internal/*` **no** se publica hacia afuera: solo se llega pasando por la reescritura de `/api/v1` (Nginx responde 404 JSON a `/internal/*`).
 
 ## Panel `/admin`

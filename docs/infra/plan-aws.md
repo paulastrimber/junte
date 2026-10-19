@@ -247,7 +247,7 @@ Cada paso indica qué es, cómo se hace, qué hace falta antes, cómo se verific
 - **Cómo:** consola, Billing, Budgets, "Create budget", tipo costo, 30 USD, avisos al 50 % y al 80 % del gasto real y al 100 % del proyectado. Por CLI es `aws budgets create-budget`.
 - **Antes:** un mail donde recibir los avisos.
 - **Verificación:** el presupuesto aparece en la lista y llega el mail de confirmación.
-- **En la cuenta A no lo bloquea** (paso 0.3, 2026-10-18): falta crearla a mano.
+- ✅ **Hecho en la cuenta A** (2026-10-19): Budgets no está bloqueado (paso 0.3) y la alerta está configurada.
 - **Si el lab lo bloquea** (acceso denegado): el control pasa a ser manual. Anotar el contador de crédito del lab al abrir y al cerrar cada sesión, y cumplir siempre la [rutina de cierre](#rutina-de-cada-sesión). El contador también se actualiza con atraso.
 - **Depende de:** nada. Es el primer paso en las dos cuentas.
 
@@ -505,7 +505,7 @@ Si no se llega a borrar antes de que venza la sesión, hay que abrir otra para h
 
 Cosas que aparecieron al armar este plan y que resuelven otras personas:
 
-- **Back · Redis y el health check.** `/internal/health` responde 503 si Redis no contesta. El ALB interno sacaría entonces a todas las instancias y la API entera quedaría caída, no solo el chat. `pendientes.md` dice que si Redis cae el chat sigue por polling: con el health check actual eso no pasa. Hay que decidir si Redis cuenta para el health.
+- ✅ **Back · Redis y el health check** (resuelto el 2026-10-19). `/internal/health` respondía 503 si Redis no contestaba, y el ALB interno habría sacado a todas las instancias. Ahora el 503 depende solo de MongoDB y Redis caído es 200 con `status: 'degraded'` ([06-api.md](../arquitectura/06-api.md#salud)). En AWS, una caída de Redis no se ve en los destinos del ALB: hay que mirar el cuerpo del health o una alarma de ElastiCache (S6).
 - **Back · secretos.** Decidir entre SDK y variables (paso 0.5) y acordar los nombres de los secretos.
 - **Back · `trust proxy`.** Si el back usa `req.ip`, configurarlo acorde a la cadena ALB, Nginx, ALB.
 - **Back · migraciones.** Se corren a mano antes de cada versión, con un usuario distinto al de la app.
