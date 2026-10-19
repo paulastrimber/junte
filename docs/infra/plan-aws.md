@@ -2,7 +2,7 @@
 
 Plan de trabajo de la responsable de AWS: qué hay hecho, qué falta, en qué orden hacerlo, cuánto cuesta y cómo verificarlo.
 
-**Estado (2026-10-18):** en la cuenta A está desplegado `junte-dev-network` (pasos 1.3 y 1.4, template `10-network.yml`). El resto de los templates que nombra este plan todavía no existe en `main`.
+**Estado (2026-10-19):** en la cuenta A están desplegados `junte-dev-network` (pasos 1.3 y 1.4, `10-network.yml`) y `junte-dev-base` (pasos 1.1 y 1.2, `00-base.yml`; evidencia en [docs/evidencia/](../evidencia/s1-base-pasos-1.1-1.2.md)). El resto de los templates que nombra este plan todavía no existe.
 
 Escrito el 2026-10-12 a partir del informe de arquitectura (`docs/junte.pdf`), `CLAUDE.md`, `docs/` e `infra/`.
 
@@ -32,8 +32,8 @@ El informe y `docs/` están escritos pensando en una cuenta común. En Learner L
 |--------------------------------------|----------------|
 | MFA en root, no usar root | No hay acceso a root. No aplica |
 | Usuario IAM o SSO para trabajar | No se pueden crear usuarios ni grupos IAM. Se trabaja con las credenciales temporales del lab, que vencen al terminar cada sesión |
-| Roles IAM de mínimo privilegio por capa | **(comprobar)** No se pueden crear roles. Todas las EC2 usan `LabRole` / `LabInstanceProfile`, que tiene permisos amplios. Es un desvío respecto del informe; ver [Roles IAM](#roles-iam-el-desvío-más-importante) |
-| Alerta de AWS Budgets | **(comprobar)** El lab suele bloquear Billing y Budgets. Si es así, el control es el contador de crédito del lab y la rutina de apagado |
+| Roles IAM de mínimo privilegio por capa | **Comprobado (0.3): no se pueden crear roles.** Todas las EC2 usan `LabRole` / `LabInstanceProfile`, que tiene permisos amplios. Es un desvío respecto del informe; ver [Roles IAM](#roles-iam-el-desvío-más-importante) |
+| Alerta de AWS Budgets | **Comprobado (0.3): Budgets abre en esta cuenta**, así que la alerta del paso 0.2 se puede crear. El contador de crédito del lab y la rutina de apagado siguen siendo el control principal |
 | Infraestructura encendida | Al terminar la sesión (4 horas) el lab **detiene las EC2** y las vuelve a arrancar en la sesión siguiente. **No apaga NAT, ALB, ElastiCache ni endpoints: siguen cobrando.** Por eso hay que borrar esos stacks al terminar cada sesión |
 | Límites | **(comprobar)** Hasta 9 EC2 encendidas a la vez, tipos hasta `large`. La topología completa usa 7 |
 
@@ -53,7 +53,12 @@ El informe y `docs/` están escritos pensando en una cuenta común. En Learner L
 
 ### Lo de AWS
 
-Hecho: `infra/templates/10-network.yml` con sus parámetros de `dev` y `entrega` (red y Security Groups; S1-INF-05 sin los NAT ni los endpoints de interfaz, y S1-INF-06 sin la prueba con instancias). Tareas abiertas:
+Hecho:
+
+- `infra/templates/10-network.yml` con sus parámetros de `dev` y `entrega` (red y Security Groups; S1-INF-05 sin los NAT ni los endpoints de interfaz, y S1-INF-06 sin la prueba con instancias).
+- `infra/templates/00-base.yml` con sus parámetros (S1-INF-07 sin Redis): buckets de fotos y de operación, ECR, grupos de logs y los secretos `junte/<env>/jwt-secret`, `mongo-admin`, `mongo-app`, `mongo-migrations`, `mongo-backup` y `mongo-keyfile`. Los roles por capa están escritos detrás de `CreateIamRoles`, en `false` en el lab. Quedan para más adelante `mongo-app-uri` (paso 1.6) y `fcm-service-account` (paso 5.1).
+
+Tareas abiertas:
 
 | Tarea | Qué es |
 |-------|--------|
@@ -242,7 +247,8 @@ Cada paso indica qué es, cómo se hace, qué hace falta antes, cómo se verific
 - **Cómo:** consola, Billing, Budgets, "Create budget", tipo costo, 30 USD, avisos al 50 % y al 80 % del gasto real y al 100 % del proyectado. Por CLI es `aws budgets create-budget`.
 - **Antes:** un mail donde recibir los avisos.
 - **Verificación:** el presupuesto aparece en la lista y llega el mail de confirmación.
-- **Si el lab lo bloquea** (acceso denegado, es lo esperable): el control pasa a ser manual. Anotar el contador de crédito del lab al abrir y al cerrar cada sesión, y cumplir siempre la [rutina de cierre](#rutina-de-cada-sesión). El contador también se actualiza con atraso.
+- **En la cuenta A no lo bloquea** (paso 0.3, 2026-10-18): falta crearla a mano.
+- **Si el lab lo bloquea** (acceso denegado): el control pasa a ser manual. Anotar el contador de crédito del lab al abrir y al cerrar cada sesión, y cumplir siempre la [rutina de cierre](#rutina-de-cada-sesión). El contador también se actualiza con atraso.
 - **Depende de:** nada. Es el primer paso en las dos cuentas.
 
 **0.3 · Comprobar los límites del lab**
