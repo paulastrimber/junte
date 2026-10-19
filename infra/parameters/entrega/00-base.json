@@ -1,0 +1,5 @@
+[
+  { "ParameterKey": "Env", "ParameterValue": "entrega" },
+  { "ParameterKey": "NameSuffix", "ParameterValue": "95xbnn" },
+  { "ParameterKey": "CreateIamRoles", "ParameterValue": "false" }
+]
