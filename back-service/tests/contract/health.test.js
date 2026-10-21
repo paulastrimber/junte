@@ -1,4 +1,5 @@
 // Contrato de GET /internal/health (S1-BE-04): lo usa el health check del ALB interno.
+// El código HTTP depende solo de MongoDB; Redis se informa en checks (ver docs/pendientes.md).
 import request from 'supertest'
 import { describe, expect, it } from 'vitest'
 import { createLogger } from '../../src/adapters/logger.js'
@@ -27,11 +28,20 @@ describe('GET /internal/health', () => {
     expect(res.body).toEqual({ status: 'unavailable', checks: { mongo: 'down', redis: 'up' } })
   })
 
-  it('503 si Redis no responde', async () => {
+  // Si Redis cae, la API sigue sirviendo (el chat pasa a polling): el ALB interno no debe sacar
+  // a las instancias, así que el código sigue siendo 200 y Redis se informa como degradado.
+  it('200 degradado si Redis no responde', async () => {
     const res = await request(appWith({ pingDb: up, pingRedis: down })).get('/internal/health')
 
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ status: 'degraded', checks: { mongo: 'up', redis: 'down' } })
+  })
+
+  it('503 si no responde ninguno', async () => {
+    const res = await request(appWith({ pingDb: down, pingRedis: down })).get('/internal/health')
+
     expect(res.status).toBe(503)
-    expect(res.body.checks).toEqual({ mongo: 'up', redis: 'down' })
+    expect(res.body).toEqual({ status: 'unavailable', checks: { mongo: 'down', redis: 'down' } })
   })
 
   it('un ping que lanza cuenta como caído y no filtra el error', async () => {
@@ -45,14 +55,15 @@ describe('GET /internal/health', () => {
 
   it('un ping colgado cuenta como caído al vencer el timeout', async () => {
     const hang = () => new Promise(() => {})
-    const app = createApp({
-      logger: createLogger({ level: 'silent' }),
-      health: { pingDb: up, pingRedis: hang, timeoutMs: 50 }
-    })
-    const res = await request(app).get('/internal/health')
+    const appWithHang = (health) => createApp({ logger: createLogger({ level: 'silent' }), health: { ...health, timeoutMs: 50 } })
 
-    expect(res.status).toBe(503)
-    expect(res.body.checks.redis).toBe('down')
+    const mongoHangs = await request(appWithHang({ pingDb: hang, pingRedis: up })).get('/internal/health')
+    expect(mongoHangs.status).toBe(503)
+    expect(mongoHangs.body.checks.mongo).toBe('down')
+
+    const redisHangs = await request(appWithHang({ pingDb: up, pingRedis: hang })).get('/internal/health')
+    expect(redisHangs.status).toBe(200)
+    expect(redisHangs.body).toEqual({ status: 'degraded', checks: { mongo: 'up', redis: 'down' } })
   })
 
   it('también responde en /health para acceso directo en desarrollo', async () => {

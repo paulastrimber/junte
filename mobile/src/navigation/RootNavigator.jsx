@@ -4,15 +4,18 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { Icon } from '../components/Icon.jsx'
 import { AUTH_STATUS } from '../contexts/AuthContext.jsx'
 import { useAuth } from '../hooks/useAuth.js'
+import { useOfflineSync } from '../hooks/useOffline.js'
 import ChatScreen, { TEXTS as CHAT_TEXTS } from '../screens/ChatScreen.jsx'
 import HomeScreen, { TEXTS as HOME_TEXTS } from '../screens/HomeScreen.jsx'
 import LoadingScreen from '../screens/LoadingScreen.jsx'
 import LoginScreen, { TEXTS as LOGIN_TEXTS } from '../screens/LoginScreen.jsx'
 import MyPlansScreen, { TEXTS as MY_PLANS_TEXTS } from '../screens/MyPlansScreen.jsx'
 import OnboardingScreen, { TEXTS as ONBOARDING_TEXTS } from '../screens/OnboardingScreen.jsx'
+import PendingActionsScreen, { TEXTS as PENDING_TEXTS } from '../screens/PendingActionsScreen.jsx'
 import PlanScreen, { TEXTS as PLAN_TEXTS } from '../screens/PlanScreen.jsx'
 import ProfileScreen, { TEXTS as PROFILE_TEXTS } from '../screens/ProfileScreen.jsx'
 import RegisterScreen, { TEXTS as REGISTER_TEXTS } from '../screens/RegisterScreen.jsx'
+import ReportScreen, { TEXTS as REPORT_TEXTS } from '../screens/ReportScreen.jsx'
 import RestoreErrorScreen from '../screens/RestoreErrorScreen.jsx'
 import { sizes, stackScreenOptions, tabScreenOptions, useTheme } from '../theme/index.js'
 import { ROUTES } from './routes.js'
@@ -68,6 +71,8 @@ function planScreens () {
       <Stack.Screen name={ROUTES.CHECK_IN} getComponent={loadCheckIn} options={{ title: SCREEN_TITLES.checkIn }} />
       {/* El título del encabezado es el del plan (llega como parámetro). */}
       <Stack.Screen name={ROUTES.CHAT} component={ChatScreen} options={({ route }) => ({ title: route.params?.title ?? CHAT_TEXTS.title })} />
+      <Stack.Screen name={ROUTES.REPORT} component={ReportScreen} options={{ title: REPORT_TEXTS.title }} />
+      <Stack.Screen name={ROUTES.PENDING_ACTIONS} component={PendingActionsScreen} options={{ title: PENDING_TEXTS.title }} />
     </>
   )
 }
@@ -105,6 +110,7 @@ function ProfileStack () {
     <Stack.Navigator screenOptions={useStackOptions()} initialRouteName={ROUTES.PROFILE}>
       <Stack.Screen name={ROUTES.PROFILE} component={ProfileScreen} options={{ title: PROFILE_TEXTS.title }} />
       <Stack.Screen name={ROUTES.HEALTH} getComponent={loadHealth} options={{ title: SCREEN_TITLES.health }} />
+      <Stack.Screen name={ROUTES.PENDING_ACTIONS} component={PendingActionsScreen} options={{ title: PENDING_TEXTS.title }} />
     </Stack.Navigator>
   )
 }
@@ -112,6 +118,8 @@ function ProfileStack () {
 // La app con sesión: cuatro tabs (ícono y texto), cada uno con su propio stack (su encabezado y su "volver").
 function AppTabs () {
   const { colors } = useTheme()
+  // La cola de pendientes se manda solo con la sesión iniciada (necesita el token).
+  useOfflineSync()
   const screenOptions = ({ route }) => ({
     ...tabScreenOptions(colors),
     tabBarIcon: ({ focused }) => (

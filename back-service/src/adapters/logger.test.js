@@ -19,7 +19,10 @@ describe('redact', () => {
     ['accessToken', 'eyJ.access.token'],
     ['photoUrl', 'https://bucket.s3.amazonaws.com/users/x/y.jpg?X-Amz-Signature=deadbeef'],
     ['latitude', -34.9011],
-    ['longitude', -56.1645]
+    ['longitude', -56.1645],
+    ['email', 'ana@um.edu.uy'],
+    ['text', 'mensaje privado del chat'],
+    ['description', 'descripción privada de un reporte']
   ])('censura %s en el nivel raíz y anidado un nivel', (field, value) => {
     const { logger, lines } = capture()
 

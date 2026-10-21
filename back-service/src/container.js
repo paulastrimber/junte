@@ -10,9 +10,10 @@ import { createRedisSocketAdapter } from './adapters/socketAdapter.js'
 import { createMemoryStorage, createS3Storage } from './adapters/storage/index.js'
 import { createScheduler } from './jobs/scheduler.js'
 import { createAuthenticate } from './middlewares/authenticate.js'
+import { createAdminController, createAdminRoutes, createAdminService } from './modules/admin/index.js'
 import {
   Career, City, Interest, InterestCategory, Neighborhood, University,
-  createCatalogController, createCatalogRepository, createCatalogRoutes, createCatalogService
+  createCatalogAdminService, createCatalogController, createCatalogRepository, createCatalogRoutes, createCatalogService
 } from './modules/catalogs/index.js'
 import {
   Session, createAuthController, createAuthRoutes, createAuthService, createSessionRepository, createTokenService
@@ -31,6 +32,9 @@ import {
   Plan, createMyPlansRoutes, createPlanController, createPlanRepository, createPlanRoutes, createPlanSerializer, createPlanService,
   isLive, matchesQrChallenge, pickFilters, planIdParams
 } from './modules/plans/index.js'
+import {
+  Report, createReportController, createReportRepository, createReportRoutes, createReportService
+} from './modules/reports/index.js'
 import { createUploadController, createUploadRoutes, createUploadService } from './modules/uploads/index.js'
 import { createChatBroadcaster } from './sockets/chat.broadcaster.js'
 import { createSocketServer } from './sockets/index.js'
@@ -62,6 +66,7 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const participationRepo = createParticipationRepository(Participation)
   const checkInRepo = createCheckInRepository(CheckIn)
   const messageRepo = createMessageRepository(Message)
+  const reportRepo = createReportRepository(Report)
 
   const userService = createUserService({
     userRepo, storage, catalogs: catalogService, clock, logger, countNoShows: participationRepo.countNoShows
@@ -90,6 +95,22 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const messageService = createMessageService({
     plans: planService, participationRepo, messageRepo, userRepo, broadcaster: chatBroadcaster, clock, logger
   })
+  const reportService = createReportService({ reportRepo, userRepo, plans: planService, messages: messageService, clock, logger })
+  const catalogAdmin = createCatalogAdminService({ catalogRepo, catalogService })
+  const adminService = createAdminService({
+    userRepo,
+    reportRepo,
+    messageRepo,
+    planRepo,
+    participationRepo,
+    checkInRepo,
+    authService,
+    catalogAdmin,
+    // `chat:hidden` y el corte de conexiones de un usuario suspendido.
+    realtime: chatBroadcaster,
+    clock,
+    logger
+  })
 
   const authenticate = createAuthenticate({ authService })
 
@@ -102,6 +123,8 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const participationController = createParticipationController({ participationService, serializeParticipant: userSerializer.serializePublic })
   const checkInController = createCheckInController({ checkInService })
   const messageController = createMessageController({ messageService, messageSerializer })
+  const reportController = createReportController({ reportService })
+  const adminController = createAdminController({ adminService })
 
   const routes = [
     { path: '/auth', router: createAuthRoutes({ authController, authenticate }) },
@@ -115,7 +138,10 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     { path: '/plans', router: createParticipationRoutes({ participationController, planIdParams, authenticate }) },
     { path: '/plans', router: createCheckInRoutes({ checkInController, planIdParams, authenticate }) },
     { path: '/plans', router: createMessageRoutes({ messageController, planIdParams, authenticate }) },
-    { path: '/feed', router: createFeedRoutes({ feedController, authenticate }) }
+    { path: '/feed', router: createFeedRoutes({ feedController, authenticate }) },
+    { path: '/reports', router: createReportRoutes({ reportController, authenticate }) },
+    // Panel de administración: todo exige rol admin (router y servicio).
+    { path: '/admin', router: createAdminRoutes({ adminController, authenticate }) }
   ]
 
   // Jobs periódicos: el scheduler los corre con lock (uno por ciclo entre todas las instancias).
@@ -139,6 +165,8 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     attendanceService,
     messageService,
     messageSerializer,
+    reportService,
+    adminService,
     chatBroadcaster,
     userSerializer,
     userRepo,

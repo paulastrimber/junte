@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { connectivity, readCache, readThrough } from '../services/offline/index.js'
 import { toViewError } from '../utils/errorMessages.js'
 
 export const LIST_STATUS = Object.freeze({ IDLE: 'idle', LOADING: 'loading', READY: 'ready', ERROR: 'error' })
 
-const stateFor = (status) => ({ status, items: [], nextCursor: null, error: null, isRefreshing: false, refreshError: null, isLoadingMore: false, loadMoreError: null })
+const stateFor = (status) => ({ status, items: [], nextCursor: null, error: null, isRefreshing: false, refreshError: null, isLoadingMore: false, loadMoreError: null, savedAt: null })
 
 /**
  * Lista paginada por cursor (`{ items, nextCursor }`): primera página, "cargar más" y refresco.
  * Las respuestas de una consulta anterior (cambió la consulta, se refrescó o se desmontó) se descartan.
+ * Con `cacheKey`, la primera página se guarda en el teléfono y sin conexión se muestra la última guardada (con
+ * `savedAt` y sin "cargar más": el cursor de esa página ya no sirve).
  * @param {(cursor: string | null) => Promise<{ items: object[], nextCursor: string | null }>} fetchPage
  *   Estable entre renders mientras la consulta sea la misma (`useCallback`): cuando cambia, se vuelve a pedir.
- * @param {{ enabled?: boolean }} [options]  Con `enabled: false` no pide nada (p. ej. sin permiso para verla).
+ * @param {{ enabled?: boolean, cacheKey?: string }} [options]  Con `enabled: false` no pide nada (p. ej. sin permiso para verla).
  * @returns {{
  *   status: string, items: object[], hasMore: boolean, isRefreshing: boolean, isLoadingMore: boolean,
+ *   savedAt: string | null,
  *   error: import('../utils/errorMessages.js').ViewError | null,
  *   refreshError: import('../utils/errorMessages.js').ViewError | null,
  *   loadMoreError: import('../utils/errorMessages.js').ViewError | null,
@@ -21,7 +25,7 @@ const stateFor = (status) => ({ status, items: [], nextCursor: null, error: null
  * }} `error`: falló la primera carga; `refreshError`: falló un refresco (se conservan los datos);
  *   `loadMoreError`: falló una página siguiente.
  */
-export function usePagedList (fetchPage, { enabled = true } = {}) {
+export function usePagedList (fetchPage, { enabled = true, cacheKey } = {}) {
   const [state, setState] = useState(() => stateFor(enabled ? LIST_STATUS.LOADING : LIST_STATUS.IDLE))
   const generationRef = useRef(0)
   // `loadMore` lee el estado más reciente sin recrearse en cada render (FlatList lo llama desde onEndReached).
@@ -38,9 +42,17 @@ export function usePagedList (fetchPage, { enabled = true } = {}) {
       ? { ...current, isRefreshing: true, refreshError: null, loadMoreError: null }
       : stateFor(LIST_STATUS.LOADING)))
     try {
-      const page = await fetchPage(null)
+      let page
+      let savedAt = null
+      if (cacheKey && !isRefreshing) {
+        ({ data: page, savedAt } = await readThrough({ key: cacheKey, fetch: () => fetchPage(null), cache: readCache, connectivity }))
+      } else {
+        // Un refresco que falla conserva lo que ya se veía (abajo), no lo cambia por lo guardado.
+        page = await fetchPage(null)
+        if (cacheKey) readCache.save(cacheKey, page)
+      }
       if (generation !== generationRef.current) return
-      setState({ ...stateFor(LIST_STATUS.READY), items: page.items, nextCursor: page.nextCursor })
+      setState({ ...stateFor(LIST_STATUS.READY), items: page.items, nextCursor: savedAt ? null : page.nextCursor, savedAt })
     } catch (failure) {
       if (generation !== generationRef.current) return
       const error = toViewError(failure)
@@ -49,7 +61,7 @@ export function usePagedList (fetchPage, { enabled = true } = {}) {
         ? { ...current, isRefreshing: false, refreshError: error }
         : { ...stateFor(LIST_STATUS.ERROR), error }))
     }
-  }, [fetchPage])
+  }, [fetchPage, cacheKey])
 
   useEffect(() => {
     const generations = generationRef

@@ -59,6 +59,51 @@ export function createMessageRepository (MessageModel) {
       }
     },
 
+    /** @returns {Promise<MessageEntity | null>} visible u oculto. */
+    async findById (id) {
+      if (!mongoose.isValidObjectId(id)) return null
+      const doc = await MessageModel.findById(id).lean()
+      return doc ? toEntity(doc) : null
+    },
+
+    /**
+     * Varios mensajes en una sola consulta (vista previa de los reportes). Ignora los IDs inválidos.
+     * @param {string[]} ids
+     * @returns {Promise<MessageEntity[]>} sin orden garantizado.
+     */
+    async findByIds (ids) {
+      const valid = [...new Set(ids)].filter((id) => mongoose.isValidObjectId(id))
+      if (valid.length === 0) return []
+      return (await MessageModel.find({ _id: { $in: valid } }).lean()).map(toEntity)
+    },
+
+    /**
+     * Moderación (solo el panel de administración): oculta o vuelve a mostrar un mensaje.
+     * @param {string} id
+     * @param {'visible' | 'hidden'} status
+     * @returns {Promise<{ message: MessageEntity, changed: boolean } | null>} null si no existe.
+     */
+    async setStatus (id, status) {
+      if (!mongoose.isValidObjectId(id)) return null
+      const previous = await MessageModel.findOneAndUpdate({ _id: id }, { $set: { status } }, { returnDocument: 'before', runValidators: true }).lean()
+      if (!previous) return null
+      return { message: toEntity({ ...previous, status }), changed: previous.status !== status }
+    },
+
+    /**
+     * Para las métricas del panel.
+     * @param {{ since: Date }} params
+     * @returns {Promise<{ total: number, createdSince: number, hidden: number }>}
+     */
+    async countMetrics ({ since }) {
+      const [total, createdSince, hidden] = await Promise.all([
+        MessageModel.countDocuments({}),
+        MessageModel.countDocuments({ createdAt: { $gte: since } }),
+        MessageModel.countDocuments({ status: 'hidden' })
+      ])
+      return { total, createdSince, hidden }
+    },
+
     /**
      * Mensajes visibles de un plan, del más nuevo al más viejo (`createdAt` + `_id`), con cursor sobre esa clave.
      * Usa el índice { planId, createdAt: -1, _id: -1 }.

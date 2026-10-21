@@ -7,10 +7,13 @@ import { RootNavigator } from './navigation/RootNavigator.jsx'
 import LoadingScreen from './screens/LoadingScreen.jsx'
 import { configureApiAuth } from './services/api/client.js'
 import { authService } from './services/auth.js'
+import { clearOfflineData } from './services/offline/index.js'
 import { fontAssets, navigationTheme, useTheme } from './theme/index.js'
 
 // El cliente HTTP compartido toma de acá el access token, el refresh y el aviso de sesión terminada.
 configureApiAuth(authService.apiAuth)
+// Lo guardado sin conexión y lo pendiente de enviar son de la cuenta: al cerrar la sesión (o vencerse) se borran.
+authService.onSessionEnded(clearOfflineData)
 
 export default function App () {
   const { scheme } = useTheme()

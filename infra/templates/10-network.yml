@@ -1,0 +1,612 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  junte - red (S1-INF-05, parte sin costo, y S1-INF-06). VPC, 9 subredes en 3 zonas,
+  Internet Gateway, tablas de rutas, endpoint gateway de S3 y los seis Security Groups
+  de docs/arquitectura/02-comunicacion-y-red.md. No crea nada que cobre por hora:
+  los NAT, sus rutas y los endpoints de interfaz van en 20-egress.yml.
+
+# Tags: project y env llegan con --tags al desplegar y CloudFormation los propaga.
+# Acá cada recurso que lo admite lleva Name (junte-<env>-<recurso>) y layer
+# (red, borde, aplicacion, datos o soporte).
+
+Parameters:
+  Env:
+    Type: String
+    AllowedValues: [dev, entrega]
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/16$'
+    Description: >-
+      CIDR de la VPC, un /16 partido en /24. Es tambien NGINX_TRUSTED_CIDR
+      (avisar a quien mantiene Nginx si cambia).
+
+Resources:
+  # ---------------------------------------------------------------- VPC e Internet Gateway
+
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true # resolver de AWS en VPC+2 y 169.254.169.253 (NGINX_RESOLVER)
+      EnableDnsHostnames: true # necesario para el DNS privado de los endpoints de interfaz
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-vpc' }
+        - { Key: layer, Value: red }
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-igw' }
+        - { Key: layer, Value: red }
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  # ---------------------------------------------------------------- Subredes
+  # !Cidr parte el /16 en 33 bloques /24 y cada subred toma el índice que coincide con
+  # su tercer octeto: públicas 0-1, borde 10-11, aplicación 20-21, datos 30-32.
+  # Zonas a, b y c = las tres primeras de la región (!GetAZs), sin nombres fijos.
+  # Ninguna asigna IP pública: el ALB y los NAT traen la suya.
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 33, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-subnet-public-a' }
+        - { Key: layer, Value: red }
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 33, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-subnet-public-b' }
+        - { Key: layer, Value: red }
+
+  EdgeSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [10, !Cidr [!Ref VpcCidr, 33, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-subnet-edge-a' }
+        - { Key: layer, Value: borde }
+
+  EdgeSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Select [11, !Cidr [!Ref VpcCidr, 33, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-subnet-edge-b' }
+        - { Key: layer, Value: borde }
+
+  AppSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [20, !Cidr [!Ref VpcCidr, 33, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-subnet-app-a' }
+        - { Key: layer, Value: aplicacion }
+
+  AppSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Select [21, !Cidr [!Ref VpcCidr, 33, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-subnet-app-b' }
+        - { Key: layer, Value: aplicacion }
+
+  DataSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [30, !Cidr [!Ref VpcCidr, 33, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-subnet-data-a' }
+        - { Key: layer, Value: datos }
+
+  DataSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Select [31, !Cidr [!Ref VpcCidr, 33, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-subnet-data-b' }
+        - { Key: layer, Value: datos }
+
+  DataSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [2, !GetAZs '']
+      CidrBlock: !Select [32, !Cidr [!Ref VpcCidr, 33, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-subnet-data-c' }
+        - { Key: layer, Value: datos }
+
+  # ---------------------------------------------------------------- Rutas
+  # Pública: 0.0.0.0/0 → IGW. Privadas: una tabla por subred, solo con la ruta local;
+  # 20-egress.yml agrega 0.0.0.0/0 → NAT de la misma zona. Tener una por subred permite
+  # decidir la salida de cada una por separado (datos-c sin NAT propio, S7-QA-07).
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-rt-public' }
+        - { Key: layer, Value: red }
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment # AWS rechaza la ruta si el IGW no está enganchado
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  EdgeRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-rt-edge-a' }
+        - { Key: layer, Value: borde }
+
+  EdgeRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-rt-edge-b' }
+        - { Key: layer, Value: borde }
+
+  AppRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-rt-app-a' }
+        - { Key: layer, Value: aplicacion }
+
+  AppRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-rt-app-b' }
+        - { Key: layer, Value: aplicacion }
+
+  DataRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-rt-data-a' }
+        - { Key: layer, Value: datos }
+
+  DataRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-rt-data-b' }
+        - { Key: layer, Value: datos }
+
+  DataRouteTableC:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-rt-data-c' }
+        - { Key: layer, Value: datos }
+
+  EdgeSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref EdgeSubnetA
+      RouteTableId: !Ref EdgeRouteTableA
+
+  EdgeSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref EdgeSubnetB
+      RouteTableId: !Ref EdgeRouteTableB
+
+  AppSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref AppSubnetA
+      RouteTableId: !Ref AppRouteTableA
+
+  AppSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref AppSubnetB
+      RouteTableId: !Ref AppRouteTableB
+
+  DataSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DataSubnetA
+      RouteTableId: !Ref DataRouteTableA
+
+  DataSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DataSubnetB
+      RouteTableId: !Ref DataRouteTableB
+
+  DataSubnetCRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DataSubnetC
+      RouteTableId: !Ref DataRouteTableC
+
+  # ---------------------------------------------------------------- Endpoint de S3
+  # Gateway (sin costo): agrega a cada tabla privada una ruta a la prefix list de S3, así
+  # fotos, backups y configuración de Nginx no pasan por el NAT. Política por defecto;
+  # lo que cada instancia puede hacer en S3 lo limita su rol.
+
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      RouteTableIds:
+        - !Ref EdgeRouteTableA
+        - !Ref EdgeRouteTableB
+        - !Ref AppRouteTableA
+        - !Ref AppRouteTableB
+        - !Ref DataRouteTableA
+        - !Ref DataRouteTableB
+        - !Ref DataRouteTableC
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-vpce-s3' }
+        - { Key: layer, Value: soporte }
+
+  # ---------------------------------------------------------------- Security Groups
+  # Cadena: sg-alb → sg-front → sg-alb-interno → sg-back → {sg-redis, sg-db}.
+  # Cada grupo declara una salida "nula" (127.0.0.1/32) para que AWS no agregue la regla
+  # por defecto de "todo permitido"; las reglas entre grupos van como recursos aparte para
+  # evitar referencias circulares, y cada entrada tiene su salida espejo en el origen.
+  # El DNS de la VPC, el servidor de hora y los metadatos de la instancia no pasan por los
+  # Security Groups. Ningún grupo abre el 22 ni el 80.
+  # Sin GroupName: el nombre va en el tag Name, así un reemplazo no choca con el anterior.
+
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB publico. Unica entrada desde Internet, solo 443.
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS y WSS desde Internet }
+      SecurityGroupEgress:
+        - { IpProtocol: '-1', CidrIp: 127.0.0.1/32, Description: Anula la salida por defecto }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-sg-alb' }
+        - { Key: layer, Value: borde }
+
+  FrontSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Nginx (borde). Solo acepta al ALB publico.
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - { IpProtocol: '-1', CidrIp: 127.0.0.1/32, Description: Anula la salida por defecto }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-sg-front' }
+        - { Key: layer, Value: borde }
+
+  InternalAlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB interno. Solo acepta a Nginx.
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - { IpProtocol: '-1', CidrIp: 127.0.0.1/32, Description: Anula la salida por defecto }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-sg-alb-interno' }
+        - { Key: layer, Value: aplicacion }
+
+  BackSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Back service (Express). Solo acepta al ALB interno.
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - { IpProtocol: '-1', CidrIp: 127.0.0.1/32, Description: Anula la salida por defecto }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-sg-back' }
+        - { Key: layer, Value: aplicacion }
+
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Redis (adaptador de Socket.io y locks). Solo acepta al back.
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - { IpProtocol: '-1', CidrIp: 127.0.0.1/32, Description: Anula la salida por defecto }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-sg-redis' }
+        - { Key: layer, Value: soporte }
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: MongoDB. Solo acepta al back y a los otros nodos del replica set.
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - { IpProtocol: '-1', CidrIp: 127.0.0.1/32, Description: Anula la salida por defecto }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-sg-db' }
+        - { Key: layer, Value: datos }
+
+  # sg-alb → sg-front :8080 (tráfico y health check /health)
+  AlbToFrontEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      DestinationSecurityGroupId: !Ref FrontSecurityGroup
+      Description: Hacia Nginx
+  FrontFromAlbIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref FrontSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !Ref AlbSecurityGroup
+      Description: Desde el ALB publico
+
+  # sg-front → sg-alb-interno :3000
+  FrontToInternalAlbEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref FrontSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3000
+      ToPort: 3000
+      DestinationSecurityGroupId: !Ref InternalAlbSecurityGroup
+      Description: Hacia el ALB interno
+  InternalAlbFromFrontIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref InternalAlbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3000
+      ToPort: 3000
+      SourceSecurityGroupId: !Ref FrontSecurityGroup
+      Description: Desde Nginx
+
+  # sg-alb-interno → sg-back :3000 (tráfico y health check /internal/health)
+  InternalAlbToBackEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref InternalAlbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3000
+      ToPort: 3000
+      DestinationSecurityGroupId: !Ref BackSecurityGroup
+      Description: Hacia el back
+  BackFromInternalAlbIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref BackSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3000
+      ToPort: 3000
+      SourceSecurityGroupId: !Ref InternalAlbSecurityGroup
+      Description: Desde el ALB interno
+
+  # sg-back → sg-redis :6379
+  BackToRedisEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref BackSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      DestinationSecurityGroupId: !Ref RedisSecurityGroup
+      Description: Hacia Redis
+  RedisFromBackIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RedisSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      SourceSecurityGroupId: !Ref BackSecurityGroup
+      Description: Desde el back
+
+  # sg-back → sg-db :27017
+  BackToDbEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref BackSecurityGroup
+      IpProtocol: tcp
+      FromPort: 27017
+      ToPort: 27017
+      DestinationSecurityGroupId: !Ref DbSecurityGroup
+      Description: Hacia MongoDB
+  DbFromBackIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 27017
+      ToPort: 27017
+      SourceSecurityGroupId: !Ref BackSecurityGroup
+      Description: Desde el back
+
+  # sg-db ↔ sg-db :27017 (replicación y elección de primario)
+  DbToDbEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref DbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 27017
+      ToPort: 27017
+      DestinationSecurityGroupId: !Ref DbSecurityGroup
+      Description: Replicacion entre nodos
+  DbFromDbIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 27017
+      ToPort: 27017
+      SourceSecurityGroupId: !Ref DbSecurityGroup
+      Description: Replicacion entre nodos
+
+  # HTTPS de salida de las capas con EC2: imágenes de contenedor, servicios de AWS (S3,
+  # Secrets Manager, ECR, Logs, Session Manager) y, en el back, FCM. Los ALB y Redis no
+  # inician conexiones hacia afuera.
+  FrontHttpsEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref FrontSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+      Description: HTTPS saliente (imagenes, servicios AWS)
+  BackHttpsEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref BackSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+      Description: HTTPS saliente (FCM, servicios AWS, ECR)
+  DbHttpsEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref DbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+      Description: HTTPS saliente (imagen, backups a S3, Session Manager)
+
+# Exportados como junte-<env>-<nombre> para los stacks 20 a 50 (!ImportValue). Mientras
+# otro stack importe un valor, CloudFormation no deja borrarlo ni cambiarlo.
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+    Export: { Name: !Sub 'junte-${Env}-VpcId' }
+  VpcCidr:
+    Description: Valor de NGINX_TRUSTED_CIDR.
+    Value: !Ref VpcCidr
+    Export: { Name: !Sub 'junte-${Env}-VpcCidr' }
+  PublicSubnetA:
+    Value: !Ref PublicSubnetA
+    Export: { Name: !Sub 'junte-${Env}-PublicSubnetA' }
+  PublicSubnetB:
+    Value: !Ref PublicSubnetB
+    Export: { Name: !Sub 'junte-${Env}-PublicSubnetB' }
+  EdgeSubnetA:
+    Value: !Ref EdgeSubnetA
+    Export: { Name: !Sub 'junte-${Env}-EdgeSubnetA' }
+  EdgeSubnetB:
+    Value: !Ref EdgeSubnetB
+    Export: { Name: !Sub 'junte-${Env}-EdgeSubnetB' }
+  AppSubnetA:
+    Value: !Ref AppSubnetA
+    Export: { Name: !Sub 'junte-${Env}-AppSubnetA' }
+  AppSubnetB:
+    Value: !Ref AppSubnetB
+    Export: { Name: !Sub 'junte-${Env}-AppSubnetB' }
+  DataSubnetA:
+    Value: !Ref DataSubnetA
+    Export: { Name: !Sub 'junte-${Env}-DataSubnetA' }
+  DataSubnetB:
+    Value: !Ref DataSubnetB
+    Export: { Name: !Sub 'junte-${Env}-DataSubnetB' }
+  DataSubnetC:
+    Value: !Ref DataSubnetC
+    Export: { Name: !Sub 'junte-${Env}-DataSubnetC' }
+  EdgeRouteTableA:
+    Value: !Ref EdgeRouteTableA
+    Export: { Name: !Sub 'junte-${Env}-EdgeRouteTableA' }
+  EdgeRouteTableB:
+    Value: !Ref EdgeRouteTableB
+    Export: { Name: !Sub 'junte-${Env}-EdgeRouteTableB' }
+  AppRouteTableA:
+    Value: !Ref AppRouteTableA
+    Export: { Name: !Sub 'junte-${Env}-AppRouteTableA' }
+  AppRouteTableB:
+    Value: !Ref AppRouteTableB
+    Export: { Name: !Sub 'junte-${Env}-AppRouteTableB' }
+  DataRouteTableA:
+    Value: !Ref DataRouteTableA
+    Export: { Name: !Sub 'junte-${Env}-DataRouteTableA' }
+  DataRouteTableB:
+    Value: !Ref DataRouteTableB
+    Export: { Name: !Sub 'junte-${Env}-DataRouteTableB' }
+  DataRouteTableC:
+    Value: !Ref DataRouteTableC
+    Export: { Name: !Sub 'junte-${Env}-DataRouteTableC' }
+  AlbSecurityGroup:
+    Value: !Ref AlbSecurityGroup
+    Export: { Name: !Sub 'junte-${Env}-AlbSecurityGroup' }
+  FrontSecurityGroup:
+    Value: !Ref FrontSecurityGroup
+    Export: { Name: !Sub 'junte-${Env}-FrontSecurityGroup' }
+  InternalAlbSecurityGroup:
+    Value: !Ref InternalAlbSecurityGroup
+    Export: { Name: !Sub 'junte-${Env}-InternalAlbSecurityGroup' }
+  BackSecurityGroup:
+    Value: !Ref BackSecurityGroup
+    Export: { Name: !Sub 'junte-${Env}-BackSecurityGroup' }
+  RedisSecurityGroup:
+    Value: !Ref RedisSecurityGroup
+    Export: { Name: !Sub 'junte-${Env}-RedisSecurityGroup' }
+  DbSecurityGroup:
+    Value: !Ref DbSecurityGroup
+    Export: { Name: !Sub 'junte-${Env}-DbSecurityGroup' }

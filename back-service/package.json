@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "migrate:check": "node --env-file-if-exists=.env scripts/migrate-check.js",
     "seed": "node --env-file-if-exists=.env seeds/index.js",
-    "catalogs:sync": "node --env-file-if-exists=.env scripts/sync-catalogs.js"
+    "catalogs:sync": "node --env-file-if-exists=.env scripts/sync-catalogs.js",
+    "admin": "node --env-file-if-exists=.env scripts/admin.js"
   },
   "engines": {
     "node": ">=22.12"

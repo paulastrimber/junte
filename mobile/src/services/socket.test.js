@@ -194,6 +194,19 @@ describe('salas y mensajes', () => {
     expect(onP2).not.toHaveBeenCalled()
   })
 
+  it('chat:hidden (un admin ocultó un mensaje) avisa solo a la sala de ese plan', () => {
+    const { service, current } = setup()
+    const onHiddenP1 = jest.fn()
+    const onHiddenP2 = jest.fn()
+    service.subscribe('p1', jest.fn(), jest.fn(), onHiddenP1)
+    service.subscribe('p2', jest.fn(), jest.fn(), onHiddenP2)
+
+    current().fire('chat:hidden', { planId: 'p1', messageId: 'm1' })
+
+    expect(onHiddenP1).toHaveBeenCalledWith('m1')
+    expect(onHiddenP2).not.toHaveBeenCalled()
+  })
+
   it('avisa si el servidor no deja entrar a la sala', () => {
     const { service, current } = setup()
     const onJoinError = jest.fn()

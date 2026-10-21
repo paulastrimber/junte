@@ -328,8 +328,17 @@ Eventos Socket.io: ver [08-tiempo-real-y-push.md](08-tiempo-real-y-push.md#event
 
 | Método y ruta | Body | OK | Errores | Permiso | Estado |
 |---|---|---|---|---|---|
-| `POST /reports` | `targetType` (`user`\|`plan`\|`message`), `targetId, reason, description` | 201 `{ id, status }` | 400, 404 | Usuario | ✔ |
+| `POST /reports` | `targetType` (`user`\|`plan`\|`message`), `targetId, reason, description` | 201 `{ id, status }` (200 si ya había uno pendiente) | 400, 404 | Usuario | ✔ S6 |
 | `POST /uploads/presign` | `contentType, sizeBytes` + opcional `planId` | 200 `{ url, objectKey, expiresAt }` | 400, 403, 404 | Usuario; creador si `planId` | ✔ |
+
+**Reportes (S6).** El `reporterId` sale del token (en el body es 400). `reason` ∈ `spam`, `harassment`, `inappropriate`, `scam`, `other`; `description` opcional, se recorta, hasta 500 caracteres y **obligatoria con `other`**. El objetivo tiene que existir y ser accesible para quien reporta; si no, **404** (no se revela que existe):
+
+- `user`: la cuenta existe.
+- `plan`: el plan le es visible (las mismas reglas que `GET /plans/:id`).
+- `message`: el mensaje está visible y es de un chat del que es parte (participante activo o creador).
+- Reportar algo propio (a sí mismo, su plan o su mensaje) es 400.
+- La misma persona sobre lo mismo, mientras el reporte siga pendiente, recibe **200 con el reporte que ya existía** (no se crea otro). Una vez resuelto, puede volver a reportarlo.
+- Un reporte nunca es visible para otros usuarios: no hay `GET /reports` (404); solo lo lista el panel de administración. En el log va `reportId`, `reporterId`, `targetType` y `reason`, nunca la descripción.
 
 `presign`: `contentType` ∈ `image/jpeg`, `image/png`, `image/webp`; `sizeBytes` entero de 1 a 5 242 880 (5 MB). La `objectKey` la genera el back; la URL `PUT` vence a los 5 minutos y lleva firmados el tipo y el tamaño.
 
@@ -340,21 +349,45 @@ Eventos Socket.io: ver [08-tiempo-real-y-push.md](08-tiempo-real-y-push.md#event
 
 | Método y ruta | Body / query | OK | Estado |
 |---|---|---|---|
-| `GET /admin/reports` | `status, limit, cursor` | 200 paginado | ❓ |
-| `PATCH /admin/reports/:id` | `status` (`reviewed`\|`dismissed`) | 200 | ❓ |
-| `PATCH /admin/messages/:id` | `status` (`visible`\|`hidden`) | 200 | ❓ |
-| `PATCH /admin/users/:id` | `status` (`active`\|`suspended`) | 200 | ❓ |
-| `GET /admin/metrics` | — | 200 | ❓ |
-| `GET/POST/PATCH /admin/catalogs/:catalog` y `/:key` | `:catalog` ∈ `interest-categories`, `interests`, `universities`, `careers`, `cities`, `neighborhoods`; campos editables: `name`, `order`, `active` (+ `minAge`, `group`, `shortName`) | 200 / 201 | ❓ (S6) |
+| `GET /admin/reports` | `status` (`pending` por defecto \| `reviewed` \| `dismissed`), `limit, cursor` | 200 paginado | ✔ S6 |
+| `PATCH /admin/reports/:id` | `status` (`reviewed`\|`dismissed`) | 200 reporte + `resolvedCount` | ✔ S6 |
+| `PATCH /admin/messages/:id` | `status` (`visible`\|`hidden`) | 200 mensaje | ✔ S6 |
+| `PATCH /admin/users/:id` | `status` (`active`\|`suspended`) | 200 usuario | ✔ S6 |
+| `GET /admin/metrics` | — | 200 | ✔ S6 |
+| `GET /admin/catalogs/:catalog` | — | 200 `{ items }` (activas e inactivas, sin paginar: son chicos) | ✔ S6 |
+| `POST /admin/catalogs/:catalog` | `key`, `name`, `order?`, `active?` + los propios del catálogo | 201 fila | ✔ S6 |
+| `PATCH /admin/catalogs/:catalog/:id` | `name`, `order`, `active` + `minAge` (intereses), `shortName` (universidades), `group` (carreras), `department` (ciudades) | 200 fila | ✔ S6 |
 
-Un usuario sin rol admin recibe 403 en cualquier `/admin/*`.
+Un usuario sin rol admin recibe **403** en cualquier `/admin/*` (exista la ruta o no); sin token, 401. El rol se comprueba en el router (`requireRole('admin')`) y otra vez en el servicio, leyendo el usuario en cada request (quitarle el rol tiene efecto en el acto). Todas las respuestas llevan `Cache-Control: no-store`. Decidido con Domenico el 2026-10-14 ([pendientes](../pendientes.md#endpoints-y-métricas-de-administración)).
+
+- **Vista de un usuario para el admin:** `{ id, name, email, role, status, reputation, createdAt }` (nunca hashes, sesiones, fecha de nacimiento ni barrio).
+- **Cola de reportes:** pendientes del más viejo al más nuevo (orden de llegada); revisados y descartados, del más nuevo al más viejo. Cursor opaco que incluye el estado (uno de otra pestaña es 400). Cada ítem: `{ id, status, reason, description, createdAt, resolvedAt, resolvedBy: { id, name } | null, reporter, target: { type, id, pendingReports, preview } }`. `pendingReports` cuenta los pendientes de cualquier persona sobre lo mismo. `preview` es lo reportado, leído en el momento (null si ya no existe):
+  - `user`: la vista de admin del usuario.
+  - `plan`: `{ id, title, description, status, startsAt, locationLabel, creator }`.
+  - `message`: `{ id, planId, type, text, status, createdAt, sender, plan: { id, title } }` (el admin ve también los ocultos).
+- **Resolver:** si el reporte estaba pendiente, se resuelven **todos** los pendientes sobre el mismo objetivo (la decisión es sobre el contenido, no sobre quién lo reportó) y `resolvedCount` dice cuántos. Uno ya resuelto se puede corregir (revisado ↔ descartado), nunca volver a pendiente.
+- **Ocultar un mensaje:** deja de salir en el historial y se emite `chat:hidden` a la sala del plan. Volver a mostrarlo lo devuelve al historial.
+- **Suspender:** `authenticate` ya rechaza al usuario en cada request; además se revocan todas sus sesiones y se cierran sus conexiones de Socket.io. Sus planes e inscripciones **no cambian** (es reversible: reactivar lo deja como antes). 403 al suspenderse a sí mismo o a otra cuenta admin (primero hay que quitarle el rol con el script). Reactivar no restaura sesiones: vuelve a iniciar sesión.
+- **Métricas:** `{ generatedAt, since, windowDays: 7, users: { total, createdSince, suspended }, plans: { total, createdSince }, participations: { active, joinedSince }, checkIns: { total, createdSince }, messages: { total, createdSince, hidden }, reports: { pending, createdSince } }`. `createdSince` = desde `since` (hace 7 días).
+- **Catálogos:** la `key` (kebab-case, hasta 80, nunca `other`) y el "padre" (`categoryKey`, `universityKey`, `cityKey`, que tiene que existir) se eligen al crear y no cambian. Las filas se identifican por `id` (la key de carreras y barrios solo es única dentro de su universidad o ciudad). `null` quita un campo opcional (`minAge`, `group`). Key repetida → 409 `CATALOG_KEY_TAKEN`. Nunca se borra: se desactiva. El cambio se ve en `GET /catalogs` de esa instancia enseguida y en las demás en menos de un minuto.
+- **Primer admin:** no hay endpoint. `npm run admin -- promote <email>` (o `create <email> "<nombre>"` con `ADMIN_PASSWORD` en el entorno, o `demote`), o `task db:admin -- …`.
 
 ### Salud
 
 | Ruta | Quién responde | Uso |
 |------|---------------|-----|
 | `GET /health` (sin prefijo, puerto 8080) | Nginx | Health check del ALB público |
-| `GET /internal/health` | Express | Health check del ALB interno; 200/503 según Mongo y Redis |
+| `GET /internal/health` | Express | Health check del ALB interno; 503 solo si MongoDB no responde (la app lo llama como `GET /api/v1/health`, sin token) |
+
+Respuesta de `GET /internal/health` (`Cache-Control: no-store`, timeout de 2 s por componente; nunca incluye mensajes de error ni hosts):
+
+| MongoDB | Redis | HTTP | Cuerpo |
+|---------|-------|------|--------|
+| up | up | 200 | `{ "status": "ok", "checks": { "mongo": "up", "redis": "up" } }` |
+| up | down | 200 | `{ "status": "degraded", "checks": { "mongo": "up", "redis": "down" } }` |
+| down | cualquiera | 503 | `{ "status": "unavailable", "checks": { "mongo": "down", "redis": "up" \| "down" } }` |
+
+Redis no decide el código: sin Redis la API sigue funcionando (el chat pasa a polling y los jobs esperan), y un 503 haría que el ALB interno saque a todas las instancias. El estado `degraded` solo se ve en el cuerpo.
 
 ## Ejemplo: crear un plan
 

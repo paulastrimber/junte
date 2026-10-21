@@ -27,7 +27,7 @@ const CONFIRMABLE = Object.freeze([PLAN_ACTION.CANCEL, PLAN_ACTION.LEAVE])
  * @param {{ addListener: (event: string, handler: () => void) => () => void }} options.navigation
  */
 export function usePlanDetail (planId, { version = 0, navigation }) {
-  const { status, plan, error, refreshError, reload, refresh } = usePlan(planId, version)
+  const { status, plan, error, refreshError, savedAt, reload, refresh } = usePlan(planId, version)
   const { catalog } = useCatalogs()
 
   const can = useMemo(() => (plan ? planActions(plan) : null), [plan])
@@ -38,7 +38,7 @@ export function usePlanDetail (planId, { version = 0, navigation }) {
     refreshParticipants()
   }, [refresh, refreshParticipants])
 
-  const actions = usePlanActions(planId, { onChanged })
+  const actions = usePlanActions(planId, { onChanged, planTitle: plan?.title ?? null })
   const activities = useMemo(() => (plan ? interestNames(plan.interests, catalog) : []), [plan, catalog])
 
   useRefreshOnFocus(navigation, onChanged)
@@ -66,6 +66,7 @@ export function usePlanDetail (planId, { version = 0, navigation }) {
     plan,
     error,
     refreshError,
+    savedAt,
     reload,
     can,
     activities,

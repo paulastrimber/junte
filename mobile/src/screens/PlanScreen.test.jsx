@@ -170,7 +170,7 @@ describe('PlanScreen (detalle)', () => {
   })
 
   it('error: muestra el mensaje y permite reintentar', async () => {
-    getPlan.mockRejectedValueOnce(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR })).mockResolvedValueOnce(PLAN)
+    getPlan.mockRejectedValueOnce(new ApiError({ status: 500, code: 'INTERNAL' })).mockResolvedValueOnce(PLAN)
 
     await renderPlan()
     expect(await screen.findByText(TEXTS.errorTitle)).toBeOnTheScreen()
@@ -178,6 +178,22 @@ describe('PlanScreen (detalle)', () => {
     await fireEvent.press(screen.getByRole('button', { name: TEXTS.retry }))
 
     expect(await screen.findByRole('header', { name: 'Fútbol 5 en Parque Rodó' })).toBeOnTheScreen()
+  })
+
+  it('sin conexión y sin nada guardado lo dice así; con el plan guardado lo muestra marcado como "sin conexión"', async () => {
+    getPlan.mockRejectedValueOnce(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR }))
+    await renderPlan()
+    expect(await screen.findByText('Sin conexión')).toBeOnTheScreen()
+
+    getPlan.mockResolvedValueOnce(PLAN).mockRejectedValueOnce(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR }))
+    await fireEvent.press(screen.getByRole('button', { name: TEXTS.retry }))
+    expect(await screen.findByRole('header', { name: 'Fútbol 5 en Parque Rodó' })).toBeOnTheScreen()
+    // El plan quedó guardado: la próxima vez que se abre sin conexión se ve igual, con el aviso.
+    await screen.unmount()
+    await renderPlan()
+
+    expect(await screen.findByRole('header', { name: 'Fútbol 5 en Parque Rodó' })).toBeOnTheScreen()
+    expect(screen.getByText(/Sin conexión. Te mostramos lo último que guardamos/)).toBeOnTheScreen()
   })
 
   it('si el catálogo no cargó, las actividades se muestran con su key (no rompe)', async () => {

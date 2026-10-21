@@ -18,6 +18,13 @@ describe('getHealth', () => {
     await expect(getHealth({ client })).resolves.toEqual({ status: HEALTH_STATUS.OK, requestId: 'req-ok' })
   })
 
+  it('200 con status degraded → degradado (Redis caído: la API responde, el chat va por polling)', async () => {
+    const { client, mock } = setup()
+    mock.onGet('/health').reply(200, { status: 'degraded', checks: { mongo: 'up', redis: 'down' } }, { 'x-request-id': 'req-deg' })
+
+    await expect(getHealth({ client })).resolves.toEqual({ status: HEALTH_STATUS.DEGRADED, requestId: 'req-deg' })
+  })
+
   it('503 → degradado (no lanza)', async () => {
     const { client, mock } = setup()
     mock.onGet('/health').reply(503, { code: 'INTERNAL', message: 'MongoDB no responde', requestId: 'req-503' })

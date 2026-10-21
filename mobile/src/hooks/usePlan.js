@@ -1,22 +1,25 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { getPlan } from '../services/api/plans.js'
+import { connectivity, readCache, readThrough } from '../services/offline/index.js'
 import { toViewError } from '../utils/errorMessages.js'
 
 /** Estados que pinta la pantalla: cargando, con datos, no disponible (404) o error. */
 export const PLAN_STATUS = Object.freeze({ LOADING: 'loading', READY: 'ready', NOT_FOUND: 'notFound', ERROR: 'error' })
 
-const LOADING_STATE = Object.freeze({ status: PLAN_STATUS.LOADING, plan: null, error: null, refreshError: null })
+const LOADING_STATE = Object.freeze({ status: PLAN_STATUS.LOADING, plan: null, error: null, refreshError: null, savedAt: null })
 
 /**
  * Detalle de un plan. Vuelve a pedirlo con `reload` o cuando cambia `version` (p. ej. al volver de editarlo).
  * `refresh` lo pide otra vez SIN pasar por "cargando": la pantalla sigue mostrando el plan hasta que llega el nuevo
  * (después de inscribirse o darse de baja, cuando el servidor ya confirmó). Si ese refresco falla, el plan sigue a la
  * vista y el error queda en `refreshError` (como en el feed); solo un 404 lo reemplaza (el plan ya no está disponible).
+ * Sin conexión muestra la última versión guardada en el teléfono, con `savedAt` (S6-MOB-01).
  * @param {string} planId
  * @param {number} [version]
  * @returns {{ status: string, plan: object | null, error: import('../utils/errorMessages.js').ViewError | null,
- *   refreshError: import('../utils/errorMessages.js').ViewError | null, reload: () => void, refresh: () => void }}
+ *   refreshError: import('../utils/errorMessages.js').ViewError | null, savedAt: string | null,
+ *   reload: () => void, refresh: () => void }}
  */
 export function usePlan (planId, version = 0) {
   const [state, setState] = useState(LOADING_STATE)
@@ -28,9 +31,14 @@ export function usePlan (planId, version = 0) {
     // No rechaza nunca: toda falla termina en un estado que la pantalla sabe pintar.
     async function load () {
       try {
-        const plan = await getPlan(planId, { signal: controller.signal })
+        const { data: plan, savedAt } = await readThrough({
+          key: `plan:${planId}`,
+          fetch: () => getPlan(planId, { signal: controller.signal }),
+          cache: readCache,
+          connectivity
+        })
         if (controller.signal.aborted) return
-        setState({ status: PLAN_STATUS.READY, plan, error: null, refreshError: null })
+        setState({ status: PLAN_STATUS.READY, plan, error: null, refreshError: null, savedAt })
       } catch (failure) {
         if (controller.signal.aborted) return
         const error = toViewError(failure)
@@ -39,7 +47,7 @@ export function usePlan (planId, version = 0) {
           // Falló un refresco con el plan a la vista (p. ej. sin red al volver del chat): se conserva y se avisa.
           if (!isNotFound && current.status === PLAN_STATUS.READY && current.plan?.id === planId) return { ...current, refreshError: error }
           // 404: no existe o ya no es visible para este usuario (cancelado, terminado).
-          return { status: isNotFound ? PLAN_STATUS.NOT_FOUND : PLAN_STATUS.ERROR, plan: null, error, refreshError: null }
+          return { status: isNotFound ? PLAN_STATUS.NOT_FOUND : PLAN_STATUS.ERROR, plan: null, error, refreshError: null, savedAt: null }
         })
       }
     }

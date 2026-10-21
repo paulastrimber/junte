@@ -1,5 +1,5 @@
 import { memo, useCallback, useRef, useState } from 'react'
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, TextInput, View } from 'react-native'
+import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Pressable, TextInput, View } from 'react-native'
 
 import { Avatar } from '../components/Avatar.jsx'
 import { Button } from '../components/Button.jsx'
@@ -10,10 +10,13 @@ import { tapFeedback } from '../components/haptics.js'
 import { Icon } from '../components/Icon.jsx'
 import { LoadingState } from '../components/LoadingState.jsx'
 import { Notice } from '../components/Notice.jsx'
+import { OfflineNotice } from '../components/OfflineNotice.jsx'
 import { Text } from '../components/Text.jsx'
 import { CHAT_STATUS, POLL_INTERVAL_MS, useChat } from '../hooks/useChat.js'
 import { useAuth } from '../hooks/useAuth.js'
+import { useIsOnline } from '../hooks/useOffline.js'
 import { useScreenFocus } from '../hooks/useScreenFocus.js'
+import { ROUTES } from '../navigation/routes.js'
 import { MAX_MESSAGE_LENGTH, MESSAGE_STATUS, formatMessageTime, messageGroupPosition } from '../utils/chat.js'
 import { borders, createThemedStyles, radius, sizes, spacing, typography, useTheme } from '../theme/index.js'
 
@@ -36,7 +39,13 @@ export const TEXTS = Object.freeze({
   me: 'Vos',
   loadingOlder: 'Cargando mensajes anteriores…',
   loadOlderError: 'No pudimos cargar los mensajes anteriores.',
-  polling: `Sin conexión en tiempo real: actualizamos cada ${POLL_INTERVAL_MS / 1000} s`
+  polling: `Sin conexión en tiempo real: actualizamos cada ${POLL_INTERVAL_MS / 1000} s`,
+  queued: 'Pendiente: se envía cuando vuelva la conexión',
+  messageActions: 'Mensaje',
+  reportMessage: 'Reportar mensaje',
+  reportLabel: (name) => `el mensaje de ${name ?? 'esta persona'}`,
+  cancel: 'Cancelar',
+  longPressHint: 'Mantené presionado para reportarlo'
 })
 
 // El contador aparece cerca del límite, no en cada mensaje.
@@ -49,9 +58,10 @@ const keyOf = (message) => message.clientId ?? message.id
 /**
  * Una burbuja: propia a la derecha, ajena a la izquierda. Presentacional. Los mensajes seguidos de la misma persona
  * van agrupados: en los ajenos el nombre va solo en el primero del grupo (`isFirst`) y la foto solo en el último
- * (`isLast`); la esquina chica de la burbuja ("cola"), también solo en el último.
+ * (`isLast`); la esquina chica de la burbuja ("cola"), también solo en el último. Con `onLongPress` (mensajes de otros
+ * ya confirmados) se pueden reportar (S6-MOB-03).
  */
-const MessageRow = memo(function MessageRow ({ message, isOwn, isFirst, isLast, onRetry }) {
+const MessageRow = memo(function MessageRow ({ message, isOwn, isFirst, isLast, onRetry, onLongPress }) {
   const styles = useStyles()
   const isPending = message.status === MESSAGE_STATUS.PENDING
   const isFailed = message.status === MESSAGE_STATUS.FAILED
@@ -62,7 +72,7 @@ const MessageRow = memo(function MessageRow ({ message, isOwn, isFirst, isLast, 
   const name = message.sender?.name ?? ''
   // Tipos que esta versión no sabe mostrar (p. ej. notas de voz) no rompen la lista.
   const isText = !message.type || message.type === 'text'
-  const status = isPending ? TEXTS.sending : formatMessageTime(message.createdAt)
+  const status = isPending ? (message.queued ? TEXTS.queued : TEXTS.sending) : formatMessageTime(message.createdAt)
   // Se anuncia completo aunque el nombre no se vea (no es el primero del grupo): "Ana: hola. 14:32".
   const label = `${isOwn ? TEXTS.me : name}: ${isText ? message.text : TEXTS.unsupported}. ${isFailed ? TEXTS.notSent : status}`
 
@@ -76,9 +86,12 @@ const MessageRow = memo(function MessageRow ({ message, isOwn, isFirst, isLast, 
           ? <Avatar photoUrl={message.sender?.photoUrl} name={message.sender?.name} size={sizes.avatarSm} recyclingKey={keyOf(message)} decorative />
           : <View style={styles.avatarSpace} />}
       <View style={styles.column}>
-        <View
+        <Pressable
           accessible
           accessibilityLabel={label}
+          // Los mensajes de otros se pueden reportar (S6-MOB-03). Los propios y los no confirmados, no.
+          onLongPress={onLongPress ? () => onLongPress(message) : undefined}
+          accessibilityHint={onLongPress ? TEXTS.longPressHint : undefined}
           style={[
             styles.bubble,
             isOwn ? styles.bubbleOwn : styles.bubbleOther,
@@ -92,7 +105,7 @@ const MessageRow = memo(function MessageRow ({ message, isOwn, isFirst, isLast, 
             ? <Text color={bodyColor} selectable>{message.text}</Text>
             : <Text color={metaColor} variant='caption'>{TEXTS.unsupported}</Text>}
           <Text variant='caption' color={metaColor} style={styles.time}>{status}</Text>
-        </View>
+        </Pressable>
         {isFailed
           ? (
             <View style={[styles.failed, isOwn && styles.failedOwn]}>
@@ -169,13 +182,14 @@ function Composer ({ onSend }) {
 }
 
 export default function ChatScreen ({ navigation, route }) {
-  const { planId } = route.params
+  const { planId, title } = route.params
   const styles = useStyles()
   const { colors } = useTheme()
   const { user } = useAuth()
+  const isOnline = useIsOnline()
   // Pantalla activa: solo entonces se hace polling.
   const isFocused = useScreenFocus(navigation)
-  const chat = useChat(planId, { user, isActive: isFocused })
+  const chat = useChat(planId, { user, isActive: isFocused, planTitle: title ?? null })
   const { loadOlder, retrySend, send, reload } = chat
   const userId = user?.id
 
@@ -186,12 +200,22 @@ export default function ChatScreen ({ navigation, route }) {
     containerRef.current?.measureInWindow?.((_x, y) => setKeyboardOffset(y))
   }, [])
 
+  // Pulsación larga sobre un mensaje de otra persona: reportarlo.
+  const openMessageActions = useCallback((message) => {
+    Alert.alert(TEXTS.messageActions, message.text, [
+      { text: TEXTS.reportMessage, style: 'destructive', onPress: () => navigation.navigate(ROUTES.REPORT, { targetType: 'message', targetId: message.id, label: TEXTS.reportLabel(message.sender?.name) }) },
+      { text: TEXTS.cancel, style: 'cancel' }
+    ])
+  }, [navigation])
+
   // `messages` va del más nuevo al más viejo (lista invertida): `messageGroupPosition` mira los vecinos en ese orden.
   const messages = chat.messages
   const renderMessage = useCallback(({ item, index }) => {
     const { isFirst, isLast } = messageGroupPosition(messages, index)
-    return <MessageRow message={item} isOwn={item.sender?.id === userId} isFirst={isFirst} isLast={isLast} onRetry={retrySend} />
-  }, [messages, userId, retrySend])
+    const isOwn = item.sender?.id === userId
+    const canReport = !isOwn && item.status === MESSAGE_STATUS.SENT
+    return <MessageRow message={item} isOwn={isOwn} isFirst={isFirst} isLast={isLast} onRetry={retrySend} onLongPress={canReport ? openMessageActions : undefined} />
+  }, [messages, userId, retrySend, openMessageActions])
 
   function olderFooter () {
     if (chat.isLoadingOlder) {
@@ -217,7 +241,10 @@ export default function ChatScreen ({ navigation, route }) {
     if (chat.status === CHAT_STATUS.ERROR) return <ErrorState title={TEXTS.errorTitle} error={chat.error} onRetry={reload} retryTitle={TEXTS.retry} fill />
     return (
       <>
-        {chat.isPolling ? <View style={styles.banner}><Notice tone='warning' icon='cloud-offline-outline' message={TEXTS.polling} accessibilityLiveRegion='polite' /></View> : null}
+        {chat.savedAt || !isOnline
+          ? <View style={styles.banner}><OfflineNotice savedAt={chat.savedAt} isOnline={isOnline} /></View>
+          : null}
+        {chat.isPolling && isOnline ? <View style={styles.banner}><Notice tone='warning' icon='cloud-offline-outline' message={TEXTS.polling} accessibilityLiveRegion='polite' /></View> : null}
         {chat.messages.length === 0
           // Una lista invertida también da vuelta su "vacío": por eso va aparte.
           ? <View style={styles.empty}><EmptyState icon='chatbubbles-outline' title={TEXTS.emptyTitle} message={TEXTS.emptyMessage} /></View>

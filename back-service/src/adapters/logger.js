@@ -29,6 +29,10 @@ export const REDACT_PATHS = Object.freeze([
   'passwordHash',
   'refreshTokenHash',
   'photoUrl',
+  // Contenido que escribe la gente y el email (S6-BE-05): el texto del chat, la descripción de un reporte.
+  'email',
+  'text',
+  'description',
   '*.password',
   '*.accessToken',
   '*.refreshToken',
@@ -42,7 +46,10 @@ export const REDACT_PATHS = Object.freeze([
   '*.city',
   '*.passwordHash',
   '*.refreshTokenHash',
-  '*.photoUrl'
+  '*.photoUrl',
+  '*.email',
+  '*.text',
+  '*.description'
 ])
 
 /**

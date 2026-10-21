@@ -59,7 +59,11 @@ export function AuthProvider ({ service = defaultService, children }) {
     signUp: async (data) => signedIn(await service.register(data)),
     signOut: async () => { await service.logout(); signedOut() },
     signOutAll: async () => { await service.logoutAll(); signedOut() },
-    setUser: (user) => setState((current) => ({ ...current, user })),
+    setUser: (user) => {
+      // También queda guardado en el teléfono: la app se puede abrir sin conexión con el perfil al día.
+      service.rememberUser?.(user)
+      setState((current) => ({ ...current, user }))
+    },
     retryRestore: async () => {
       setState((current) => ({ ...current, status: AUTH_STATUS.LOADING, error: null }))
       await restore()

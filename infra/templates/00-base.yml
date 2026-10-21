@@ -1,0 +1,481 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  junte - base persistente (S1-INF-07, parte; pasos 1.1 y 1.2 del plan). Buckets S3
+  privados, repositorio ECR, grupos de logs, secretos generados y roles IAM de minimo
+  privilegio. Queda siempre creado. Los roles solo se crean con CreateIamRoles=true
+  (en Learner Lab va en false y todas las EC2 usan LabInstanceProfile).
+
+# Tags: project y env llegan con --tags al desplegar y CloudFormation los propaga.
+# Acá cada recurso que lo admite lleva Name (junte-<env>-<recurso>) y layer
+# (red, borde, aplicacion, datos o soporte).
+
+Parameters:
+  Env:
+    Type: String
+    AllowedValues: [dev, entrega]
+  NameSuffix:
+    Type: String
+    AllowedPattern: '^[a-z0-9]{4,12}$'
+    Description: >-
+      Sufijo para que los nombres de los buckets sean unicos en todo AWS
+      (minusculas y numeros). No es un secreto.
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+    AllowedValues: [7, 14, 30]
+  BackupRetentionDays:
+    Type: Number
+    Default: 14
+    MinValue: 1
+  CreateIamRoles:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >-
+      true crea los roles por capa (front, back, datos). Learner Lab no permite
+      crear roles: ahi va false y se declara como limitacion.
+  LabInstanceProfile:
+    Type: String
+    Default: LabInstanceProfile
+    Description: Perfil de instancia que usan las EC2 cuando CreateIamRoles=false.
+
+Conditions:
+  CreateRoles: !Equals [!Ref CreateIamRoles, 'true']
+
+Resources:
+  # ---------------------------------------------------------------- S3
+  # Privados: Block Public Access completo, sin ACL (BucketOwnerEnforced), cifrado SSE-S3
+  # y solo HTTPS. Sin CORS: la app es nativa y accede con URLs firmadas que emite el back.
+  # Retain: borrar el stack no borra fotos ni backups (para recrearlo hay que borrarlos a mano).
+
+  PhotosBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub 'junte-${Env}-photos-${NameSuffix}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      LifecycleConfiguration:
+        Rules:
+          - Id: abort-incomplete-uploads # las partes sueltas cobran y no se ven
+            Status: Enabled
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-photos' }
+        - { Key: layer, Value: datos }
+
+  PhotosBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PhotosBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt PhotosBucket.Arn
+              - !Sub '${PhotosBucket.Arn}/*'
+            Condition:
+              Bool: { 'aws:SecureTransport': 'false' }
+
+  # Operación: backups de MongoDB (backups/, vencen solos) y configuración de Nginx (nginx/).
+  OpsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub 'junte-${Env}-ops-${NameSuffix}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-backups
+            Status: Enabled
+            Prefix: backups/
+            ExpirationInDays: !Ref BackupRetentionDays
+          - Id: abort-incomplete-uploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-ops' }
+        - { Key: layer, Value: soporte }
+
+  OpsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref OpsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt OpsBucket.Arn
+              - !Sub '${OpsBucket.Arn}/*'
+            Condition:
+              Bool: { 'aws:SecureTransport': 'false' }
+
+  # ---------------------------------------------------------------- ECR
+  # Imagen del back (target prod del Dockerfile). Escaneo de vulnerabilidades al subir.
+  # Se conservan las últimas 5; EmptyOnDelete porque las imágenes se reconstruyen desde Git.
+
+  BackRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub 'junte-${Env}-back'
+      ImageScanningConfiguration: { ScanOnPush: true }
+      EmptyOnDelete: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Conservar las ultimas 5 imagenes",
+                "selection": { "tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 5 },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-back' }
+        - { Key: layer, Value: aplicacion }
+
+  # ---------------------------------------------------------------- Logs
+  # Los contenedores envían su salida con el driver awslogs de Docker (S6-INF-01). Creados
+  # acá para que tengan retención (si no, se guardan para siempre) y para dar permisos por grupo.
+
+  BackLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/junte/${Env}/back'
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-logs-back' }
+        - { Key: layer, Value: aplicacion }
+
+  NginxLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/junte/${Env}/nginx'
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-logs-nginx' }
+        - { Key: layer, Value: borde }
+
+  # ---------------------------------------------------------------- Secretos
+  # Los genera Secrets Manager: nadie los ve ni los tipea, y CloudFormation solo conoce el
+  # ARN. Sin signos de puntuación para que entren tal cual en una URI de MongoDB y cumplan
+  # el alfabeto del keyFile. La URI completa del back (mongo-app-uri) se guarda en el paso
+  # 1.6, cuando existan los nodos; el secreto de FCM se carga a mano en S5.
+
+  JwtSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'junte/${Env}/jwt-secret'
+      Description: Firma de los JWT del back (JWT_SECRET).
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-jwt-secret' }
+        - { Key: layer, Value: aplicacion }
+
+  MongoAdminSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'junte/${Env}/mongo-admin'
+      Description: Usuario administrador de MongoDB. Solo para la inicializacion por Session Manager.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"junte_admin"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-mongo-admin' }
+        - { Key: layer, Value: datos }
+
+  MongoAppSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'junte/${Env}/mongo-app'
+      Description: Usuario de la app (readWrite solo sobre su base).
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"junte_app"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-mongo-app' }
+        - { Key: layer, Value: datos }
+
+  MongoMigrationsSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'junte/${Env}/mongo-migrations'
+      Description: Usuario de migraciones (indices y validadores).
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"junte_migrations"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-mongo-migrations' }
+        - { Key: layer, Value: datos }
+
+  MongoBackupSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'junte/${Env}/mongo-backup'
+      Description: Usuario de backup (mongodump).
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"junte_backup"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-mongo-backup' }
+        - { Key: layer, Value: datos }
+
+  MongoKeyFileSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'junte/${Env}/mongo-keyfile'
+      Description: Clave interna entre los nodos del replica set (keyFile).
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-mongo-keyfile' }
+        - { Key: layer, Value: datos }
+
+  # ---------------------------------------------------------------- IAM (solo fuera del lab)
+  # Mínimo privilegio por capa (docs/infra/plan-aws.md, "Roles IAM"). Con CreateIamRoles=false
+  # no se crea nada de esto y los outputs devuelven LabInstanceProfile. Nginx no llega a
+  # secretos ni fotos; la base no llega al JWT. Los secretos que se crean después (paso 1.6
+  # y S5) van con -* porque AWS agrega un sufijo aleatorio al ARN.
+
+  FrontRole:
+    Type: AWS::IAM::Role
+    Condition: CreateRoles
+    Properties:
+      RoleName: !Sub 'junte-${Env}-front'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Policies:
+        - PolicyName: front
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: NginxConfig
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub '${OpsBucket.Arn}/nginx/*'
+              - Sid: NginxConfigList # aws s3 sync necesita listar el prefijo
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt OpsBucket.Arn
+                Condition:
+                  StringLike: { 's3:prefix': ['nginx/*'] }
+              - Sid: Logs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub '${NginxLogGroup.Arn}:*'
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-role-front' }
+        - { Key: layer, Value: borde }
+
+  FrontInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: CreateRoles
+    Properties:
+      InstanceProfileName: !Sub 'junte-${Env}-front'
+      Roles: [!Ref FrontRole]
+
+  BackRole:
+    Type: AWS::IAM::Role
+    Condition: CreateRoles
+    Properties:
+      RoleName: !Sub 'junte-${Env}-back'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Policies:
+        - PolicyName: back
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: Photos
+                Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
+                Resource:
+                  - !Sub '${PhotosBucket.Arn}/users/*'
+                  - !Sub '${PhotosBucket.Arn}/plans/*'
+              - Sid: PhotosList # sin esto HeadObject de una clave inexistente da 403 en vez de 404
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt PhotosBucket.Arn
+              - Sid: Secrets
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref JwtSecret
+                  - !Ref MongoAppSecret
+                  - !Ref MongoMigrationsSecret
+                  - !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:junte/${Env}/mongo-app-uri-*'
+                  - !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:junte/${Env}/fcm-service-account-*'
+              - Sid: EcrAuth # AWS no permite limitar esta acción a un recurso
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: EcrPull
+                Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:GetDownloadUrlForLayer, ecr:BatchCheckLayerAvailability]
+                Resource: !GetAtt BackRepository.Arn
+              - Sid: Logs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub '${BackLogGroup.Arn}:*'
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-role-back' }
+        - { Key: layer, Value: aplicacion }
+
+  BackInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: CreateRoles
+    Properties:
+      InstanceProfileName: !Sub 'junte-${Env}-back'
+      Roles: [!Ref BackRole]
+
+  DataRole:
+    Type: AWS::IAM::Role
+    Condition: CreateRoles
+    Properties:
+      RoleName: !Sub 'junte-${Env}-data'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Policies:
+        - PolicyName: data
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: Secrets # app y migraciones: esos usuarios se crean en la inicialización
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref MongoAdminSecret
+                  - !Ref MongoAppSecret
+                  - !Ref MongoMigrationsSecret
+                  - !Ref MongoBackupSecret
+                  - !Ref MongoKeyFileSecret
+              - Sid: Backups
+                Effect: Allow
+                Action: [s3:PutObject, s3:GetObject]
+                Resource: !Sub '${OpsBucket.Arn}/backups/*'
+              - Sid: BackupsList # para elegir qué backup restaurar
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt OpsBucket.Arn
+                Condition:
+                  StringLike: { 's3:prefix': ['backups/*'] }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-role-data' }
+        - { Key: layer, Value: datos }
+
+  DataInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: CreateRoles
+    Properties:
+      InstanceProfileName: !Sub 'junte-${Env}-data'
+      Roles: [!Ref DataRole]
+
+# Exportados como junte-<env>-<nombre>. De los secretos solo el ARN (!Ref), nunca el valor.
+# Los ARN y la URI de ECR incluyen el ID de la cuenta: no copiarlos a docs/.
+Outputs:
+  PhotosBucket:
+    Description: Valor de S3_BUCKET en el back.
+    Value: !Ref PhotosBucket
+    Export: { Name: !Sub 'junte-${Env}-PhotosBucket' }
+  OpsBucket:
+    Value: !Ref OpsBucket
+    Export: { Name: !Sub 'junte-${Env}-OpsBucket' }
+  BackRepositoryUri:
+    Value: !GetAtt BackRepository.RepositoryUri
+    Export: { Name: !Sub 'junte-${Env}-BackRepositoryUri' }
+  BackLogGroup:
+    Value: !Ref BackLogGroup
+    Export: { Name: !Sub 'junte-${Env}-BackLogGroup' }
+  NginxLogGroup:
+    Value: !Ref NginxLogGroup
+    Export: { Name: !Sub 'junte-${Env}-NginxLogGroup' }
+  JwtSecretArn:
+    Value: !Ref JwtSecret
+    Export: { Name: !Sub 'junte-${Env}-JwtSecretArn' }
+  MongoAdminSecretArn:
+    Value: !Ref MongoAdminSecret
+    Export: { Name: !Sub 'junte-${Env}-MongoAdminSecretArn' }
+  MongoAppSecretArn:
+    Value: !Ref MongoAppSecret
+    Export: { Name: !Sub 'junte-${Env}-MongoAppSecretArn' }
+  MongoMigrationsSecretArn:
+    Value: !Ref MongoMigrationsSecret
+    Export: { Name: !Sub 'junte-${Env}-MongoMigrationsSecretArn' }
+  MongoBackupSecretArn:
+    Value: !Ref MongoBackupSecret
+    Export: { Name: !Sub 'junte-${Env}-MongoBackupSecretArn' }
+  MongoKeyFileSecretArn:
+    Value: !Ref MongoKeyFileSecret
+    Export: { Name: !Sub 'junte-${Env}-MongoKeyFileSecretArn' }
+  FrontInstanceProfile:
+    Description: Perfil de instancia (LabInstanceProfile si no se crean roles).
+    Value: !If [CreateRoles, !Ref FrontInstanceProfile, !Ref LabInstanceProfile]
+    Export: { Name: !Sub 'junte-${Env}-FrontInstanceProfile' }
+  BackInstanceProfile:
+    Description: Perfil de instancia (LabInstanceProfile si no se crean roles).
+    Value: !If [CreateRoles, !Ref BackInstanceProfile, !Ref LabInstanceProfile]
+    Export: { Name: !Sub 'junte-${Env}-BackInstanceProfile' }
+  DataInstanceProfile:
+    Description: Perfil de instancia (LabInstanceProfile si no se crean roles).
+    Value: !If [CreateRoles, !Ref DataInstanceProfile, !Ref LabInstanceProfile]
+    Export: { Name: !Sub 'junte-${Env}-DataInstanceProfile' }

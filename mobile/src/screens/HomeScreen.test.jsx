@@ -98,13 +98,23 @@ describe('HomeScreen (feed)', () => {
       getFeed.mockRejectedValueOnce(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR })).mockResolvedValueOnce(page([plan('a')]))
 
       await renderHome()
-      expect(await screen.findByText(TEXTS.errorTitle)).toBeOnTheScreen()
+      expect(await screen.findByText('Sin conexión')).toBeOnTheScreen()
       expect(screen.getByText(/No pudimos conectarnos/)).toBeOnTheScreen()
 
       await fireEvent.press(screen.getByRole('button', { name: TEXTS.retry }))
 
       expect(await screen.findByText('Plan a')).toBeOnTheScreen()
-      expect(screen.queryByText(TEXTS.errorTitle)).not.toBeOnTheScreen()
+      expect(screen.queryByText('Sin conexión')).not.toBeOnTheScreen()
+    })
+
+    it('error del servidor: dice qué no se pudo cargar', async () => {
+      withLocation()
+      getFeed.mockRejectedValueOnce(new ApiError({ status: 500, code: 'INTERNAL' }))
+
+      await renderHome()
+
+      expect(await screen.findByText(TEXTS.errorTitle)).toBeOnTheScreen()
+      expect(screen.getByRole('button', { name: TEXTS.retry })).toBeOnTheScreen()
     })
 
     it('con datos: una tarjeta por plan con fecha, lugar, distancia, costo y cupo', async () => {
