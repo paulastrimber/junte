@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  junte - zona de Route 53 del subdominio y certificado ACM de la API (S1-INF-10, parte;
+  paso 1.9 del plan). Queda siempre creado. Se despliega en dos pasadas: primero la zona
+  (CreateCertificate=false), despues la delegacion a mano y recien ahi el certificado.
+
+# Tags: project y env llegan con --tags al desplegar y CloudFormation los propaga.
+# Acá cada recurso que lo admite lleva Name (junte-<env>-<recurso>) y layer.
+# Borrar y recrear la zona cambia sus 4 servidores de nombres: hay que repetir la delegación.
+
+Parameters:
+  Env:
+    Type: String
+    AllowedValues: [dev, entrega]
+  ZoneName:
+    Type: String
+    AllowedPattern: '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$'
+    Description: >-
+      Subdominio delegado a Route 53 (dev.<dominio> en la cuenta A, app.<dominio> en la B).
+      La API queda en api.<ZoneName>.
+  CreateCertificate:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >-
+      false en la primera pasada. true despues de cargar los NS en el proveedor del dominio:
+      si no, la validacion por DNS no termina nunca.
+
+Conditions:
+  WithCertificate: !Equals [!Ref CreateCertificate, 'true']
+
+Resources:
+  # Al crearla, AWS le asigna 4 servidores de nombres (output NameServers): se cargan una vez
+  # como registros NS del subdominio en el proveedor del dominio.
+  HostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref ZoneName
+      HostedZoneConfig:
+        Comment: !Sub 'junte ${Env} - subdominio delegado'
+      HostedZoneTags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-zone' }
+        - { Key: layer, Value: borde }
+
+  # Validado por DNS: CloudFormation crea el registro de validación en la zona. Gratis y se renueva solo.
+  ApiCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: WithCertificate
+    Properties:
+      DomainName: !Sub 'api.${ZoneName}'
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Sub 'api.${ZoneName}'
+          HostedZoneId: !Ref HostedZone
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-cert-api' }
+        - { Key: layer, Value: borde }
+
+Outputs:
+  NameServers:
+    Description: Los 4 NS a cargar en el proveedor del dominio para el subdominio (una sola vez).
+    Value: !Join [', ', !GetAtt HostedZone.NameServers]
+  HostedZoneId:
+    Value: !Ref HostedZone
+    Export: { Name: !Sub 'junte-${Env}-HostedZoneId' }
+  ZoneName:
+    Value: !Ref ZoneName
+    Export: { Name: !Sub 'junte-${Env}-ZoneName' }
+  ApiCertificateArn:
+    Condition: WithCertificate
+    Value: !Ref ApiCertificate
+    Export: { Name: !Sub 'junte-${Env}-ApiCertificateArn' }
