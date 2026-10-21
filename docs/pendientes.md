@@ -109,6 +109,8 @@ Correcciones de la revisión que **ya están aplicadas en docs/** y faltan en el
 ✅ **Decidido (2026-10-19): Redis no decide el health check.** `/internal/health` respondía 503 si Redis no contestaba; detrás del ALB interno eso sacaba a todas las instancias del back y tiraba la API entera, en contra de "si Redis cae, el chat sigue por polling". Ahora el código HTTP depende solo de MongoDB (503 si no responde) y Redis se sigue informando en `checks`, con `status: 'degraded'` y 200 cuando está caído. Sin Redis tampoco corren los jobs ([sección G](#g-notas-del-sprint-4-inscripciones-asistencia-y-reputación)): se ponen al día cuando vuelve. Para enterarse de que Redis cayó hay que mirar el cuerpo del health (o una alarma de ElastiCache en S6), no el estado de los destinos del ALB.
 **App:** `services/api/health.js` toma como degradado tanto el 503 como un 200 con `status: 'degraded'`, así que la pantalla de diagnóstico también avisa cuando Redis está caído.
 
+**Motor en AWS (2026-10-21):** `30-redis.yml` usa ElastiCache **Redis OSS 7.1** (la última de Redis en ElastiCache; local usa Redis 8). El back solo usa pub/sub y `SET NX PX`, iguales en las dos. **Valkey** (fork abierto de Redis) es compatible y cuesta ~20 % menos por nodo: si el equipo lo prefiere, es cambiar `Engine` y `EngineVersion` en el template.
+
 ### TLS interno
 **Problema:** tramos internos en HTTP. El informe lo reconoce.
 **Propuesta:** límite documentado para la entrega; TLS en MongoDB primero si hay tiempo.

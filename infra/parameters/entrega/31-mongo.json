@@ -1,0 +1,5 @@
+[
+  { "ParameterKey": "Env", "ParameterValue": "entrega" },
+  { "ParameterKey": "NodeCount", "ParameterValue": "3" },
+  { "ParameterKey": "InstanceType", "ParameterValue": "t3.small" }
+]

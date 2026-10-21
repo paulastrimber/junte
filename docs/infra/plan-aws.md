@@ -2,7 +2,7 @@
 
 Plan de trabajo de la responsable de AWS: qué hay hecho, qué falta, en qué orden hacerlo, cuánto cuesta y cómo verificarlo.
 
-**Estado (2026-10-19):** en la cuenta A están desplegados `junte-dev-network` (pasos 1.3 y 1.4, `10-network.yml`) y `junte-dev-base` (pasos 1.1 y 1.2, `00-base.yml`; evidencia en [docs/evidencia/](../evidencia/s1-base-pasos-1.1-1.2.md)). El resto de los templates que nombra este plan todavía no existe.
+**Estado (2026-10-19):** en la cuenta A están desplegados `junte-dev-network` (pasos 1.3 y 1.4, `10-network.yml`) y `junte-dev-base` (pasos 1.1 y 1.2, `00-base.yml`; evidencia en [docs/evidencia/](../evidencia/s1-base-pasos-1.1-1.2.md)). Escritos y validados con `cfn-lint` (también en CI), sin desplegar todavía: `20-egress.yml`, `30-redis.yml` y `31-mongo.yml` (pasos 1.5 a 1.7). Faltan `01-dns-cert.yml`, `40-back.yml` y `50-front.yml`.
 
 Escrito el 2026-10-12 a partir del informe de arquitectura (`docs/junte.pdf`), `CLAUDE.md`, `docs/` e `infra/`.
 
@@ -57,6 +57,11 @@ Hecho:
 
 - `infra/templates/10-network.yml` con sus parámetros de `dev` y `entrega` (red y Security Groups; S1-INF-05 sin los NAT ni los endpoints de interfaz, y S1-INF-06 sin la prueba con instancias).
 - `infra/templates/00-base.yml` con sus parámetros (S1-INF-07 sin Redis): buckets de fotos y de operación, ECR, grupos de logs y los secretos `junte/<env>/jwt-secret`, `mongo-admin`, `mongo-app`, `mongo-migrations`, `mongo-backup` y `mongo-keyfile`. Los roles por capa están escritos detrás de `CreateIamRoles`, en `false` en el lab. Quedan para más adelante `mongo-app-uri` (paso 1.6) y `fcm-service-account` (paso 5.1).
+- `infra/templates/20-egress.yml`, `30-redis.yml` y `31-mongo.yml` con sus parámetros, **sin desplegar** (se prueban en la próxima sesión con el lab):
+  - `20-egress`: 1 o 2 NAT (`NatCount`), rutas `0.0.0.0/0` de las 7 tablas privadas (datos c sale por el NAT de la zona a), endpoints de interfaz de SSM, Secrets Manager y Logs con su SG (`InterfaceEndpoints`). Sin exports, para poder borrarlo en cada sesión.
+  - `30-redis`: ElastiCache `ReplicationGroup`, Redis 7.1, 1 nodo o primario y réplica con failover (`NodeCount`), sin TLS en tránsito ni `AuthToken` (límite documentado), cifrado en reposo. Exporta `junte-<env>-RedisUrl` para `40-back`.
+  - `31-mongo`: 1 o 3 EC2 Amazon Linux 2023 con Docker y `mongo:9.0.2-noble`, IP privada fija (`10.0.30.10`, `10.0.31.10`, `10.0.32.10`), disco de datos gp3 cifrado con `DeletionPolicy: Snapshot`, IMDSv2 y la clave del replica set leída de Secrets Manager. `rs.initiate`, los usuarios y `mongo-app-uri` siguen siendo pasos a mano del 1.6.
+- `cfn-lint` de `infra/templates/` en CI (job `infra`) y en `task ci` (`task infra:lint`, en Docker).
 
 Tareas abiertas:
 
