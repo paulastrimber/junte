@@ -1,9 +1,10 @@
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker'
-import { act, fireEvent, screen } from '@testing-library/react-native'
-import { Platform } from 'react-native'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react-native'
+import { AccessibilityInfo, Keyboard, Platform, ScrollView } from 'react-native'
 
 import { CATALOG, COMPLETE_USER, SignedIn, USER, createFakeAuthService, renderWithAuth } from '../../tests/helpers/auth.jsx'
 import { deferred } from '../../tests/helpers/deferred.js'
+import { REQUIRED_HINT } from '../components/FormField.jsx'
 import { TEXTS as PLACE } from '../components/LocationPicker.jsx'
 import { resetCatalogsCache } from '../hooks/useCatalogs.js'
 import { getCatalogs } from '../services/api/catalogs.js'
@@ -61,6 +62,41 @@ async function fillBasics () {
   await pickDate(TEXTS.endsAt, endsAt)
   await fireEvent.changeText(field(TEXTS.locationLabel), 'Cancha del campus')
   await fireEvent.press(await screen.findByRole('checkbox', { name: 'Fútbol' }))
+}
+
+// Todo válido: lo básico, el pin y el cupo.
+async function fillValid () {
+  await fillBasics()
+  await fireEvent.press(screen.getByTestId('location-map'), mapEvent(-34.9, -56.16))
+  await fireEvent.changeText(field(TEXTS.capacity), '5')
+}
+
+// El `View` que registra la posición de un bloque del formulario: el primer ancestro con `onLayout`.
+function wrapperOf (element) {
+  let node = element
+  while (node && !node.props.onLayout) node = node.parent
+  return node
+}
+const layout = (element, y, height = 80) => fireEvent(element, 'layout', { nativeEvent: { layout: { x: 0, y, width: 360, height } } })
+// Margen con el que se deja un bloque arriba al scrollear (`spacing.xl`).
+const SCROLL_MARGIN = 24
+// Asteriscos de un bloque, incluidos los ocultos al lector (que es como tienen que estar).
+const asterisks = (element) => within(element).queryAllByText('*', { includeHiddenElements: true })
+// El campo entero (etiqueta + caja) de un `FormField`, a partir de su `TextInput`.
+const formFieldOf = (input) => input.parent.parent
+// El aviso (alerta) que contiene un texto: los `FieldError` también son alertas.
+const alertWith = (text) => screen.getAllByRole('alert').find((alert) => within(alert).queryByText(text))
+// El `onPress` del botón, para llamarlo dos veces en el mismo frame (sin re-render entre medio).
+function onPressOf (element) {
+  let fiber = element.unstable_fiber
+  while (fiber && !fiber.memoizedProps?.onPress) fiber = fiber.return
+  return fiber.memoizedProps.onPress
+}
+// El ScrollView de `Screen`: el ancestro que escucha el scroll.
+function scrollViewOf (element) {
+  let node = element
+  while (node && !node.props.onScroll) node = node.parent
+  return node
 }
 
 describe('CreatePlanScreen', () => {
@@ -259,6 +295,320 @@ describe('CreatePlanScreen', () => {
 
       expect(await screen.findByText('El cupo no puede ser menor que los 4 inscriptos')).toBeOnTheScreen()
       expect(navigation.popTo).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('feedback del envío', () => {
+    let announce
+    let scrollTo
+
+    beforeEach(() => {
+      announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {})
+      scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo')
+    })
+
+    it('envío vacío: cartel con los campos que faltan, anuncio al lector y ningún request', async () => {
+      await renderScreen()
+
+      await fireEvent.press(await screen.findByRole('button', { name: TEXTS.create }))
+
+      const alert = alertWith('Revisá estos 7 datos')
+      expect(within(alert).getByText('Revisá estos 7 datos')).toBeOnTheScreen()
+      expect(within(alert).getByText('Título, Empieza, Termina y 4 más.')).toBeOnTheScreen()
+      expect(announce).toHaveBeenCalledWith('Revisá estos 7 datos: Título, Empieza, Termina y 4 más.')
+      expect(plansApi.createPlan).not.toHaveBeenCalled()
+    })
+
+    it('cada toque fallido se vuelve a anunciar, aunque el cartel ya estuviera', async () => {
+      await renderScreen()
+      const button = await screen.findByRole('button', { name: TEXTS.create })
+
+      await fireEvent.press(button)
+      await fireEvent.press(button)
+
+      expect(announce).toHaveBeenCalledTimes(2)
+    })
+
+    it('el cartel se actualiza al corregir y desaparece cuando no queda nada por revisar', async () => {
+      await renderScreen()
+      await fireEvent.press(await screen.findByRole('button', { name: TEXTS.create }))
+
+      await fireEvent.changeText(field(TEXTS.title), 'Partido de fútbol')
+      expect(screen.getByText('Revisá estos 6 datos')).toBeOnTheScreen()
+      expect(screen.getByText('Empieza, Termina, Lugar en el mapa y 3 más.')).toBeOnTheScreen()
+
+      await pickDate(TEXTS.startsAt, startsAt)
+      await pickDate(TEXTS.endsAt, endsAt)
+      await fireEvent.changeText(field(TEXTS.locationLabel), 'Cancha del campus')
+      await fireEvent.press(await screen.findByRole('checkbox', { name: 'Fútbol' }))
+      await fireEvent.changeText(field(TEXTS.capacity), '5')
+      expect(screen.getByText('Revisá este dato')).toBeOnTheScreen()
+      expect(screen.getByText('Lugar en el mapa.')).toBeOnTheScreen()
+
+      await fireEvent.press(screen.getByTestId('location-map'), mapEvent(-34.9, -56.16))
+      expect(screen.queryByText(/^Revisá/)).not.toBeOnTheScreen()
+    })
+
+    it('el cartel se esconde con el teclado abierto y vuelve al cerrarlo', async () => {
+      const listeners = {}
+      jest.spyOn(Keyboard, 'addListener').mockImplementation((name, listener) => {
+        listeners[name] = listener
+        return { remove: jest.fn() }
+      })
+      await renderScreen()
+      await fireEvent.press(await screen.findByRole('button', { name: TEXTS.create }))
+      expect(screen.getByText('Revisá estos 7 datos')).toBeOnTheScreen()
+
+      await act(async () => listeners.keyboardDidShow())
+      expect(screen.queryByText('Revisá estos 7 datos')).not.toBeOnTheScreen()
+      // El error de cada campo sigue a la vista.
+      expect(screen.getByText('Elegí cuándo empieza.')).toBeOnTheScreen()
+
+      await act(async () => listeners.keyboardDidHide())
+      expect(screen.getByText('Revisá estos 7 datos')).toBeOnTheScreen()
+    })
+
+    it('scrollea al primer campo con error en el orden visual, aunque haya varios', async () => {
+      await renderScreen()
+      await screen.findByRole('checkbox', { name: 'Fútbol' })
+      // Viewport alto: lo que se despliega (el selector de fecha) ya se ve entero y no mueve el scroll.
+      await layout(scrollViewOf(field(TEXTS.title)), 0, 2000)
+      await layout(wrapperOf(field(TEXTS.title)), 100)
+      await layout(wrapperOf(field(TEXTS.description)), 200)
+      await layout(wrapperOf(screen.getByRole('button', { name: TEXTS.startsAt })), 360)
+      await layout(wrapperOf(screen.getByRole('button', { name: TEXTS.endsAt })), 460)
+      await layout(wrapperOf(screen.getByTestId('location-map')), 560, 400)
+      await layout(wrapperOf(field(TEXTS.locationLabel)), 980)
+      await layout(wrapperOf(screen.getByRole('switch', { name: TEXTS.unlimited })), 1080, 300)
+      await layout(wrapperOf(screen.getByRole('checkbox', { name: 'Fútbol' })), 1400, 300)
+      // Título y Empieza bien; fallan Termina, Lugar, Nombre del lugar, Cupo y Tipo de actividad.
+      await fireEvent.changeText(field(TEXTS.title), 'Partido de fútbol')
+      await pickDate(TEXTS.startsAt, startsAt)
+
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.create }))
+
+      await waitFor(() => expect(scrollTo).toHaveBeenCalled())
+      expect(scrollTo).toHaveBeenCalledTimes(1)
+      expect(scrollTo).toHaveBeenCalledWith({ y: 460 - SCROLL_MARGIN, animated: true })
+
+      // Corregido lo de arriba, el siguiente intento lleva al primero que sigue fallando.
+      await pickDate(TEXTS.endsAt, endsAt)
+      await fireEvent.press(screen.getByTestId('location-map'), mapEvent(-34.9, -56.16))
+      await fireEvent.changeText(field(TEXTS.locationLabel), 'Cancha del campus')
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.create }))
+
+      // El cupo está dentro de la tarjeta: se lleva la vista a la tarjeta.
+      await waitFor(() => expect(scrollTo).toHaveBeenCalledTimes(2))
+      expect(scrollTo).toHaveBeenLastCalledWith({ y: 1080 - SCROLL_MARGIN, animated: true })
+    })
+
+    it('el costo, dentro de la tarjeta de cupo, suma la posición de la tarjeta', async () => {
+      await renderScreen()
+      await screen.findByRole('checkbox', { name: 'Fútbol' })
+      await layout(wrapperOf(screen.getByRole('switch', { name: TEXTS.unlimited })), 1080, 300)
+      await layout(wrapperOf(field(TEXTS.price)), 200)
+      await fillValid()
+      await fireEvent.changeText(field(TEXTS.price), '')
+
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.create }))
+
+      await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ y: 1080 + 200 - SCROLL_MARGIN, animated: true }))
+      expect(screen.getByText('Costo.')).toBeOnTheScreen()
+      expect(plansApi.createPlan).not.toHaveBeenCalled()
+    })
+
+    it('marca los obligatorios con un asterisco oculto al lector, sin cambiar cómo se encuentra cada campo', async () => {
+      await renderScreen()
+      await screen.findByRole('checkbox', { name: 'Fútbol' })
+
+      expect(screen.getByText(TEXTS.requiredLegend)).toBeOnTheScreen()
+      for (const label of [TEXTS.title, TEXTS.locationLabel, TEXTS.capacity, TEXTS.price]) {
+        expect(screen.getAllByLabelText(label)).toHaveLength(1)
+        expect(asterisks(formFieldOf(field(label)))).toHaveLength(1)
+        expect(field(label).props.accessibilityHint).toMatch(new RegExp(`^${REQUIRED_HINT}`))
+      }
+      for (const label of [TEXTS.startsAt, TEXTS.endsAt]) {
+        const button = screen.getByRole('button', { name: label })
+        expect(asterisks(button.parent)).toHaveLength(1)
+        expect(button.props.accessibilityHint).toMatch(new RegExp(`^${REQUIRED_HINT}`))
+      }
+      // El asterisco no se lee: solo aparece incluyendo lo oculto.
+      expect(screen.queryAllByText('*')).toHaveLength(0)
+      expect(screen.getByRole('header', { name: 'Lugar, obligatorio' })).toBeOnTheScreen()
+      expect(screen.getByRole('header', { name: 'Tipo de actividad, obligatorio' })).toBeOnTheScreen()
+
+      // Descripción es opcional: sin asterisco y con la ayuda de siempre.
+      expect(asterisks(formFieldOf(field(TEXTS.description)))).toHaveLength(0)
+      expect(field(TEXTS.description).props.accessibilityHint).toBe(TEXTS.descriptionHint)
+    })
+
+    it('el cupo solo lleva asterisco cuando no es ilimitado (con ilimitado el campo no está)', async () => {
+      await renderScreen()
+      await screen.findByRole('checkbox', { name: 'Fútbol' })
+      const total = () => screen.queryAllByText('*', { includeHiddenElements: true }).length
+      const withCapacity = total()
+
+      await fireEvent(screen.getByRole('switch', { name: TEXTS.unlimited }), 'valueChange', true)
+
+      expect(screen.queryByLabelText(TEXTS.capacity)).not.toBeOnTheScreen()
+      expect(total()).toBe(withCapacity - 1)
+    })
+
+    it('el hint de un obligatorio con error dice "Obligatorio" y el error', async () => {
+      await renderScreen()
+      await fireEvent.press(await screen.findByRole('button', { name: TEXTS.create }))
+
+      expect(field(TEXTS.locationLabel).props.accessibilityHint).toBe(`${REQUIRED_HINT}. Ingresá el nombre del lugar.`)
+      expect(screen.getByRole('button', { name: TEXTS.endsAt }).props.accessibilityHint).toContain('Elegí cuándo termina.')
+    })
+
+    it('doble toque mientras guarda: un solo request', async () => {
+      const pending = deferred()
+      plansApi.createPlan.mockReturnValue(pending.promise)
+      await renderScreen()
+      await screen.findByRole('button', { name: TEXTS.create })
+      await fillValid()
+
+      const press = onPressOf(screen.getByRole('button', { name: TEXTS.create }))
+      await act(async () => {
+        press()
+        press()
+      })
+
+      expect(plansApi.createPlan).toHaveBeenCalledTimes(1)
+      await act(async () => pending.resolve(PLAN))
+      expect(navigation.navigate).toHaveBeenCalledTimes(1)
+      expect(announce).toHaveBeenCalledWith(TEXTS.created)
+    })
+
+    it('error del servidor en una ruta de array (interests.0) se muestra en Tipo de actividad, con cartel', async () => {
+      plansApi.createPlan.mockRejectedValue(new ApiError({
+        status: 400,
+        code: 'VALIDATION_ERROR',
+        details: [{ path: 'interests.0', message: 'Ese tipo de actividad no existe.' }]
+      }))
+      await renderScreen()
+      await screen.findByRole('checkbox', { name: 'Fútbol' })
+      await layout(wrapperOf(screen.getByRole('checkbox', { name: 'Fútbol' })), 1400, 300)
+      await fillValid()
+
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.create }))
+
+      expect(await screen.findByText('Ese tipo de actividad no existe.')).toBeOnTheScreen()
+      expect(screen.getByText('Revisá este dato')).toBeOnTheScreen()
+      expect(screen.getByText('Tipo de actividad.')).toBeOnTheScreen()
+      expect(screen.queryByText(TEXTS.createErrorTitle)).not.toBeOnTheScreen()
+      expect(announce).toHaveBeenCalledWith('Revisá este dato: Tipo de actividad.')
+      await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ y: 1400 - SCROLL_MARGIN, animated: true }))
+    })
+
+    it('error del servidor en un campo que el formulario no tiene: aviso general, nunca silencio', async () => {
+      plansApi.createPlan.mockRejectedValue(new ApiError({
+        status: 400,
+        code: 'VALIDATION_ERROR',
+        message: 'Hay datos inválidos en la solicitud.',
+        details: [{ path: 'creatorId', message: 'No se permite.' }]
+      }))
+      await renderScreen()
+      await screen.findByRole('button', { name: TEXTS.create })
+      await fillValid()
+
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.create }))
+
+      await screen.findByText(TEXTS.createErrorTitle)
+      const alert = alertWith(TEXTS.createErrorTitle)
+      expect(within(alert).getByText(TEXTS.createErrorTitle)).toBeOnTheScreen()
+      expect(within(alert).getByText('Hay datos inválidos en la solicitud.')).toBeOnTheScreen()
+      expect(screen.queryByText(/^Revisá/)).not.toBeOnTheScreen()
+      expect(announce).toHaveBeenCalledWith(`${TEXTS.createErrorTitle} Hay datos inválidos en la solicitud.`)
+    })
+
+    it('un campo conocido y uno desconocido: se muestran los dos (en el campo y como aviso general)', async () => {
+      plansApi.createPlan.mockRejectedValue(new ApiError({
+        status: 400,
+        code: 'VALIDATION_ERROR',
+        details: [{ path: 'title', message: 'Ese título no va.' }, { path: 'status', message: 'No se permite.' }]
+      }))
+      await renderScreen()
+      await screen.findByRole('button', { name: TEXTS.create })
+      await fillValid()
+
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.create }))
+
+      expect(await screen.findByText('Ese título no va.')).toBeOnTheScreen()
+      expect(screen.getByText('Revisá este dato')).toBeOnTheScreen()
+      expect(screen.getByText(TEXTS.createErrorTitle)).toBeOnTheScreen()
+    })
+
+    it('500: aviso general en el footer con el título y el botón vuelve a estar disponible', async () => {
+      plansApi.createPlan.mockRejectedValue(new ApiError({ status: 500, code: 'INTERNAL' }))
+      await renderScreen()
+      await screen.findByRole('button', { name: TEXTS.create })
+      await fillValid()
+
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.create }))
+
+      await screen.findByText(TEXTS.createErrorTitle)
+      const alert = alertWith(TEXTS.createErrorTitle)
+      expect(within(alert).getByText(TEXTS.createErrorTitle)).toBeOnTheScreen()
+      expect(within(alert).getByText(/error en el servidor/)).toBeOnTheScreen()
+      expect(screen.getByRole('button', { name: TEXTS.create })).toBeEnabled()
+      expect(announce).toHaveBeenCalledWith(expect.stringContaining(TEXTS.createErrorTitle))
+      expect(scrollTo).not.toHaveBeenCalled()
+    })
+
+    it('sin conexión en Android: aviso con título; lo anuncia la región viva (no se anuncia dos veces)', async () => {
+      plansApi.createPlan.mockRejectedValue(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR }))
+      await renderScreen()
+      await screen.findByRole('button', { name: TEXTS.create })
+      await fillValid()
+      jest.replaceProperty(Platform, 'OS', 'android')
+
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.create }))
+
+      await screen.findByText(TEXTS.createErrorTitle)
+      const alert = alertWith(TEXTS.createErrorTitle)
+      expect(within(alert).getByText(TEXTS.createErrorTitle)).toBeOnTheScreen()
+      expect(within(alert).getByText(/No pudimos conectarnos/)).toBeOnTheScreen()
+      expect(alert.props.accessibilityLiveRegion).toBe('polite')
+      expect(announce).not.toHaveBeenCalled()
+    })
+
+    it('editar sin cambios vuelve al detalle sin llamar a la API ni mostrar avisos', async () => {
+      await renderScreen({ plan: PLAN })
+
+      await fireEvent.press(await screen.findByRole('button', { name: TEXTS.save }))
+
+      expect(navigation.popTo).toHaveBeenCalledWith('Plan', { planId: 'p1', version: expect.any(Number) })
+      expect(plansApi.updatePlan).not.toHaveBeenCalled()
+      expect(screen.queryByText(/^Revisá/)).not.toBeOnTheScreen()
+      expect(announce).not.toHaveBeenCalled()
+    })
+
+    it('editar: 409 por cupo muestra el cartel "Cupo." y lleva la vista a la tarjeta del cupo', async () => {
+      plansApi.updatePlan.mockRejectedValue(new ApiError({ status: 409, code: 'CAPACITY_BELOW_PARTICIPANTS', message: 'El cupo no puede ser menor que los 4 inscriptos' }))
+      await renderScreen({ plan: PLAN })
+      await layout(wrapperOf(await screen.findByRole('switch', { name: TEXTS.unlimited })), 1080, 300)
+
+      await fireEvent.changeText(field(TEXTS.capacity), '3')
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.save }))
+
+      expect(await screen.findByText('El cupo no puede ser menor que los 4 inscriptos')).toBeOnTheScreen()
+      expect(screen.getByText('Revisá este dato')).toBeOnTheScreen()
+      expect(screen.getByText('Cupo.')).toBeOnTheScreen()
+      expect(screen.queryByText(TEXTS.saveErrorTitle)).not.toBeOnTheScreen()
+      await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ y: 1080 - SCROLL_MARGIN, animated: true }))
+    })
+
+    it('editar: un error general usa el título de guardar', async () => {
+      plansApi.updatePlan.mockRejectedValue(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR }))
+      await renderScreen({ plan: PLAN })
+
+      await fireEvent.changeText(await screen.findByLabelText(TEXTS.title), 'Fútbol 5 mixto')
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.save }))
+
+      expect(await screen.findByText(TEXTS.saveErrorTitle)).toBeOnTheScreen()
+      expect(announce).toHaveBeenCalledWith(expect.stringContaining(TEXTS.saveErrorTitle))
     })
   })
 })

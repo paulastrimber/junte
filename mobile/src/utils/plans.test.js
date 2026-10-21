@@ -1,6 +1,6 @@
 import {
-  dateRangeFor, defaultEndsAt, formValuesFrom, formatJoined, formatDistance, formatPrice, formatSchedule, formatSpots, planChanges, priceRangeLabel, radiusLabel,
-  toPlanPayload, validatePlanForm
+  dateRangeFor, defaultEndsAt, formValuesFrom, formatIssueList, formatJoined, formatDistance, formatPrice, formatSchedule, formatSpots, planChanges, planFormIssues,
+  priceRangeLabel, radiusLabel, scrollTargetY, toPlanPayload, validatePlanForm
 } from './plans.js'
 
 // Fechas armadas con la hora LOCAL del teléfono (los textos se muestran en hora local).
@@ -201,5 +201,48 @@ describe('defaultEndsAt', () => {
 
   it('sin inicio no propone nada', () => {
     expect(defaultEndsAt(null)).toBeUndefined()
+  })
+})
+
+describe('feedback del envío', () => {
+  it('planFormIssues ordena como se ven los campos e ignora claves desconocidas', () => {
+    expect(planFormIssues({ interests: 'x', title: 'x' })).toEqual(['title', 'interests'])
+    expect(planFormIssues({ price: 'x', locationLabel: 'x' })).toEqual(['locationLabel', 'price'])
+    expect(planFormIssues({ creatorId: 'x', title: undefined })).toEqual([])
+  })
+
+  it('formatIssueList nombra hasta 3 campos y cuenta el resto', () => {
+    const more = (count) => `y ${count} más`
+    expect(formatIssueList(['Título'], more)).toBe('Título.')
+    expect(formatIssueList(['Título', 'Empieza'], more)).toBe('Título y Empieza.')
+    expect(formatIssueList(['Título', 'Empieza', 'Termina'], more)).toBe('Título, Empieza y Termina.')
+    expect(formatIssueList(['Título', 'Empieza', 'Termina', 'Lugar', 'Nombre', 'Cupo', 'Tipo'], more)).toBe('Título, Empieza, Termina y 4 más.')
+  })
+
+  describe('scrollTargetY', () => {
+    const view = { offset: 100, viewport: 500 }
+    const margin = 24
+
+    it('si ya se ve entero no scrollea', () => {
+      expect(scrollTargetY({ y: 200, height: 100 }, view, { margin })).toBeNull()
+    })
+
+    it('debajo de lo visible: alinea su borde de abajo, con margen', () => {
+      expect(scrollTargetY({ y: 550, height: 100 }, view, { margin })).toBe(550 + 100 - 500 + margin)
+    })
+
+    it('arriba de lo visible: alinea su borde de arriba, con margen', () => {
+      expect(scrollTargetY({ y: 50, height: 40 }, view, { margin })).toBe(50 - margin)
+    })
+
+    it('más alto que lo visible: se muestra desde arriba', () => {
+      expect(scrollTargetY({ y: 700, height: 600 }, view, { margin })).toBe(700 - margin)
+    })
+
+    it('align top: deja el bloque arriba (nunca por debajo de 0) y no se mueve si ya está ahí', () => {
+      expect(scrollTargetY({ y: 300, height: 50 }, view, { align: 'top', margin })).toBe(300 - margin)
+      expect(scrollTargetY({ y: 10, height: 50 }, view, { align: 'top', margin })).toBe(0)
+      expect(scrollTargetY({ y: 126, height: 50 }, view, { align: 'top', margin })).toBeNull()
+    })
   })
 })

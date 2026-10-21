@@ -2,6 +2,7 @@ import { View } from 'react-native'
 
 import { spacing } from '../theme/index.js'
 import { Button } from './Button.jsx'
+import { REQUIRED_HINT } from './FormField.jsx'
 import { Text } from './Text.jsx'
 
 /**
@@ -13,12 +14,15 @@ import { Text } from './Text.jsx'
  * @param {string} [props.actionTitle]  Acción secundaria a la derecha ("Ver todos", "Limpiar").
  * @param {() => void} [props.onAction]
  * @param {import('react-native').StyleProp<import('react-native').ViewStyle>} [props.style]  Solo para ubicarlo.
+ * @param {boolean} [props.required]  La sección es un dato obligatorio ("Lugar *"); el lector dice "Lugar, obligatorio".
  */
-export function SectionHeader ({ title, description, actionTitle, onAction, style }) {
+export function SectionHeader ({ title, description, actionTitle, onAction, style, required = false }) {
   return (
     <View style={[styles.row, style]}>
       <View style={styles.text}>
-        <Text variant='heading' accessibilityRole='header'>{title}</Text>
+        <Text variant='heading' accessibilityRole='header' accessibilityLabel={required ? `${title}, ${REQUIRED_HINT.toLowerCase()}` : undefined}>
+          {required ? `${title} *` : title}
+        </Text>
         {description ? <Text variant='caption' color='textMuted'>{description}</Text> : null}
       </View>
       {actionTitle && onAction ? <Button title={actionTitle} variant='ghost' size='sm' onPress={onAction} style={styles.action} /> : null}
