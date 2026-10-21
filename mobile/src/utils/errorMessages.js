@@ -26,6 +26,11 @@ export const CHAT_ERROR_MESSAGES = Object.freeze({
 // Un solo texto genérico en toda la app: el mismo que usa el ApiError cuando no hay otro.
 const GENERIC = defaultMessageFor(CLIENT_ERROR_CODES.UNKNOWN_ERROR)
 
+/** No hubo respuesta del servidor (sin conexión o se demoró demasiado): se muestra como "sin conexión". Sirve para ApiError y ViewError. */
+export function isOfflineError (error) {
+  return error?.code === CLIENT_ERROR_CODES.NETWORK_ERROR || error?.code === CLIENT_ERROR_CODES.TIMEOUT
+}
+
 /**
  * @param {unknown} error
  * @param {Record<string, string>} [overrides]  Textos propios de una acción (inscribirse, check-in…): el mismo `code`

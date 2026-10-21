@@ -28,7 +28,8 @@ export function usePlanAutoRefresh (plan, refresh, { isFocused = true, onForegro
     if (!milestone) return undefined
     const wait = milestone.getTime() - Date.now() + AFTER_MILESTONE_MS
     if (wait > MAX_WAIT_MS) return undefined
-    const timer = setTimeout(refresh, wait)
+    // En segundo plano no se consulta al servidor (S6-MOB-04): al volver a primer plano se refresca igual.
+    const timer = setTimeout(() => { if (AppState.currentState !== 'background') refresh() }, wait)
     return () => clearTimeout(timer)
   }, [plan, refresh])
 

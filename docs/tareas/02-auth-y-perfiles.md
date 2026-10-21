@@ -53,6 +53,6 @@ Las de "Auth y permisos" y "Validación" de [testing.md](../practicas/testing.md
 - [x] **S2b-MOB-01 · `SelectField`** (lista con buscador y "Otra"), `InterestPicker` (por categoría, con máximo y edad mínima) y `useCatalogs`.
 - [x] **S2b-MOB-02 · Onboarding de 3 pasos** (`Paso X de 3`, Atrás, Siguiente/Finalizar, Saltar este paso, Más tarde) que se muestra mientras `onboardingCompleted` sea `false`.
 - [x] **S2b-MOB-03 · Perfil con los mismos selectores** (reemplaza los campos de texto de barrio, localidad y universidad).
-- [ ] **S6 · Admin de catálogos** (listar, crear, renombrar, ordenar, activar/desactivar) con `catalogService.invalidate()`.
+- [x] **S6 · Admin de catálogos** (listar, crear, renombrar, ordenar, activar/desactivar) con `catalogService.invalidate()`.
 
 **Estado:** back ✅ (tests, `task ci`, migración sobre la base local). App ✅ con tests y lint, **sin probar en emulador ni teléfono**.

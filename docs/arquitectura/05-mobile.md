@@ -120,6 +120,19 @@ Pedirlos **en el momento en que se usan**, explicando para qué, y degradar con 
 - Escrituras **no se confirman en la UI hasta que el servidor las acepta** (requisito del informe). Se muestran como "pendiente" y se reintentan al volver la conexión; si el servidor responde 409 (cupo agotado, etc.) se informa al usuario.
 - No se encolan operaciones que dependen del momento exacto (check-in).
 
+**Implementación (S6, `services/offline/`):**
+
+- **Dependencias:** `@react-native-async-storage/async-storage` (lo guardado) y `@react-native-community/netinfo` (si hay red). Las dos funcionan en Expo Go y en el APK. Nada secreto va a AsyncStorage: los tokens siguen en `expo-secure-store`.
+- **Conexión (`connectivity`):** "sin conexión" solo cuando NetInfo lo sabe; mientras no se sabe, se intenta y una falla por red (`NETWORK_ERROR`/`TIMEOUT`) cuenta igual.
+- **Caché de lecturas (`readCache` + `readThrough`):** la primera página del feed (por filtros y radio; no la posición ni el calendario), el detalle de un plan, "Mis planes", la primera página del chat, los catálogos y el propio perfil (`me`, para poder abrir la app sin red). Se guarda la última respuesta del servidor con la hora (`savedAt`); sin conexión se muestra con `OfflineNotice` ("Sin conexión. Te mostramos lo último que guardamos (14:05)") y sin "cargar más". Límites: 30 planes, 20 chats, 5 feeds, 4 listas de "Mis planes" (se borran los más viejos). Un refresco que falla conserva lo que ya se veía.
+- **Cola de pendientes (`outbox`):** inscribirse, darse de baja, mensajes del chat y reportes (decidido en S6). Se guarda en el teléfono, se manda en orden, de a uno, cuando vuelve la red o la app vuelve a primer plano (nunca con un timer ni en segundo plano), y solo con la sesión iniciada. Una falla de red la deja pendiente y corta la vuelta; un rechazo del servidor la deja "no se pudo enviar" con el motivo (p. ej. `PLAN_FULL`) hasta que la persona la descarta o la reintenta. Inscribirse y darse de baja del mismo plan sin conexión se anulan. Un mensaje encolado conserva su `clientId`, así que reintentarlo nunca lo duplica; `ALREADY_JOINED` al reintentar una inscripción cuenta como hecha. La pantalla "Pendientes" lista todo.
+- **Al cerrar sesión** (o vencerse) se borran la caché y la cola: son de esa cuenta.
+
+## Permisos y batería (S6-MOB-04)
+
+- Ubicación solo con la app abierta y en el momento de usarla (feed, crear plan, check-in): `requestForegroundPermissionsAsync`, `isAndroidBackgroundLocationEnabled: false` y `ACCESS_BACKGROUND_LOCATION` bloqueado en el manifiesto de Android.
+- En segundo plano no hay polling ni WebSocket del chat (se suelta la conexión y se recupera al volver), el refresco automático del detalle no consulta al servidor y la cola de pendientes no se manda.
+
 ## UI
 
 - Layout con Flexbox (`flexDirection`, `justifyContent`, `alignItems`, `gap`), estilos con `StyleSheet.create`.

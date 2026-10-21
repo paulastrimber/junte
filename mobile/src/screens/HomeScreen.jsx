@@ -8,12 +8,14 @@ import { ErrorBanner } from '../components/ErrorBanner.jsx'
 import { ErrorState } from '../components/ErrorState.jsx'
 import { FeedFilters } from '../components/FeedFilters.jsx'
 import { Notice } from '../components/Notice.jsx'
+import { OfflineNotice } from '../components/OfflineNotice.jsx'
 import { PlanCard } from '../components/PlanCard.jsx'
 import { PlanCardSkeleton } from '../components/Skeleton.jsx'
 import { Text } from '../components/Text.jsx'
 import { FEED_MODE, FEED_STATUS, LOCATION_NOTICE, useFeed } from '../hooks/useFeed.js'
 import { useFeedFilters } from '../hooks/useFeedFilters.js'
 import { useIsLargeText } from '../hooks/useIsLargeText.js'
+import { useOfflineStatus } from '../hooks/useOffline.js'
 import { ROUTES } from '../navigation/routes.js'
 import { createThemedStyles, spacing, useTheme } from '../theme/index.js'
 import { AVAILABILITY, formatDistance, formatPrice, formatSchedule, formatSpots } from '../utils/plans.js'
@@ -63,6 +65,7 @@ export default function HomeScreen ({ navigation }) {
   const [areFiltersOpen, setAreFiltersOpen] = useState(false)
   // Con texto grande el segmentado y "Filtros (n)" no entran en una fila: van uno abajo del otro.
   const isLargeText = useIsLargeText()
+  const offline = useOfflineStatus()
   // Los manejadores se pasan como identificadores sueltos (regla react/jsx-handler-names).
   const { loadMore, refresh, retry } = feed
   const { setValue, toggleInterest, togglePriceRange, reset } = filters
@@ -90,6 +93,13 @@ export default function HomeScreen ({ navigation }) {
 
   const header = (
     <View style={styles.header}>
+      <OfflineNotice
+        savedAt={feed.savedAt}
+        isOnline={offline.isOnline}
+        pendingCount={offline.pendingCount}
+        failedCount={offline.failedCount}
+        onOpenPending={() => navigation.navigate(ROUTES.PENDING_ACTIONS)}
+      />
       <View testID='feed-toolbar' style={isLargeText ? styles.toolbarStacked : styles.toolbar}>
         <View style={isLargeText ? styles.sectionsStacked : styles.sections}>
           <ChipGroup label={TEXTS.section} options={SECTIONS} selected={[filters.values.availability]} onSelect={(key) => setValue('availability', key)} variant='segmented' hideLabel />

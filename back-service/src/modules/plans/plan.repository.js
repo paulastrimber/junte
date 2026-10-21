@@ -162,6 +162,30 @@ export function createPlanRepository (PlanModel) {
     },
 
     /**
+     * Varios planes en una sola consulta (vista previa de los reportes). Ignora los IDs inválidos.
+     * @param {string[]} ids
+     * @returns {Promise<PlanEntity[]>} sin orden garantizado.
+     */
+    async findByIds (ids) {
+      const valid = [...new Set(ids)].filter((id) => mongoose.isValidObjectId(id))
+      if (valid.length === 0) return []
+      return (await PlanModel.find({ _id: { $in: valid } }).lean()).map(toEntity)
+    },
+
+    /**
+     * Para las métricas del panel.
+     * @param {{ since: Date }} params
+     * @returns {Promise<{ total: number, createdSince: number }>}
+     */
+    async countMetrics ({ since }) {
+      const [total, createdSince] = await Promise.all([
+        PlanModel.countDocuments({}),
+        PlanModel.countDocuments({ createdAt: { $gte: since } })
+      ])
+      return { total, createdSince }
+    },
+
+    /**
      * Edita un plan en UNA operación condicional: solo si es del creador, sigue editable y (si se fija un cupo) el cupo
      * nuevo no queda por debajo de los inscriptos. Pasar a cupo ilimitado (`capacity: null`) no tiene condición. Nunca "consultar y después escribir" (regla 3).
      * Si cambian las fechas, la ventana de check-in se recalcula en la misma operación.

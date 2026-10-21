@@ -116,6 +116,13 @@ tasks:
         msg: Los seeds no se corren en producción
     cmds: [npm run seed]
 
+  db:admin:
+    desc: 'Cuentas admin sin pasar por la API (ej: task db:admin -- promote ana@um.edu.uy). create toma la contraseña de ADMIN_PASSWORD'
+    dir: '{{.BACK}}'
+    requires:
+      vars: [CLI_ARGS]
+    cmds: ['npm run admin -- {{.CLI_ARGS}}']
+
   db:catalogs:sync:
     desc: Suma a la base las entradas nuevas de back-service/catalogs/ (solo inserta; nunca pisa lo que editó el admin)
     dir: '{{.BACK}}'

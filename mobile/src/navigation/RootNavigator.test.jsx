@@ -3,6 +3,7 @@ import { act, fireEvent, screen } from '@testing-library/react-native'
 
 import { CATALOG, COMPLETE_USER, USER, createFakeAuthService, renderWithAuth } from '../../tests/helpers/auth.jsx'
 import { deferred } from '../../tests/helpers/deferred.js'
+import { ERROR_STATE_TEXTS } from '../components/ErrorState.jsx'
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import { resetFilterOptionsCache } from '../hooks/useFeedFilters.js'
 import { TEXTS as CREATE } from '../screens/CreatePlanScreen.jsx'
@@ -185,7 +186,8 @@ describe('RootNavigator (navegación protegida)', () => {
     const restore = jest.fn().mockRejectedValueOnce(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR })).mockResolvedValueOnce(COMPLETE_USER)
     await renderApp(createFakeAuthService({ restore }))
 
-    expect(await screen.findByText(RESTORE.title)).toBeOnTheScreen()
+    // Sin red el título de la pantalla de error pasa a "Sin conexión" (S6-MOB-05).
+    expect(await screen.findByText(ERROR_STATE_TEXTS.offlineTitle)).toBeOnTheScreen()
     expect(screen.getByText(/No pudimos conectarnos/)).toBeOnTheScreen()
 
     await fireEvent.press(screen.getByRole('button', { name: RESTORE.retry }))

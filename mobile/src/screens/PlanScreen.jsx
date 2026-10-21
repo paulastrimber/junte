@@ -9,15 +9,19 @@ import { ErrorBanner } from '../components/ErrorBanner.jsx'
 import { ErrorState } from '../components/ErrorState.jsx'
 import { LoadingState } from '../components/LoadingState.jsx'
 import { Notice } from '../components/Notice.jsx'
+import { OfflineNotice } from '../components/OfflineNotice.jsx'
 import { SectionHeader } from '../components/SectionHeader.jsx'
 import { Text } from '../components/Text.jsx'
+import { useAuth } from '../hooks/useAuth.js'
+import { useOfflineStatus } from '../hooks/useOffline.js'
 import { LIST_STATUS } from '../hooks/usePagedList.js'
 import { PLAN_STATUS } from '../hooks/usePlan.js'
-import { PLAN_ACTION } from '../hooks/usePlanActions.js'
+import { PLAN_ACTION, PLAN_ACTION_MESSAGES } from '../hooks/usePlanActions.js'
 import { usePlanDetail } from '../hooks/usePlanDetail.js'
 import { ROUTES } from '../navigation/routes.js'
 import { borders, createThemedStyles, sizes, spacing } from '../theme/index.js'
 import { formatReputation } from '../utils/attendance.js'
+import { messageForError } from '../utils/errorMessages.js'
 import { formatJoined, formatPrice, formatSchedule, formatSpots } from '../utils/plans.js'
 
 export const TEXTS = Object.freeze({
@@ -63,7 +67,21 @@ export const TEXTS = Object.freeze({
   participantsEmpty: 'Todavía no se inscribió nadie.',
   participantsError: 'No pudimos cargar la lista.',
   participantsMore: 'Ver más',
-  statusLabels: { closed: 'Inscripciones cerradas', cancelled: 'Plan cancelado', completed: 'Plan finalizado' }
+  statusLabels: { closed: 'Inscripciones cerradas', cancelled: 'Plan cancelado', completed: 'Plan finalizado' },
+  // Sin conexión (S6-MOB-02): la inscripción y la baja esperan en la cola; nunca se dan por hechas antes del servidor.
+  joinQueued: 'Inscripción pendiente: la enviamos cuando vuelva la conexión. Todavía no estás inscripto.',
+  leaveQueued: 'Baja pendiente: la enviamos cuando vuelva la conexión. Por ahora seguís inscripto.',
+  cancelQueued: 'Cancelar',
+  joinFailed: 'No pudimos inscribirte.',
+  leaveFailed: 'No pudimos darte de baja.',
+  dismiss: 'Entendido',
+  needsConnection: 'Para registrar la asistencia necesitás conexión.',
+  // Reportes (S6-MOB-03)
+  reportPlan: 'Reportar este plan',
+  reportCreator: (name) => `Reportar a ${name ?? 'quien organiza'}`,
+  reportPerson: 'Reportar',
+  reportPlanLabel: 'este plan',
+  reportUserLabel: (name) => `a ${name ?? 'esta persona'}`
 })
 
 // Textos de cada confirmación (las acciones que no tienen vuelta atrás).
@@ -73,7 +91,7 @@ const CONFIRM_TEXTS = Object.freeze({
 })
 
 /** Lista de anotados: la ven quienes participan y quien organiza. Presentacional (los datos llegan por props). */
-function Participants ({ list, creatorId }) {
+function Participants ({ list, creatorId, userId, onReport }) {
   const styles = useStyles()
   const { loadMore, retry } = list
   return (
@@ -100,6 +118,9 @@ function Participants ({ list, creatorId }) {
                   {person.id === creatorId ? `${person.name ?? ''} (${TEXTS.creator.toLowerCase()})` : person.name}
                 </Text>
                 <Text variant='caption' color='textMuted'>{formatReputation(person.reputation)}</Text>
+                {person.id !== userId
+                  ? <Button title={TEXTS.reportPerson} variant='ghost' size='sm' onPress={() => onReport(person)} />
+                  : null}
               </View>
             ))}
           </View>
@@ -129,9 +150,14 @@ export default function PlanScreen ({ navigation, route }) {
   // `version` cambia cuando se vuelve de editar: fuerza a pedir el plan otra vez.
   const { planId, version = 0 } = route.params
   const detail = usePlanDetail(planId, { version, navigation })
-  const { status, plan, error, refreshError, reload, can, activities, actions, participants, confirmation } = detail
-  const { join, closeSignUps, reopenSignUps } = actions
+  const { status, plan, error, refreshError, savedAt, reload, can, activities, actions, participants, confirmation } = detail
+  const { join, closeSignUps, reopenSignUps, discardQueued } = actions
   const { askCancel, askLeave, confirm, dismiss } = confirmation
+  const { user } = useAuth()
+  const offline = useOfflineStatus()
+
+  const report = (params) => navigation.navigate(ROUTES.REPORT, params)
+  const openPending = () => navigation.navigate(ROUTES.PENDING_ACTIONS)
 
   if (status === PLAN_STATUS.LOADING) return <LoadingState label={TEXTS.loading} fill />
 
@@ -153,9 +179,32 @@ export default function PlanScreen ({ navigation, route }) {
 
   const statusLabel = TEXTS.statusLabels[plan.status]
   const isPending = (action) => actions.pending === action
+  const { queued } = actions
+  const isOnline = offline.isOnline && !savedAt
+  // Lo que depende del momento y del lugar exactos (asistencia, QR) no se puede dejar pendiente.
+  const needsConnection = !isOnline && (can.canCheckIn || can.canShowQr)
+
+  function queuedNotice (item, { pendingText, failedText, action }) {
+    if (!item) return null
+    if (item.status === 'failed') {
+      return (
+        <Notice tone='danger' message={`${failedText} ${messageForError(item.error, PLAN_ACTION_MESSAGES[action])}`}>
+          <Button title={TEXTS.dismiss} variant='ghost' size='sm' onPress={() => discardQueued(item.id)} style={styles.start} />
+        </Notice>
+      )
+    }
+    return (
+      <Notice tone='warning' icon='cloud-upload-outline' message={pendingText}>
+        {item.status === 'pending'
+          ? <Button title={TEXTS.cancelQueued} variant='ghost' size='sm' onPress={() => discardQueued(item.id)} style={styles.start} />
+          : null}
+      </Notice>
+    )
+  }
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <OfflineNotice savedAt={savedAt} isOnline={offline.isOnline} pendingCount={0} failedCount={offline.failedCount} onOpenPending={openPending} />
       <View style={styles.group}>
         <Text variant='title' accessibilityRole='header'>{plan.title}</Text>
         {/* Falló un refresco: se sigue viendo el plan de antes, con el aviso. */}
@@ -191,6 +240,16 @@ export default function PlanScreen ({ navigation, route }) {
               <Text variant='bodyStrong'>{plan.isCreator ? `${plan.creator.name ?? ''} (${TEXTS.you})` : plan.creator.name}</Text>
               <Text variant='caption' color='textMuted'>{formatReputation(plan.creator.reputation ?? 0)}</Text>
             </View>
+            {!plan.isCreator && plan.creator.id !== user?.id
+              ? (
+                <Button
+                  title={TEXTS.reportPerson}
+                  variant='ghost'
+                  size='sm'
+                  onPress={() => report({ targetType: 'user', targetId: plan.creator.id, label: TEXTS.reportUserLabel(plan.creator.name) })}
+                />
+                )
+              : null}
           </Card>
           )
         : null}
@@ -200,27 +259,39 @@ export default function PlanScreen ({ navigation, route }) {
         {can.hasCheckedIn ? <Notice tone='success' message={TEXTS.checkedIn} accessibilityLiveRegion='polite' /> : null}
         {can.wasNoShow ? <Notice tone='warning' message={TEXTS.noShow} /> : null}
 
+        {queuedNotice(queued.join, { pendingText: TEXTS.joinQueued, failedText: TEXTS.joinFailed, action: PLAN_ACTION.JOIN })}
+        {queuedNotice(queued.leave, { pendingText: TEXTS.leaveQueued, failedText: TEXTS.leaveFailed, action: PLAN_ACTION.LEAVE })}
         <ErrorBanner error={actions.error} />
+        {needsConnection ? <Notice tone='warning' icon='cloud-offline-outline' message={TEXTS.needsConnection} /> : null}
 
-        {can.canJoin ? <Button title={TEXTS.join} haptic loading={isPending(PLAN_ACTION.JOIN)} disabled={actions.isBusy} onPress={join} /> : null}
+        {can.canJoin && !queued.isWaiting ? <Button title={TEXTS.join} haptic loading={isPending(PLAN_ACTION.JOIN)} disabled={actions.isBusy} onPress={join} /> : null}
         {can.canCheckIn
-          ? <Button title={TEXTS.checkIn} icon='qr-code-outline' onPress={() => navigation.navigate(ROUTES.CHECK_IN, { planId: plan.id })} />
+          ? <Button title={TEXTS.checkIn} icon='qr-code-outline' disabled={!isOnline} onPress={() => navigation.navigate(ROUTES.CHECK_IN, { planId: plan.id })} />
           : null}
         {can.canShowQr
-          ? <Button title={TEXTS.showQr} icon='qr-code-outline' onPress={() => navigation.navigate(ROUTES.PLAN_QR, { planId: plan.id, canCheckIn: can.canCreatorCheckIn })} />
+          ? <Button title={TEXTS.showQr} icon='qr-code-outline' disabled={!isOnline} onPress={() => navigation.navigate(ROUTES.PLAN_QR, { planId: plan.id, canCheckIn: can.canCreatorCheckIn })} />
           : null}
         {can.canChat
           ? <Button title={TEXTS.chat} variant='secondary' icon='chatbubbles-outline' onPress={() => navigation.navigate(ROUTES.CHAT, { planId: plan.id, title: plan.title })} />
           : null}
-        {can.canLeave && confirmation.action !== PLAN_ACTION.LEAVE
+        {can.canLeave && !queued.isWaiting && confirmation.action !== PLAN_ACTION.LEAVE
           ? <Button title={TEXTS.leave} variant='secondary' disabled={actions.isBusy} onPress={askLeave} />
           : null}
-        {can.canLeave && confirmation.action === PLAN_ACTION.LEAVE
+        {can.canLeave && !queued.isWaiting && confirmation.action === PLAN_ACTION.LEAVE
           ? <Confirmation action={PLAN_ACTION.LEAVE} isBusy={actions.isBusy} isPending={isPending(PLAN_ACTION.LEAVE)} onConfirm={confirm} onDismiss={dismiss} />
           : null}
       </View>
 
-      {can.canSeeParticipants ? <Participants list={participants} creatorId={plan.creator?.id} /> : null}
+      {can.canSeeParticipants
+        ? (
+          <Participants
+            list={participants}
+            creatorId={plan.creator?.id}
+            userId={user?.id}
+            onReport={(person) => report({ targetType: 'user', targetId: person.id, label: TEXTS.reportUserLabel(person.name) })}
+          />
+          )
+        : null}
 
       {plan.isCreator
         ? (
@@ -241,6 +312,10 @@ export default function PlanScreen ({ navigation, route }) {
               : null}
           </View>
           )
+        : null}
+
+      {!plan.isCreator
+        ? <Button title={TEXTS.reportPlan} variant='ghost' icon='flag-outline' onPress={() => report({ targetType: 'plan', targetId: plan.id, label: TEXTS.reportPlanLabel })} />
         : null}
     </ScrollView>
   )

@@ -6,8 +6,8 @@
 # Verifica: /health, X-Request-Id (siempre generado por Nginx; el del cliente no llega al back), proxy /api/v1/* → /internal/*,
 # /internal no publicado, upgrade a WebSocket de Socket.io (y long-polling rechazado), límite de body, 429 JSON tras una ráfaga en /api/v1/auth/login,
 # que las variantes de esa URL y /auth/register comparten el límite estricto, que /auth/refresh NO lo
-# comparte (usa la zona general), que un X-Forwarded-For de un cliente externo no evade el límite y que
-# el límite es por IP real.
+# comparte (usa la zona general), que un X-Forwarded-For de un cliente externo no evade el límite, que
+# el límite es por IP real y que el panel /admin sale con sus cabeceras de seguridad.
 #
 # Las verificaciones marcadas [local] necesitan el entorno de docker compose levantado:
 #   - leen el access log de Nginx (para ver el path reescrito y la IP real), y
@@ -235,6 +235,37 @@ if [ -n "$limited" ]; then
   done
 else
   fail "15 requests seguidos no dieron 429" "${codes[*]}"
+fi
+
+# ── Panel /admin ────────────────────────────────────────────────────
+section 'Panel /admin (estáticos con cabeceras de seguridad; la autorización es del back)'
+request admin "$BASE_URL/admin/"
+if [ "$(status admin)" = 200 ] && grep -qi 'text/html' <<<"$(header admin Content-Type)"; then
+  ok "/admin/ → 200 HTML"
+else
+  fail "/admin/ → $(status admin) $(header admin Content-Type)"
+fi
+csp="$(header admin Content-Security-Policy)"
+if grep -q "default-src 'none'" <<<"$csp" && grep -q "script-src 'self'" <<<"$csp" && grep -q "frame-ancestors 'none'" <<<"$csp"; then
+  ok "CSP estricta (solo recursos propios, sin frames)"
+else
+  fail "falta la CSP del panel o no es estricta" "$csp"
+fi
+[ "$(header admin X-Frame-Options)" = DENY ] && ok "X-Frame-Options: DENY" || fail "falta X-Frame-Options: DENY" "$(header admin X-Frame-Options)"
+[ "$(header admin X-Content-Type-Options)" = nosniff ] && ok "X-Content-Type-Options: nosniff" || fail "falta X-Content-Type-Options: nosniff"
+[ "$(header admin Cache-Control)" = no-store ] && ok "Cache-Control: no-store" || fail "el panel se puede cachear" "$(header admin Cache-Control)"
+[ -n "$(header admin X-Request-Id)" ] && ok "el panel también lleva X-Request-Id" || fail "/admin/ sin X-Request-Id (add_header de la location pisa el del server)"
+request admin_js "$BASE_URL/admin/app.js"
+if [ "$(status admin_js)" = 200 ] && grep -qi 'javascript' <<<"$(header admin_js Content-Type)"; then
+  ok "/admin/app.js → 200 JavaScript (módulo)"
+else
+  fail "/admin/app.js → $(status admin_js) $(header admin_js Content-Type)"
+fi
+request admin_api "$BASE_URL/api/v1/admin/metrics"
+if [ "$(status admin_api)" = 401 ] && [ "$(json_field admin_api code)" = UNAUTHENTICATED ]; then
+  ok "/api/v1/admin/metrics sin token → 401 JSON (lo decide el back)"
+else
+  fail "/api/v1/admin/metrics sin token → $(status admin_api)" "$(body admin_api)"
 fi
 
 # ── IP real desde la red de confianza ───────────────────────────────

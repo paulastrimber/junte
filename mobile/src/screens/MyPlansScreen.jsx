@@ -6,9 +6,11 @@ import { ChipGroup } from '../components/ChipGroup.jsx'
 import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorBanner } from '../components/ErrorBanner.jsx'
 import { ErrorState } from '../components/ErrorState.jsx'
+import { OfflineNotice } from '../components/OfflineNotice.jsx'
 import { PlanCard } from '../components/PlanCard.jsx'
 import { PlanCardSkeleton } from '../components/Skeleton.jsx'
 import { MY_PLANS_ROLE, MY_PLANS_WHEN, useMyPlans } from '../hooks/useMyPlans.js'
+import { useOfflineStatus } from '../hooks/useOffline.js'
 import { LIST_STATUS } from '../hooks/usePagedList.js'
 import { useRefreshOnFocus } from '../hooks/useScreenFocus.js'
 import { ROUTES } from '../navigation/routes.js'
@@ -89,6 +91,7 @@ export default function MyPlansScreen ({ navigation }) {
   const [role, setRole] = useState(MY_PLANS_ROLE.JOINED)
   const [when, setWhen] = useState(MY_PLANS_WHEN.UPCOMING)
   const plans = useMyPlans({ role, when })
+  const offline = useOfflineStatus()
   const { loadMore, refresh, retry } = plans
 
   // Al volver a la pestaña la lista pudo cambiar (inscripciones, bajas, asistencia). Al entrar ya la pide el hook.
@@ -116,6 +119,13 @@ export default function MyPlansScreen ({ navigation }) {
 
   const header = (
     <View style={styles.header}>
+      <OfflineNotice
+        savedAt={plans.savedAt}
+        isOnline={offline.isOnline}
+        pendingCount={offline.pendingCount}
+        failedCount={offline.failedCount}
+        onOpenPending={() => navigation.navigate(ROUTES.PENDING_ACTIONS)}
+      />
       <ChipGroup label={TEXTS.role} options={ROLES} selected={[role]} onSelect={setRole} variant='segmented' hideLabel />
       <ChipGroup label={TEXTS.when} options={WHENS} selected={[when]} onSelect={setWhen} variant='segmented' hideLabel />
       {plans.refreshError

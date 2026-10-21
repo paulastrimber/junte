@@ -4,6 +4,7 @@ import { AppState } from 'react-native'
 
 import { COMPLETE_USER, SignedIn, createFakeAuthService, renderWithAuth, CATALOG } from '../../tests/helpers/auth.jsx'
 import { deferred } from '../../tests/helpers/deferred.js'
+import { ERROR_STATE_TEXTS } from '../components/ErrorState.jsx'
 import { resetCatalogsCache } from '../hooks/useCatalogs.js'
 import { getCatalogs } from '../services/api/catalogs.js'
 import { checkIn, createPlanQr } from '../services/api/checkins.js'
@@ -244,7 +245,8 @@ describe('PlanQrScreen (creador)', () => {
 
     await act(async () => jest.advanceTimersByTime(90_000))
 
-    expect(screen.getByText(QR.errorTitle)).toBeOnTheScreen()
+    // Sin red el título del error dice "Sin conexión" (S6-MOB-05).
+    expect(screen.getByText(ERROR_STATE_TEXTS.offlineTitle)).toBeOnTheScreen()
     expect(screen.queryByRole('image', { name: QR.qrLabel })).not.toBeOnTheScreen()
     expect(screen.queryByText(/Sin conexión\. Este QR/)).not.toBeOnTheScreen()
     createPlanQr.mockResolvedValueOnce({ qrToken: 'p1.token-2', expiresAt: new Date(NOW.getTime() + 180_000).toISOString() })
@@ -425,9 +427,9 @@ describe('MyPlansScreen', () => {
     await render(<MyPlansScreen navigation={navigation} />)
     expect(screen.getByRole('progressbar', { name: MY_PLANS.loading })).toBeOnTheScreen()
 
-    await act(async () => pending.reject(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR)))
+    // Un error del servidor (sin conexión el título pasa a "Sin conexión").
+    await act(async () => pending.reject(apiError(500, 'INTERNAL')))
     expect(await screen.findByRole('header', { name: MY_PLANS.errorTitle })).toBeOnTheScreen()
-    expect(screen.getByText(/No pudimos conectarnos/)).toBeOnTheScreen()
     // Los selectores siguen arriba del error para poder cambiar de lista.
     expect(screen.getByRole('radio', { name: 'Organizo' })).toBeOnTheScreen()
 

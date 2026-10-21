@@ -3,7 +3,8 @@ import { isApiError } from './errors.js'
 
 // Se llama a GET /api/v1/health (Nginx lo reescribe a /internal/health del back) y no al
 // /health de la raíz: ese lo responde Nginx con texto plano y solo dice que Nginx está vivo.
-// Este recorre app → Nginx → back → MongoDB/Redis y distingue 200 (ok) de 503 (degradado).
+// Este recorre app → Nginx → back → MongoDB/Redis. Degradado es un 503 (MongoDB no responde) o un 200 con
+// `status: 'degraded'` (Redis caído: la API sigue respondiendo y el chat va por polling).
 const HEALTH_PATH = '/health'
 const SERVICE_UNAVAILABLE = 503
 
@@ -24,9 +25,10 @@ export async function getHealth ({ client = getApiClient(), signal } = {}) {
   try {
     const response = await client.get(HEALTH_PATH, { signal })
     const requestId = response.headers?.get?.('x-request-id') ?? null
-    return { status: HEALTH_STATUS.OK, requestId }
+    const status = response.data?.status === HEALTH_STATUS.DEGRADED ? HEALTH_STATUS.DEGRADED : HEALTH_STATUS.OK
+    return { status, requestId }
   } catch (error) {
-    // 503 = el back respondió pero alguna dependencia (MongoDB/Redis) no: degradado, no caído.
+    // 503 = el back respondió pero MongoDB no: degradado, no caído.
     if (isApiError(error) && error.status === SERVICE_UNAVAILABLE) {
       return { status: HEALTH_STATUS.DEGRADED, requestId: error.requestId, error }
     }

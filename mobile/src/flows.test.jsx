@@ -8,6 +8,7 @@ import { Platform } from 'react-native'
 
 import { CATALOG, COMPLETE_USER, USER } from '../tests/helpers/auth.jsx'
 import { deferred } from '../tests/helpers/deferred.js'
+import { ERROR_STATE_TEXTS } from './components/ErrorState.jsx'
 import { AuthProvider } from './contexts/AuthContext.jsx'
 import { resetCatalogsCache } from './hooks/useCatalogs.js'
 import { resetFilterOptionsCache } from './hooks/useFeedFilters.js'
@@ -284,7 +285,8 @@ describe('flujo: detalle → inscribirse → darse de baja', () => {
     await renderApp()
     await fireEvent.press(await screen.findByRole('button', { name: /Fútbol 5 en Parque Rodó/ }))
 
-    expect(await screen.findByText(PLAN.errorTitle)).toBeOnTheScreen()
+    // Sin red el título dice "Sin conexión" (S6-MOB-05); el motivo es el texto del catálogo.
+    expect(await screen.findByText(ERROR_STATE_TEXTS.offlineTitle)).toBeOnTheScreen()
     expect(screen.getByText(/No pudimos conectarnos/)).toBeOnTheScreen()
     await fireEvent.press(button(PLAN.retry))
 
@@ -511,8 +513,9 @@ describe('flujo: chat sin WebSocket (por REST)', () => {
     expect(screen.getAllByText('Hola, ¿llevo pelota?')).toHaveLength(1)
   })
 
-  it('si falla por red queda "No se envió · Reintentar"; reintentar lo manda con el mismo clientId', async () => {
-    api.onPost('/plans/p1/messages').networkErrorOnce()
+  // Un error de red no llega acá: el mensaje queda en la cola de pendientes (S6-MOB-02, lo cubre useChat.test.js).
+  it('si el servidor lo rechaza queda "No se envió · Reintentar"; reintentar lo manda con el mismo clientId', async () => {
+    api.onPost('/plans/p1/messages').replyOnce(500, { code: 'INTERNAL_ERROR', message: 'Error interno.', requestId: 'req-1' })
     api.onPost('/plans/p1/messages').reply((config) => [201, { id: 'm1', planId: 'p1', sender: ME, type: 'text', text: 'Hola', clientId: JSON.parse(config.data).clientId, createdAt: todayAt(10, 6) }])
     await openChat()
 

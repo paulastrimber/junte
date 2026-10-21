@@ -4,6 +4,7 @@ import { getFeed } from '../services/api/feed.js'
 import { listPlans } from '../services/api/plans.js'
 import { readBusySlots } from '../services/calendar.js'
 import { LOCATION_STATUS, getCurrentCoordinates } from '../services/location.js'
+import { connectivity, isTransportFailure, readCache } from '../services/offline/index.js'
 import { toViewError } from '../utils/errorMessages.js'
 import { toApiFilters } from './useFeedFilters.js'
 
@@ -38,7 +39,8 @@ const INITIAL = Object.freeze({
   isReloading: false,
   refreshError: null,
   isLoadingMore: false,
-  loadMoreError: null
+  loadMoreError: null,
+  savedAt: null
 })
 
 /**
@@ -52,6 +54,8 @@ const INITIAL = Object.freeze({
  * llega la respuesta. Una carga nueva cancela la request de la anterior.
  * Errores (`ViewError`): `error` si falló la primera carga, `refreshError` si falló un refresco (se conservan los
  * planes) y `loadMoreError` si falló una página siguiente. `locationNotice` dice por qué quedó por fecha.
+ * Sin conexión muestra la última primera página guardada con los mismos filtros (`savedAt`, sin "cargar más"). Solo se
+ * guardan los planes que ya mostraba la pantalla: ni la posición ni el calendario.
  * @param {{ query: object, radiusKm: number }} params  De `useFeedFilters`.
  */
 export function useFeed ({ query, radiusKm }) {
@@ -101,6 +105,7 @@ export function useFeed ({ query, radiusKm }) {
     const controller = new AbortController()
     abortRef.current = controller
     isLoadingMoreRef.current = false
+    const cacheKey = `feed:${applied.radiusKm}:${applied.filtersKey}`
     setState((current) => {
       if (isRefreshing) return { ...current, isRefreshing: true, isReloading: false, refreshError: null, loadMoreError: null }
       // Sin desmontar la lista (ni perder el scroll): se reemplaza cuando llega la respuesta.
@@ -109,6 +114,18 @@ export function useFeed ({ query, radiusKm }) {
       }
       return { ...INITIAL }
     })
+
+    /** La última primera página guardada con estos filtros, o null. */
+    async function showCached () {
+      const cached = await readCache.load(cacheKey)
+      if (!cached || !isCurrent()) return Boolean(cached)
+      const { items, mode, locationStatus } = cached.data
+      requestRef.current = null
+      setState({ ...INITIAL, status: FEED_STATUS.READY, items, mode, locationStatus, locationNotice: noticeFor(locationStatus), savedAt: cached.savedAt })
+      return true
+    }
+
+    if (!isRefreshing && !connectivity.isOnline() && await showCached()) return
 
     try {
       const filters = toApiFilters(JSON.parse(applied.filtersKey))
@@ -137,9 +154,13 @@ export function useFeed ({ query, radiusKm }) {
         locationStatus: location.status,
         locationNotice: noticeFor(location.status)
       })
+      readCache.save(cacheKey, { items: page.items, mode: request.mode, locationStatus: location.status })
     } catch (failure) {
       if (!isCurrent()) return
       const error = toViewError(failure)
+      // Un refresco que falla conserva lo que ya se veía (abajo); solo la primera carga recurre a lo guardado.
+      if (!isRefreshing && isTransportFailure(error) && await showCached()) return
+      if (!isCurrent()) return
       // Si falla un refresco se conserva lo que ya se veía; si falla la primera carga, pantalla de error.
       setState((current) => (isRefreshing && current.status === FEED_STATUS.READY
         ? { ...current, isRefreshing: false, refreshError: error }

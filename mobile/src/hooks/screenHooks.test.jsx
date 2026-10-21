@@ -244,14 +244,25 @@ describe('usePlanDetail', () => {
     expect(result.current.participants.items).toEqual([])
   })
 
-  it('si falla un refresco (sin red), el plan sigue a la vista con refreshError', async () => {
+  it('si falla un refresco, el plan sigue a la vista con refreshError', async () => {
+    getPlan.mockResolvedValueOnce(plan()).mockRejectedValueOnce(apiError(500, 'INTERNAL_ERROR'))
+    const { result, navigation } = await renderDetail()
+    await navigation.emit('focus')
+
+    await navigation.emit('focus')
+    await waitFor(() => expect(result.current.refreshError).toMatchObject({ code: 'INTERNAL_ERROR' }))
+
+    expect(result.current).toMatchObject({ status: 'ready', plan: { id: 'p1' } })
+  })
+
+  it('si un refresco falla sin red, muestra el plan guardado en el teléfono (savedAt), sin refreshError', async () => {
     getPlan.mockResolvedValueOnce(plan()).mockRejectedValueOnce(apiError(0, CLIENT_ERROR_CODES.NETWORK_ERROR))
     const { result, navigation } = await renderDetail()
     await navigation.emit('focus')
 
     await navigation.emit('focus')
-    await waitFor(() => expect(result.current.refreshError).toMatchObject({ code: CLIENT_ERROR_CODES.NETWORK_ERROR }))
+    await waitFor(() => expect(result.current.savedAt).toEqual(expect.any(String)))
 
-    expect(result.current).toMatchObject({ status: 'ready', plan: { id: 'p1' } })
+    expect(result.current).toMatchObject({ status: 'ready', plan: { id: 'p1' }, refreshError: null })
   })
 })

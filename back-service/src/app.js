@@ -32,17 +32,27 @@ async function probe (ping, timeoutMs) {
 }
 
 /**
- * GET /internal/health: 200 si Mongo y Redis responden, 503 si alguno no.
+ * Estado global a partir de los checks. Solo MongoDB decide el código HTTP: sin Redis la API sigue
+ * sirviendo (el chat pasa a polling), y un 503 haría que el ALB interno saque a todas las instancias.
+ * @param {{ mongo: boolean, redis: boolean }} checks
+ */
+function healthStatus ({ mongo, redis }) {
+  if (!mongo) return { httpStatus: 503, status: 'unavailable' }
+  return { httpStatus: 200, status: redis ? 'ok' : 'degraded' }
+}
+
+/**
+ * GET /internal/health: 503 si Mongo no responde; si no, 200 con status `ok` o, sin Redis, `degraded`.
  * Solo expone up/down por componente, nunca mensajes de error ni hosts.
  * @param {{ pingDb: () => Promise<boolean>, pingRedis: () => Promise<boolean>, timeoutMs?: number }} deps
  */
 function createHealthHandler ({ pingDb, pingRedis, timeoutMs = HEALTH_CHECK_TIMEOUT_MS }) {
   return async function health (req, res) {
     const [mongo, redis] = await Promise.all([probe(pingDb, timeoutMs), probe(pingRedis, timeoutMs)])
-    const isHealthy = mongo && redis
+    const { httpStatus, status } = healthStatus({ mongo, redis })
     res.set('Cache-Control', 'no-store')
-    res.status(isHealthy ? 200 : 503).json({
-      status: isHealthy ? 'ok' : 'unavailable',
+    res.status(httpStatus).json({
+      status,
       checks: { mongo: mongo ? 'up' : 'down', redis: redis ? 'up' : 'down' }
     })
   }

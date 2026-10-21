@@ -114,7 +114,8 @@ describe('requests al navegar (React Navigation real)', () => {
     // Otro detalle en el stack de "Mis planes": dos PlanScreen montadas a la vez, una sola a la vista.
     await act(async () => ref.navigate(ROUTES.MY_PLANS_TAB, { screen: ROUTES.PLAN, params: { planId: 'p1' } }))
     await settle()
-    expect(appStateHandlers.size).toBe(2)
+    // Uno por cada detalle, más el de la sincronización de la cola de pendientes (useOfflineSync).
+    expect(appStateHandlers.size).toBe(3)
     const plansBefore = getPlan.mock.calls.length
     const participantsBefore = listParticipants.mock.calls.length
 

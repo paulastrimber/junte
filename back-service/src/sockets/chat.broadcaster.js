@@ -46,6 +46,34 @@ export function createChatBroadcaster ({ serializeMessage, logger }) {
       } catch (err) {
         logger.warn({ err, planId, userId }, 'could not remove user from chat room')
       }
+    },
+
+    /**
+     * Avisa a la sala del plan que un admin ocultó un mensaje (`chat:hidden`): la app lo saca de la lista.
+     * Nunca lanza: quien no lo reciba deja de verlo al recargar el historial (solo trae mensajes visibles).
+     * @param {{ planId: string, messageId: string }} params
+     */
+    publishHidden ({ planId, messageId }) {
+      if (!io) return
+      try {
+        io.to(planRoom(planId)).emit('chat:hidden', { planId, messageId })
+      } catch (err) {
+        logger.warn({ err, planId, messageId }, 'could not broadcast hidden message')
+      }
+    },
+
+    /**
+     * Cierra todas las conexiones de un usuario en todas las instancias (p. ej. cuando un admin lo suspende).
+     * Al reconectar, el handshake lo rechaza con ACCOUNT_SUSPENDED.
+     * @param {string} userId
+     */
+    disconnectUser (userId) {
+      if (!io) return
+      try {
+        io.in(userRoom(userId)).disconnectSockets(true)
+      } catch (err) {
+        logger.warn({ err, userId }, 'could not disconnect user sockets')
+      }
     }
   }
 }
