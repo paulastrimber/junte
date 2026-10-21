@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  junte - Redis en ElastiCache (S1-INF-07, parte; paso 1.7 del plan). Adaptador de
+  Socket.io y locks de los jobs. Un nodo en dev; primario y replica con failover en
+  entrega. Stack de encender y apagar: cobra por hora y no guarda nada que importe perder.
+
+# Tags: project y env llegan con --tags al desplegar y CloudFormation los propaga.
+# Acá cada recurso que lo admite lleva Name (junte-<env>-<recurso>) y layer.
+
+Parameters:
+  Env:
+    Type: String
+    AllowedValues: [dev, entrega]
+  NodeCount:
+    Type: Number
+    AllowedValues: [1, 2]
+    Default: 1
+    Description: 1 = un nodo (dev). 2 = primario y replica en la otra zona, con failover automatico.
+  NodeType:
+    Type: String
+    Default: cache.t4g.micro
+    AllowedValues: [cache.t4g.micro, cache.t4g.small]
+
+Conditions:
+  WithReplica: !Equals [!Ref NodeCount, 2]
+
+Resources:
+  # Subredes de aplicación: junto al back, sin acceso desde Internet.
+  RedisSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Subredes de aplicacion para Redis.
+      SubnetIds:
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetA' }
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetB' }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-redis-subnets' }
+        - { Key: layer, Value: soporte }
+
+  # ReplicationGroup (y no CacheCluster): es el único tipo que admite réplica con failover.
+  # Sin TLS en tránsito: REDIS_URL sigue siendo redis:// (límite documentado). Sin TLS,
+  # ElastiCache no admite AuthToken: el acceso lo controla solo sg-redis (6379 desde sg-back).
+  # Sin snapshots: no guarda nada que haya que recuperar.
+  RedisReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupDescription: !Sub 'junte ${Env} - adaptador de Socket.io y locks de jobs'
+      Engine: redis
+      EngineVersion: '7.1'
+      CacheNodeType: !Ref NodeType
+      NumCacheClusters: !Ref NodeCount
+      AutomaticFailoverEnabled: !If [WithReplica, true, false]
+      MultiAZEnabled: !If [WithReplica, true, false]
+      Port: 6379
+      CacheSubnetGroupName: !Ref RedisSubnetGroup
+      SecurityGroupIds:
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-RedisSecurityGroup' }
+      TransitEncryptionEnabled: false
+      AtRestEncryptionEnabled: true
+      SnapshotRetentionLimit: 0
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-redis' }
+        - { Key: layer, Value: soporte }
+
+# El export lo importa 40-back: por eso redis se borra después de back (orden de apagado del plan).
+Outputs:
+  RedisUrl:
+    Description: Valor de REDIS_URL en el back (endpoint del primario).
+    Value: !Sub 'redis://${RedisReplicationGroup.PrimaryEndPoint.Address}:${RedisReplicationGroup.PrimaryEndPoint.Port}'
+    Export: { Name: !Sub 'junte-${Env}-RedisUrl' }

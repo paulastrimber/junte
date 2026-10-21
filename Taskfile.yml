@@ -137,6 +137,15 @@ tasks:
     desc: Smoke test del front contra el entorno local
     cmds: ['bash {{.FRONT}}/tests/smoke.sh http://localhost:8080']
 
+  # ── Infra (CloudFormation) ───────────────────────────────────────
+  infra:lint:
+    desc: cfn-lint de infra/templates (en Docker, misma versión que CI; no usa credenciales de AWS)
+    cmds:
+      - >-
+        docker run --rm -v "$PWD/infra:/infra:ro" -w /infra python:3.13.15-slim
+        sh -c 'pip install -q --disable-pip-version-check --root-user-action=ignore cfn-lint==1.57.0
+        && cfn-lint --regions us-east-1 -- templates/*.yml'
+
   # ── App móvil ────────────────────────────────────────────────────
   mobile:start:
     desc: Inicia Expo (development build)
@@ -183,3 +192,4 @@ tasks:
       - task: test
       - task: db:migrate:check
       - task: front:check
+      - task: infra:lint

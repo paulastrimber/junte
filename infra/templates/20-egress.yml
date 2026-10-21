@@ -1,0 +1,237 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  junte - salida a Internet (S1-INF-05, parte paga; paso 1.5 del plan). NAT Gateway
+  (1 o 2, ADR-0005), rutas 0.0.0.0/0 de las tablas privadas y endpoints de interfaz
+  opcionales. Stack de encender y apagar: cobra por hora, se borra al terminar la sesion.
+
+# Tags: project y env llegan con --tags al desplegar y CloudFormation los propaga.
+# Acá cada recurso que lo admite lleva Name (junte-<env>-<recurso>) y layer.
+# Sin exports a propósito: este stack se borra en cada sesión y un export importado lo impediría.
+
+Parameters:
+  Env:
+    Type: String
+    AllowedValues: [dev, entrega]
+  NatCount:
+    Type: Number
+    AllowedValues: [1, 2]
+    Default: 1
+    Description: >-
+      2 = un NAT por zona (ADR-0005). 1 = todas las subredes privadas salen por el NAT
+      de la zona a (desvio temporal de dev, documentado en el plan).
+  InterfaceEndpoints:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >-
+      true crea endpoints de interfaz para SSM, Secrets Manager y Logs en las subredes
+      de aplicacion (sin pasar por el NAT). Cobran por hora y por zona.
+
+Conditions:
+  TwoNats: !Equals [!Ref NatCount, 2]
+  CreateEndpoints: !Equals [!Ref InterfaceEndpoints, 'true']
+
+Resources:
+  # ---------------------------------------------------------------- NAT Gateways
+  # Viven en las subredes públicas con una IP elástica. Solo permiten conexiones que salen.
+
+  NatEipA:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-eip-nat-a' }
+        - { Key: layer, Value: red }
+
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEipA.AllocationId
+      SubnetId: { 'Fn::ImportValue': !Sub 'junte-${Env}-PublicSubnetA' }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-nat-a' }
+        - { Key: layer, Value: red }
+
+  NatEipB:
+    Type: AWS::EC2::EIP
+    Condition: TwoNats
+    Properties:
+      Domain: vpc
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-eip-nat-b' }
+        - { Key: layer, Value: red }
+
+  NatGatewayB:
+    Type: AWS::EC2::NatGateway
+    Condition: TwoNats
+    Properties:
+      AllocationId: !GetAtt NatEipB.AllocationId
+      SubnetId: { 'Fn::ImportValue': !Sub 'junte-${Env}-PublicSubnetB' }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-nat-b' }
+        - { Key: layer, Value: red }
+
+  # ---------------------------------------------------------------- Rutas por defecto
+  # Cada tabla privada sale por el NAT de su zona. Con un solo NAT, la zona b usa el de a.
+  # Datos c no tiene NAT propio: sale por el de a (paso 1.5 del plan).
+
+  EdgeDefaultRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: { 'Fn::ImportValue': !Sub 'junte-${Env}-EdgeRouteTableA' }
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+
+  EdgeDefaultRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: { 'Fn::ImportValue': !Sub 'junte-${Env}-EdgeRouteTableB' }
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !If [TwoNats, !Ref NatGatewayB, !Ref NatGatewayA]
+
+  AppDefaultRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: { 'Fn::ImportValue': !Sub 'junte-${Env}-AppRouteTableA' }
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+
+  AppDefaultRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: { 'Fn::ImportValue': !Sub 'junte-${Env}-AppRouteTableB' }
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !If [TwoNats, !Ref NatGatewayB, !Ref NatGatewayA]
+
+  DataDefaultRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: { 'Fn::ImportValue': !Sub 'junte-${Env}-DataRouteTableA' }
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+
+  DataDefaultRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: { 'Fn::ImportValue': !Sub 'junte-${Env}-DataRouteTableB' }
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !If [TwoNats, !Ref NatGatewayB, !Ref NatGatewayA]
+
+  DataDefaultRouteC:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: { 'Fn::ImportValue': !Sub 'junte-${Env}-DataRouteTableC' }
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+
+  # ---------------------------------------------------------------- Endpoints de interfaz
+  # Solo con InterfaceEndpoints=true. Una placa de red por zona en las subredes de aplicación;
+  # con PrivateDnsEnabled el nombre normal del servicio resuelve a esa IP privada.
+
+  EndpointsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateEndpoints
+    Properties:
+      GroupDescription: VPC endpoints de interfaz. HTTPS desde la VPC.
+      VpcId: { 'Fn::ImportValue': !Sub 'junte-${Env}-VpcId' }
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: { 'Fn::ImportValue': !Sub 'junte-${Env}-VpcCidr' }
+          Description: HTTPS desde la VPC
+      SecurityGroupEgress:
+        - { IpProtocol: '-1', CidrIp: 127.0.0.1/32, Description: Anula la salida por defecto }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-sg-endpoints' }
+        - { Key: layer, Value: soporte }
+
+  SsmEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateEndpoints
+    Properties:
+      VpcEndpointType: Interface
+      VpcId: { 'Fn::ImportValue': !Sub 'junte-${Env}-VpcId' }
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetA' }
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetB' }
+      SecurityGroupIds: [!Ref EndpointsSecurityGroup]
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-vpce-ssm' }
+        - { Key: layer, Value: soporte }
+
+  SsmMessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateEndpoints
+    Properties:
+      VpcEndpointType: Interface
+      VpcId: { 'Fn::ImportValue': !Sub 'junte-${Env}-VpcId' }
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssmmessages'
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetA' }
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetB' }
+      SecurityGroupIds: [!Ref EndpointsSecurityGroup]
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-vpce-ssmmessages' }
+        - { Key: layer, Value: soporte }
+
+  Ec2MessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateEndpoints
+    Properties:
+      VpcEndpointType: Interface
+      VpcId: { 'Fn::ImportValue': !Sub 'junte-${Env}-VpcId' }
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ec2messages'
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetA' }
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetB' }
+      SecurityGroupIds: [!Ref EndpointsSecurityGroup]
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-vpce-ec2messages' }
+        - { Key: layer, Value: soporte }
+
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateEndpoints
+    Properties:
+      VpcEndpointType: Interface
+      VpcId: { 'Fn::ImportValue': !Sub 'junte-${Env}-VpcId' }
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.secretsmanager'
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetA' }
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetB' }
+      SecurityGroupIds: [!Ref EndpointsSecurityGroup]
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-vpce-secretsmanager' }
+        - { Key: layer, Value: soporte }
+
+  LogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateEndpoints
+    Properties:
+      VpcEndpointType: Interface
+      VpcId: { 'Fn::ImportValue': !Sub 'junte-${Env}-VpcId' }
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetA' }
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetB' }
+      SecurityGroupIds: [!Ref EndpointsSecurityGroup]
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-vpce-logs' }
+        - { Key: layer, Value: soporte }
+
+# Sin Export: nadie los importa y el stack tiene que poder borrarse en cada sesión.
+Outputs:
+  NatPublicIpA:
+    Description: IP publica del NAT de la zona a (verificacion con checkip.amazonaws.com).
+    Value: !Ref NatEipA
+  NatPublicIpB:
+    Condition: TwoNats
+    Description: IP publica del NAT de la zona b.
+    Value: !Ref NatEipB

@@ -1,0 +1,5 @@
+[
+  { "ParameterKey": "Env", "ParameterValue": "entrega" },
+  { "ParameterKey": "NatCount", "ParameterValue": "2" },
+  { "ParameterKey": "InterfaceEndpoints", "ParameterValue": "true" }
+]
