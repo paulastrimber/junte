@@ -43,7 +43,7 @@ describe('useHealth', () => {
     const { result } = await renderHook(() => useHealth())
 
     await waitFor(() => expect(result.current.status).toBe(HEALTH_VIEW_STATUS.ERROR))
-    expect(result.current.error).toMatchObject({ code: 'INTERNAL', message: 'Falla' })
+    expect(result.current.error).toEqual({ code: 'INTERNAL', message: 'Falla', requestId: 'req-500' })
     expect(result.current.requestId).toBe('req-500')
   })
 
@@ -53,8 +53,8 @@ describe('useHealth', () => {
     const { result } = await renderHook(() => useHealth())
 
     await waitFor(() => expect(result.current.status).toBe(HEALTH_VIEW_STATUS.ERROR))
-    expect(result.current.error).toBeInstanceOf(ApiError)
-    expect(result.current.error.code).toBe(CLIENT_ERROR_CODES.UNKNOWN_ERROR)
+    expect(result.current.error).toEqual({ code: CLIENT_ERROR_CODES.UNKNOWN_ERROR, message: 'Ocurrió un error inesperado. Probá de nuevo.', requestId: null })
+    expect(result.current.error.message).not.toMatch(/apiUrl/)
   })
 
   it('retry vuelve a loading y consulta de nuevo', async () => {

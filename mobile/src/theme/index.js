@@ -5,8 +5,9 @@ import { shadows } from './tokens.js'
 
 export { palettes } from './colors.js'
 export { navigationTheme, stackScreenOptions, tabScreenOptions } from './navigation.js'
-export { motion, radius, sizes, spacing } from './tokens.js'
-export { fontAssets, fonts, typography } from './typography.js'
+export { borders, motion, radius, sizes, spacing } from './tokens.js'
+export { LARGE_TEXT_SCALE, fontAssets, fontScaleLimits, fonts, typography } from './typography.js'
+export { useReducedMotion } from './useReducedMotion.js'
 
 const themes = Object.freeze({
   light: Object.freeze({ scheme: 'light', isDark: false, colors: palettes.light, shadows: shadows.light }),
@@ -15,7 +16,7 @@ const themes = Object.freeze({
 
 /**
  * Tema según el modo del sistema (claro u oscuro). Se vuelve a renderizar cuando el usuario lo cambia.
- * @returns {{ scheme: 'light' | 'dark', isDark: boolean, colors: typeof palettes.light, shadows: { card?: string } }}
+ * @returns {{ scheme: 'light' | 'dark', isDark: boolean, colors: typeof palettes.light, shadows: { card?: string, raised?: string } }}
  */
 export function useTheme () {
   return themes[useColorScheme() === 'dark' ? 'dark' : 'light']

@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, FlatList, View } from 'react-native'
 
 import { Button } from '../components/Button.jsx'
 import { ChipGroup } from '../components/ChipGroup.jsx'
@@ -7,14 +7,17 @@ import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorBanner } from '../components/ErrorBanner.jsx'
 import { ErrorState } from '../components/ErrorState.jsx'
 import { FeedFilters } from '../components/FeedFilters.jsx'
+import { Notice } from '../components/Notice.jsx'
 import { OfflineNotice } from '../components/OfflineNotice.jsx'
 import { PlanCard } from '../components/PlanCard.jsx'
-import { FEED_MODE, FEED_STATUS, useFeed } from '../hooks/useFeed.js'
+import { PlanCardSkeleton } from '../components/Skeleton.jsx'
+import { Text } from '../components/Text.jsx'
+import { FEED_MODE, FEED_STATUS, LOCATION_NOTICE, useFeed } from '../hooks/useFeed.js'
 import { useFeedFilters } from '../hooks/useFeedFilters.js'
+import { useIsLargeText } from '../hooks/useIsLargeText.js'
 import { useOfflineStatus } from '../hooks/useOffline.js'
 import { ROUTES } from '../navigation/routes.js'
-import { LOCATION_STATUS } from '../services/location.js'
-import { messageForError } from '../utils/errorMessages.js'
+import { createThemedStyles, spacing, useTheme } from '../theme/index.js'
 import { AVAILABILITY, formatDistance, formatPrice, formatSchedule, formatSpots } from '../utils/plans.js'
 
 export const TEXTS = Object.freeze({
@@ -23,16 +26,20 @@ export const TEXTS = Object.freeze({
   available: 'Con cupo',
   full: 'Llenos',
   filters: 'Filtros',
+  filtersActive: (count) => `Filtros, ${count} ${count === 1 ? 'activo' : 'activos'}`,
   loading: 'Buscando planes…',
+  reloading: 'Actualizando los planes con los filtros…',
   errorTitle: 'No pudimos cargar los planes.',
   retry: 'Reintentar',
   emptyTitle: 'No hay planes para mostrar',
   emptyNearby: 'Probá con una distancia mayor o con menos filtros.',
   emptyByDate: 'Probá con menos filtros, o creá el primero.',
   emptyFull: 'No hay planes llenos con estos filtros.',
+  create: 'Crear un plan',
   fullHint: 'Estos planes ya no tienen lugar: podés ver el detalle, pero no inscribirte.',
   locationDenied: 'Sin permiso de ubicación mostramos los planes por fecha. Activalo para ver primero los que tenés cerca.',
   locationUnavailable: 'No pudimos obtener tu ubicación: mostramos los planes por fecha.',
+  refreshError: 'No pudimos actualizar los planes.',
   loadingMore: 'Cargando más planes…',
   loadMoreError: 'No pudimos cargar más planes.',
   end: 'No hay más planes.'
@@ -43,18 +50,28 @@ const SECTIONS = [
   { key: AVAILABILITY.FULL, label: TEXTS.full }
 ]
 
+const LOCATION_TEXTS = Object.freeze({
+  [LOCATION_NOTICE.DENIED]: TEXTS.locationDenied,
+  [LOCATION_NOTICE.UNAVAILABLE]: TEXTS.locationUnavailable
+})
+
 const keyOf = (plan) => plan.id
 
 export default function HomeScreen ({ navigation }) {
+  const styles = useStyles()
+  const { colors } = useTheme()
   const filters = useFeedFilters()
   const feed = useFeed({ query: filters.query, radiusKm: filters.radiusKm })
   const [areFiltersOpen, setAreFiltersOpen] = useState(false)
+  // Con texto grande el segmentado y "Filtros (n)" no entran en una fila: van uno abajo del otro.
+  const isLargeText = useIsLargeText()
   const offline = useOfflineStatus()
   // Los manejadores se pasan como identificadores sueltos (regla react/jsx-handler-names).
   const { loadMore, refresh, retry } = feed
   const { setValue, toggleInterest, togglePriceRange, reset } = filters
 
   const openPlan = useCallback((planId) => navigation.navigate(ROUTES.PLAN, { planId }), [navigation])
+  const closeFilters = useCallback(() => setAreFiltersOpen(false), [])
   const renderPlan = useCallback(({ item }) => (
     <PlanCard
       id={item.id}
@@ -65,12 +82,14 @@ export default function HomeScreen ({ navigation }) {
       price={formatPrice(item.price)}
       spots={formatSpots(item)}
       isFull={item.isFull}
+      isFree={item.price === 0}
       onPress={openPlan}
     />
   ), [openPlan])
 
   const isFullSection = filters.values.availability === AVAILABILITY.FULL
-  const filtersTitle = filters.activeCount > 0 ? `${TEXTS.filters} (${filters.activeCount})` : TEXTS.filters
+  const activeCount = filters.activeCount
+  const filtersTitle = activeCount > 0 ? `${TEXTS.filters} (${activeCount})` : TEXTS.filters
 
   const header = (
     <View style={styles.header}>
@@ -81,53 +100,78 @@ export default function HomeScreen ({ navigation }) {
         failedCount={offline.failedCount}
         onOpenPending={() => navigation.navigate(ROUTES.PENDING_ACTIONS)}
       />
-      <ChipGroup label={TEXTS.section} options={SECTIONS} selected={[filters.values.availability]} onSelect={(key) => setValue('availability', key)} />
-      <Button title={filtersTitle} variant='secondary' onPress={() => setAreFiltersOpen(true)} />
-      {isFullSection ? <Text style={styles.notice}>{TEXTS.fullHint}</Text> : null}
-      {feed.mode === FEED_MODE.BY_DATE
-        ? <Text style={styles.notice}>{feed.locationStatus === LOCATION_STATUS.DENIED ? TEXTS.locationDenied : TEXTS.locationUnavailable}</Text>
+      <View testID='feed-toolbar' style={isLargeText ? styles.toolbarStacked : styles.toolbar}>
+        <View style={isLargeText ? styles.sectionsStacked : styles.sections}>
+          <ChipGroup label={TEXTS.section} options={SECTIONS} selected={[filters.values.availability]} onSelect={(key) => setValue('availability', key)} variant='segmented' hideLabel />
+        </View>
+        <Button
+          title={filtersTitle}
+          accessibilityLabel={activeCount > 0 ? TEXTS.filtersActive(activeCount) : TEXTS.filters}
+          variant='secondary'
+          size='sm'
+          icon='options-outline'
+          onPress={() => setAreFiltersOpen(true)}
+          style={isLargeText ? styles.end : undefined}
+        />
+      </View>
+      {feed.isReloading
+        ? <ActivityIndicator accessibilityLabel={TEXTS.reloading} accessibilityLiveRegion='polite' color={colors.primary} style={styles.start} />
+        : null}
+      {isFullSection ? <Notice tone='info' icon='lock-closed-outline' message={TEXTS.fullHint} /> : null}
+      {feed.locationNotice ? <Notice tone='warning' icon='location-outline' message={LOCATION_TEXTS[feed.locationNotice]} /> : null}
+      {feed.refreshError
+        ? (
+          <View style={styles.refreshError}>
+            <ErrorBanner title={TEXTS.refreshError} error={feed.refreshError} />
+            <Button title={TEXTS.retry} variant='secondary' size='sm' icon='refresh-outline' onPress={refresh} style={styles.start} />
+          </View>
+          )
         : null}
     </View>
   )
 
-  function emptyMessage () {
-    if (isFullSection) return TEXTS.emptyFull
-    return feed.mode === FEED_MODE.NEARBY ? TEXTS.emptyNearby : TEXTS.emptyByDate
+  function empty () {
+    if (isFullSection) return <EmptyState title={TEXTS.emptyTitle} message={TEXTS.emptyFull} />
+    if (feed.mode === FEED_MODE.NEARBY) return <EmptyState title={TEXTS.emptyTitle} message={TEXTS.emptyNearby} />
+    // Por fecha no hay distancia que agrandar: la invitación es armar uno.
+    return (
+      <EmptyState
+        icon='add-circle-outline'
+        title={TEXTS.emptyTitle}
+        message={TEXTS.emptyByDate}
+        actionTitle={TEXTS.create}
+        actionVariant='primary'
+        onAction={() => navigation.navigate(ROUTES.CREATE_TAB)}
+      />
+    )
   }
 
   function footer () {
-    if (feed.isLoadingMore) return <ActivityIndicator accessibilityLabel={TEXTS.loadingMore} style={styles.footer} />
+    if (feed.isLoadingMore) return <ActivityIndicator accessibilityLabel={TEXTS.loadingMore} color={colors.primary} style={styles.footer} />
     if (feed.loadMoreError) {
       return (
         <View style={styles.footer}>
-          <ErrorBanner message={`${TEXTS.loadMoreError} ${messageForError(feed.loadMoreError)}`} requestId={feed.loadMoreError.requestId} />
-          {feed.hasMore ? <Button title={TEXTS.retry} variant='secondary' onPress={loadMore} /> : null}
+          <ErrorBanner title={TEXTS.loadMoreError} error={feed.loadMoreError} />
+          <Button title={TEXTS.retry} variant='secondary' size='sm' icon='refresh-outline' onPress={loadMore} style={styles.start} />
         </View>
       )
     }
-    return feed.items.length > 0 && !feed.hasMore ? <Text style={styles.end}>{TEXTS.end}</Text> : null
+    return feed.items.length > 0 && !feed.hasMore ? <Text variant='caption' color='textMuted' center style={styles.footer}>{TEXTS.end}</Text> : null
   }
 
   return (
     <View style={styles.container}>
       {feed.status === FEED_STATUS.LOADING
         ? (
-          <View style={styles.center}>
+          <View style={styles.list}>
             {header}
-            <ActivityIndicator accessibilityLabel={TEXTS.loading} />
-            <Text>{TEXTS.loading}</Text>
+            <PlanCardSkeleton label={TEXTS.loading} />
           </View>
           )
         : null}
 
-      {feed.status === FEED_STATUS.ERROR
-        ? (
-          <View style={styles.center}>
-            {header}
-            <ErrorState title={TEXTS.errorTitle} error={feed.error} onRetry={retry} retryTitle={TEXTS.retry} />
-          </View>
-          )
-        : null}
+      {/* Los filtros siguen arriba del error: a veces cambiarlos es la salida. */}
+      {feed.status === FEED_STATUS.ERROR ? <ErrorState title={TEXTS.errorTitle} error={feed.error} onRetry={retry}>{header}</ErrorState> : null}
 
       {feed.status === FEED_STATUS.READY
         ? (
@@ -138,7 +182,7 @@ export default function HomeScreen ({ navigation }) {
             renderItem={renderPlan}
             contentContainerStyle={styles.list}
             ListHeaderComponent={header}
-            ListEmptyComponent={<EmptyState title={TEXTS.emptyTitle} message={emptyMessage()} />}
+            ListEmptyComponent={empty()}
             ListFooterComponent={footer()}
             onEndReached={loadMore}
             onEndReachedThreshold={0.5}
@@ -150,7 +194,7 @@ export default function HomeScreen ({ navigation }) {
 
       <FeedFilters
         visible={areFiltersOpen}
-        onClose={() => setAreFiltersOpen(false)}
+        onClose={closeFilters}
         values={filters.values}
         priceRangeOptions={filters.priceRangeOptions}
         interestCategories={filters.interestCategories}
@@ -163,12 +207,16 @@ export default function HomeScreen ({ navigation }) {
   )
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  center: { padding: 16, gap: 12 },
-  header: { gap: 12, marginBottom: 4 },
-  list: { padding: 16, gap: 12 },
-  notice: { fontSize: 13, color: '#8a5a00', backgroundColor: '#fff6e0', padding: 10, borderRadius: 8 },
-  footer: { paddingVertical: 16, gap: 8 },
-  end: { textAlign: 'center', color: '#777', paddingVertical: 16 }
-})
+const useStyles = createThemedStyles(({ colors }) => ({
+  container: { flex: 1, backgroundColor: colors.background },
+  list: { padding: spacing.lg, gap: spacing.md },
+  header: { gap: spacing.md },
+  toolbar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  sections: { flex: 1 },
+  toolbarStacked: { gap: spacing.sm },
+  sectionsStacked: { alignSelf: 'stretch' },
+  refreshError: { gap: spacing.sm },
+  footer: { paddingVertical: spacing.lg, gap: spacing.sm },
+  start: { alignSelf: 'flex-start' },
+  end: { alignSelf: 'flex-end' }
+}))

@@ -1,6 +1,6 @@
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import { ageOn, formatForDisplay, parseCalendarDate, toCalendarDate, toLocalDate, today } from './dates.js'
-import { fieldErrorsFrom, messageForError } from './errorMessages.js'
+import { CHAT_ERROR_MESSAGES, fieldErrorsFrom, messageForError, toViewError } from './errorMessages.js'
 import { validateBirthDate, validateEmail, validateName, validatePassword } from './validation.js'
 
 describe('dates', () => {
@@ -99,5 +99,28 @@ describe('errorMessages', () => {
     expect(fieldErrorsFrom(error)).toEqual({ birthDate: 'No puede ser futura', city: 'Muy largo' })
     expect(fieldErrorsFrom(new ApiError({ status: 409, code: 'EMAIL_TAKEN' }))).toEqual({})
     expect(fieldErrorsFrom(new Error('x'))).toEqual({})
+  })
+})
+
+describe('toViewError (contrato entre hooks y screens)', () => {
+  it('devuelve exactamente { code, message, requestId }, con el texto elegido por code', () => {
+    const error = new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR, requestId: 'r1' })
+    expect(toViewError(error)).toEqual({ code: 'NETWORK_ERROR', message: 'No pudimos conectarnos con el servidor. Revisá tu conexión.', requestId: 'r1' })
+  })
+
+  it('los textos propios de una acción tienen prioridad', () => {
+    const error = new ApiError({ status: 403, code: 'FORBIDDEN' })
+    expect(toViewError(error, CHAT_ERROR_MESSAGES)).toEqual({ code: 'FORBIDDEN', message: CHAT_ERROR_MESSAGES.FORBIDDEN, requestId: null })
+  })
+
+  it('sin texto propio usa el message del servidor', () => {
+    const error = new ApiError({ status: 409, code: 'CAPACITY_BELOW_PARTICIPANTS', message: 'Ya hay 5 inscriptos.', requestId: 'r2' })
+    expect(toViewError(error)).toEqual({ code: 'CAPACITY_BELOW_PARTICIPANTS', message: 'Ya hay 5 inscriptos.', requestId: 'r2' })
+  })
+
+  it('un error que no es de la API queda como UNKNOWN_ERROR, sin exponer su mensaje', () => {
+    const viewError = toViewError(new TypeError('undefined is not a function'))
+    expect(viewError).toEqual({ code: CLIENT_ERROR_CODES.UNKNOWN_ERROR, message: expect.any(String), requestId: null })
+    expect(viewError.message).not.toMatch(/undefined/)
   })
 })

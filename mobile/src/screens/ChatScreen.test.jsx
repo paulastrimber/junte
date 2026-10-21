@@ -16,6 +16,8 @@ jest.mock('../services/socket.js', () => ({
 
 const ME = { id: COMPLETE_USER.id, name: COMPLETE_USER.name, photoUrl: null, reputation: 0 }
 const BETO = { id: 'u2', name: 'Beto', photoUrl: null, reputation: 1 }
+// Mensajes de HOY a las 10:n: así la hora se muestra sola ('10:01'), sin la fecha, cualquier día que corra el
+// test. El formato de "otro día" ya lo cubre utils/chat.test.js con un `now` fijo.
 const TODAY = new Date()
 const message = (n, extra = {}) => ({
   id: `m${n}`,
@@ -24,8 +26,6 @@ const message = (n, extra = {}) => ({
   type: 'text',
   text: `Mensaje ${n}`,
   clientId: null,
-  // Hoy a las 10:n: formatMessageTime muestra solo la hora en los mensajes del día (con una fecha fija, el test
-  // dejaba de pasar al día siguiente porque la hora pasaba a mostrarse con día y mes).
   createdAt: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 10, n).toISOString(),
   ...extra
 })
@@ -92,6 +92,66 @@ describe('ChatScreen: estados', () => {
     expect(screen.queryByText(ME.name)).not.toBeOnTheScreen()
     expect(screen.getByText('10:01')).toBeOnTheScreen()
     expect(screen.getByText('10:02')).toBeOnTheScreen()
+    // La foto de cada burbuja es decorativa (el nombre ya está escrito): el lector no repite "Sin foto de perfil".
+    expect(screen.queryAllByLabelText(/foto de perfil/i)).toHaveLength(0)
+  })
+
+  it('agrupa los seguidos de la misma persona: un nombre arriba y una foto abajo por grupo', async () => {
+    // Del más nuevo al más viejo: Beto 10:01 y 10:02 (grupo), yo 10:03, Beto 10:09 (más de 5 min: otro grupo).
+    listMessages.mockResolvedValue({ items: [message(9), message(3, { sender: ME, text: 'Yo llego' }), message(2), message(1)], nextCursor: null })
+
+    await renderChat()
+
+    expect(await screen.findByText('Mensaje 9')).toBeOnTheScreen()
+    expect(screen.getAllByText('Beto')).toHaveLength(2)
+    // La inicial del avatar (sin foto) solo en el último de cada grupo ajeno.
+    expect(screen.getAllByText('B', { includeHiddenElements: true })).toHaveLength(2)
+  })
+
+  it('cada burbuja se anuncia completa, con quién y la hora, aunque no se vea el nombre', async () => {
+    listMessages.mockResolvedValue({ items: [message(3, { sender: ME, text: 'Yo llego' }), message(2), message(1)], nextCursor: null })
+
+    await renderChat()
+
+    expect(await screen.findByLabelText('Beto: Mensaje 1. 10:01')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Beto: Mensaje 2. 10:02')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Vos: Yo llego. 10:03')).toBeOnTheScreen()
+  })
+
+  it('grupo de 3 ajenos: el nombre y la foto una sola vez, y cada uno se anuncia "Ana: texto. hora"', async () => {
+    const ANA = { id: 'u3', name: 'Ana', photoUrl: null, reputation: 2 }
+    listMessages.mockResolvedValue({ items: [message(4, { sender: ME, text: 'Dale' }), message(3, { sender: ANA }), message(2, { sender: ANA }), message(1, { sender: ANA })], nextCursor: null })
+
+    await renderChat()
+
+    expect(await screen.findByLabelText('Ana: Mensaje 1. 10:01')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Ana: Mensaje 2. 10:02')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Ana: Mensaje 3. 10:03')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Vos: Dale. 10:04')).toBeOnTheScreen()
+    expect(screen.getAllByText('Ana')).toHaveLength(1)
+    // La inicial del avatar (decorativo, oculto al lector) una sola vez: en el último del grupo.
+    expect(screen.getAllByText('A', { includeHiddenElements: true })).toHaveLength(1)
+    expect(screen.queryAllByText('A')).toHaveLength(0)
+  })
+
+  it('textos de la pantalla en voseo, sin punto final en el título de error', async () => {
+    expect(TEXTS.errorTitle).toBe('No pudimos cargar el chat')
+    expect(TEXTS.unsupported).toBe('Actualizá la app para ver este mensaje')
+
+    listMessages.mockResolvedValue({ items: [message(1, { type: 'voice', text: '' })], nextCursor: null })
+    await renderChat()
+
+    expect(await screen.findByText('Actualizá la app para ver este mensaje')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Beto: Actualizá la app para ver este mensaje. 10:01')).toBeOnTheScreen()
+  })
+
+  it('el error de carga se titula "No pudimos cargar el chat"', async () => {
+    listMessages.mockRejectedValue(apiError(500, 'INTERNAL_ERROR'))
+
+    await renderChat()
+
+    expect(await screen.findByText('No pudimos cargar el chat')).toBeOnTheScreen()
+    expect(screen.getByRole('button', { name: 'Reintentar' })).toBeOnTheScreen()
   })
 
   it('un mensaje de un tipo que la app no conoce no rompe la lista', async () => {
@@ -119,7 +179,7 @@ describe('ChatScreen: estados', () => {
 
     await renderChat()
 
-    expect(await screen.findByText('Solo quienes están anotados y quien creó el plan pueden usar el chat.')).toBeOnTheScreen()
+    expect(await screen.findByText('Solo quienes se inscribieron y quien creó el plan pueden usar el chat.')).toBeOnTheScreen()
     expect(screen.queryByLabelText(TEXTS.inputLabel)).not.toBeOnTheScreen()
   })
 
@@ -243,7 +303,7 @@ describe('ChatScreen: enviar', () => {
     await fireEvent.press(sendButton())
 
     expect(await screen.findByText(TEXTS.errorTitle)).toBeOnTheScreen()
-    expect(screen.getByText('Solo quienes están anotados y quien creó el plan pueden usar el chat.')).toBeOnTheScreen()
+    expect(screen.getByText('Solo quienes se inscribieron y quien creó el plan pueden usar el chat.')).toBeOnTheScreen()
     expect(screen.queryByText(`${TEXTS.notSent} · ${TEXTS.retrySend}`)).not.toBeOnTheScreen()
   })
 

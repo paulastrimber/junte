@@ -93,6 +93,32 @@ describe('usePlanAutoRefresh', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
+  it('un "inactive" (centro de control, diálogo de permisos) que vuelve a "active" no refresca', async () => {
+    const refresh = jest.fn()
+    await renderHook(() => usePlanAutoRefresh(plan(), refresh))
+
+    await act(async () => appStateListener('inactive'))
+    await act(async () => appStateListener('active'))
+
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('con la pantalla fuera de foco no refresca al volver a primer plano (lo hará al volver a ella)', async () => {
+    const refresh = jest.fn()
+    const onForeground = jest.fn()
+    const { rerender } = await renderHook((props) => usePlanAutoRefresh(plan(), refresh, props), { initialProps: { isFocused: false, onForeground } })
+
+    await act(async () => appStateListener('background'))
+    await act(async () => appStateListener('active'))
+    expect(onForeground).not.toHaveBeenCalled()
+
+    await rerender({ isFocused: true, onForeground })
+    await act(async () => appStateListener('background'))
+    await act(async () => appStateListener('active'))
+    expect(onForeground).toHaveBeenCalledTimes(1)
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
   it('al salir de la pantalla deja de escuchar y cancela lo programado', async () => {
     const refresh = jest.fn()
     const { unmount } = await renderHook(() => usePlanAutoRefresh(plan(), refresh))

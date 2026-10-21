@@ -31,6 +31,7 @@ Punto de entrada. Cada tema vive en **un solo archivo**: si hay que cambiar algo
 |-----|--------------|
 | [SOLID y modularidad](practicas/solid-y-modularidad.md) | Cómo aplicar cada principio en junte, con ejemplos |
 | [Estilo de código](practicas/estilo-de-codigo.md) | ESM, nombres, funciones, React Native |
+| [Diseño de la interfaz](practicas/diseno-ui.md) | Identidad, colores por rol, tipografía, componentes base, los cuatro estados, accesibilidad y checklist de PR |
 | [Testing](practicas/testing.md) | Pirámide, casos obligatorios, convenciones |
 | [Migraciones](practicas/migraciones.md) | Versionado de la base con migrate-mongo |
 | [Errores y logs](practicas/errores-y-logs.md) | Catálogo de códigos, qué se loguea y qué no |

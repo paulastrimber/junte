@@ -60,3 +60,30 @@ export function toggleInterest (selected, key) {
 
 /** Texto sin tildes ni mayúsculas, para buscar. */
 export const normalizeText = (text) => String(text ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+
+/**
+ * Nombres de los intereses según el catálogo; si todavía no cargó (o la key ya no existe), la key misma.
+ * @param {string[]} keys
+ * @param {{ interestCategories?: Array<{ interests: Array<{ key: string, name: string }> }> } | null} catalog
+ * @returns {string[]}
+ */
+export function interestNames (keys, catalog) {
+  const names = new Map((catalog?.interestCategories ?? []).flatMap((category) => category.interests).map(({ key, name }) => [key, name]))
+  return keys.map((key) => names.get(key) ?? key)
+}
+
+/** Por qué un selector que depende de otro (carrera de universidad, barrio de ciudad) está deshabilitado. */
+export const DEPENDENT_REASON = Object.freeze({ NO_PARENT: 'noParent', NO_OPTIONS: 'noOptions' })
+
+/**
+ * Estado de un selector que depende de otro: deshabilitado si todavía no se eligió el de arriba, o si lo elegido no
+ * tiene opciones en el catálogo ("Otra" universidad, una ciudad sin barrios cargados).
+ * @param {string} parentValue  Key elegida arriba ('' si ninguna).
+ * @param {Array<{ key: string }>} options  Opciones del de abajo para esa key.
+ * @returns {{ disabled: boolean, reason: 'noParent' | 'noOptions' | null }}
+ */
+export function dependentFieldState (parentValue, options) {
+  if (!parentValue) return { disabled: true, reason: DEPENDENT_REASON.NO_PARENT }
+  if (options.length === 0) return { disabled: true, reason: DEPENDENT_REASON.NO_OPTIONS }
+  return { disabled: false, reason: null }
+}

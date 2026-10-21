@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 
 import { ageOn, parseCalendarDate, today } from '../utils/dates.js'
 import {
-  careerOptions, cityOptions, neighborhoodOptions, toggleInterest as toggleInterestIn, universityOptions, visibleInterestCategories
+  careerOptions, cityOptions, dependentFieldState, neighborhoodOptions, toggleInterest as toggleInterestIn, universityOptions, visibleInterestCategories
 } from '../utils/catalog.js'
 
 const fromUser = (user) => ({
@@ -52,6 +52,12 @@ export function useProfileDraft (user, catalog) {
     interestCategories: visibleInterestCategories(catalog, age)
   }), [catalog, values.university, values.city, age])
 
+  // Carrera y barrio dependen de otro selector: si están deshabilitados y por qué (lo mismo en onboarding y perfil).
+  const dependents = useMemo(() => ({
+    career: dependentFieldState(values.university, options.careers),
+    neighborhood: dependentFieldState(values.city, options.neighborhoods)
+  }), [values.university, values.city, options.careers, options.neighborhoods])
+
   /**
    * Lo que cambió, solo de los campos pedidos. Los selectores vacíos no se mandan (no hay forma de "borrar" una opción;
    * lo que depende de otra lo quita el back). Los intereses sí se mandan aunque queden vacíos.
@@ -73,5 +79,5 @@ export function useProfileDraft (user, catalog) {
     return changes
   }
 
-  return { values, setField, toggleInterest, age, options, changesFor }
+  return { values, setField, toggleInterest, age, options, dependents, changesFor }
 }

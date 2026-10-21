@@ -1,12 +1,12 @@
 import { useState } from 'react'
 
-import { fieldErrorsFrom, messageForError } from '../utils/errorMessages.js'
+import { fieldErrorsFrom, messageForError, toViewError } from '../utils/errorMessages.js'
 import { validateEmail, validateName, validatePassword } from '../utils/validation.js'
 import { useAuth } from './useAuth.js'
 
 /**
  * Estado y envío del formulario de registro. Los errores de validación del servidor (`details`) se
- * muestran junto a cada campo; el resto (EMAIL_TAKEN, red, rate limit) como error del formulario.
+ * muestran junto a cada campo; el resto (red, rate limit) como error del formulario (`formError`, un `ViewError`).
  */
 export function useRegisterForm () {
   const { signUp } = useAuth()
@@ -44,7 +44,7 @@ export function useRegisterForm () {
         // El email duplicado se marca en su campo: es lo que la persona tiene que cambiar.
         setErrors({ email: messageForError(error) })
       } else {
-        setFormError({ message: messageForError(error), requestId: error?.requestId ?? null })
+        setFormError(toViewError(error))
       }
     } finally {
       setIsSubmitting(false)

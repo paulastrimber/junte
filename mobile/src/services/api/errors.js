@@ -39,7 +39,7 @@ const DEFAULT_MESSAGES = Object.freeze({
   NETWORK_ERROR: 'No pudimos conectarnos con el servidor. Revisá tu conexión.',
   TIMEOUT: 'El servidor tardó demasiado en responder. Probá de nuevo.',
   REQUEST_CANCELED: 'La operación se canceló.',
-  UNKNOWN_ERROR: 'Ocurrió un error inesperado.',
+  UNKNOWN_ERROR: 'Ocurrió un error inesperado. Probá de nuevo.',
   UPLOAD_FAILED: 'No pudimos subir la foto. Probá de nuevo.',
   IMAGE_NOT_SUPPORTED: 'Elegí una imagen JPEG, PNG o WebP.',
   IMAGE_TOO_LARGE: 'La imagen pesa más de 5 MB. Elegí una más liviana.',

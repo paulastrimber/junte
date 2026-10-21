@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { getCatalogs } from '../services/api/catalogs.js'
 import { connectivity, readCache, readThrough } from '../services/offline/index.js'
+import { toViewError } from '../utils/errorMessages.js'
 
 // Los catálogos cambian poco y son iguales para todos: se piden una vez por sesión de la app y se reutilizan entre pantallas.
 // Sin conexión se usa la última versión guardada en el teléfono (y se vuelven a pedir la próxima vez).
@@ -30,7 +31,7 @@ export const CATALOG_STATUS = Object.freeze({ LOADING: 'loading', READY: 'ready'
 
 /**
  * Catálogos para los selectores, con cargando / error / reintentar.
- * @returns {{ status: string, catalog: object | null, error: Error | null, retry: () => void }}
+ * @returns {{ status: string, catalog: object | null, error: import('../utils/errorMessages.js').ViewError | null, retry: () => void }}
  */
 export function useCatalogs () {
   const [state, setState] = useState(cached
@@ -43,7 +44,7 @@ export function useCatalogs () {
     let active = true
     loadCatalogs().then(
       (catalog) => { if (active) setState({ status: CATALOG_STATUS.READY, catalog, error: null }) },
-      (error) => { if (active) setState({ status: CATALOG_STATUS.ERROR, catalog: null, error }) }
+      (failure) => { if (active) setState({ status: CATALOG_STATUS.ERROR, catalog: null, error: toViewError(failure) }) }
     )
     return () => { active = false }
   }, [attempt])

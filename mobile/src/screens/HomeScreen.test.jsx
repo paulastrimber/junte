@@ -1,10 +1,12 @@
-import { act, fireEvent, screen, within } from '@testing-library/react-native'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react-native'
+import { Dimensions, StyleSheet } from 'react-native'
 
 import { CATALOG, COMPLETE_USER, SignedIn, createFakeAuthService, renderWithAuth } from '../../tests/helpers/auth.jsx'
 import { deferred } from '../../tests/helpers/deferred.js'
 import { TEXTS as FILTERS } from '../components/FeedFilters.jsx'
 import { resetCatalogsCache } from '../hooks/useCatalogs.js'
 import { resetFilterOptionsCache } from '../hooks/useFeedFilters.js'
+import { useIsLargeText } from '../hooks/useIsLargeText.js'
 import { getCatalogs } from '../services/api/catalogs.js'
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import { getFeed } from '../services/api/feed.js'
@@ -17,6 +19,7 @@ jest.mock('../services/api/catalogs.js', () => ({ getCatalogs: jest.fn() }))
 jest.mock('../services/api/feed.js', () => ({ getFeed: jest.fn() }))
 jest.mock('../services/api/plans.js', () => ({ listPlans: jest.fn(), getPlanFilters: jest.fn() }))
 jest.mock('../services/calendar.js', () => ({ readBusySlots: jest.fn() }))
+jest.mock('../hooks/useIsLargeText.js', () => ({ useIsLargeText: jest.fn(() => false) }))
 jest.mock('../services/location.js', () => ({ ...jest.requireActual('../services/location.js'), getCurrentCoordinates: jest.fn() }))
 
 const NEAR = [-56.1645, -34.9011]
@@ -63,6 +66,7 @@ describe('HomeScreen (feed)', () => {
     listPlans.mockReset()
     readBusySlots.mockReset().mockResolvedValue(null)
     getCurrentCoordinates.mockReset()
+    useIsLargeText.mockReset().mockReturnValue(false)
   })
 
   describe('los cuatro estados', () => {
@@ -73,7 +77,9 @@ describe('HomeScreen (feed)', () => {
 
       await renderHome()
 
-      expect(screen.getByText(TEXTS.loading)).toBeOnTheScreen()
+      // Esqueletos de tarjetas que anuncian qué se espera; los filtros siguen a mano.
+      expect(screen.getByRole('progressbar', { name: TEXTS.loading })).toBeOnTheScreen()
+      expect(screen.getByRole('radio', { name: TEXTS.available })).toBeOnTheScreen()
       await act(async () => pending.resolve(page([])))
     })
 
@@ -175,6 +181,16 @@ describe('HomeScreen (feed)', () => {
       expect(await screen.findByText(TEXTS.locationUnavailable)).toBeOnTheScreen()
       expect(screen.getByText(TEXTS.emptyByDate)).toBeOnTheScreen()
     })
+
+    it('vacío por fecha: invita a crear un plan y lleva al tab Crear', async () => {
+      withoutLocation()
+      listPlans.mockResolvedValue(page([]))
+      await renderHome()
+
+      await fireEvent.press(await screen.findByRole('button', { name: TEXTS.create }))
+
+      expect(navigation.navigate).toHaveBeenCalledWith('CreateTab')
+    })
   })
 
   describe('scroll infinito y pull-to-refresh', () => {
@@ -220,6 +236,29 @@ describe('HomeScreen (feed)', () => {
       expect(await screen.findByText('Plan z')).toBeOnTheScreen()
       expect(screen.queryByText('Plan a')).not.toBeOnTheScreen()
       expect(lastFeedBody()).not.toHaveProperty('cursor')
+      // El pull-to-refresh vuelve a pedir la ubicación (puede haberse movido).
+      expect(getCurrentCoordinates).toHaveBeenCalledTimes(2)
+    })
+
+    it('si falla el refresco conserva los planes, lo dice arriba y deja reintentar aunque no haya más páginas', async () => {
+      withLocation()
+      getFeed
+        .mockResolvedValueOnce(page([plan('a')]))
+        .mockRejectedValueOnce(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR }))
+        .mockResolvedValueOnce(page([plan('z')]))
+      await renderHome()
+      await screen.findByText('Plan a')
+
+      await act(async () => screen.getByTestId('feed-list').props.onRefresh())
+
+      expect(await screen.findByText(TEXTS.refreshError)).toBeOnTheScreen()
+      expect(screen.queryByText(TEXTS.loadMoreError)).not.toBeOnTheScreen()
+      expect(screen.getByText('Plan a')).toBeOnTheScreen()
+
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.retry }))
+
+      expect(await screen.findByText('Plan z')).toBeOnTheScreen()
+      expect(screen.queryByText(TEXTS.refreshError)).not.toBeOnTheScreen()
     })
   })
 
@@ -268,10 +307,34 @@ describe('HomeScreen (feed)', () => {
       await fireEvent.press(await screen.findByRole('checkbox', { name: 'Cine' }))
       await fireEvent.press(screen.getByRole('button', { name: FILTERS.apply }))
 
-      await screen.findByRole('button', { name: `${TEXTS.filters} (4)` })
-      expect(lastFeedBody()).toEqual({
+      // El título visible dice "Filtros (4)"; el lector de pantalla, "Filtros, 4 activos".
+      expect(await screen.findByText(`${TEXTS.filters} (4)`)).toBeOnTheScreen()
+      expect(screen.getByRole('button', { name: TEXTS.filtersActive(4) })).toBeOnTheScreen()
+      // Cada toque vuelve a pedir el feed, pero reutiliza la ubicación: el GPS se consultó una sola vez.
+      expect(getCurrentCoordinates).toHaveBeenCalledTimes(1)
+      // La consulta sale cuando se dejan de tocar filtros (FILTERS_DEBOUNCE_MS).
+      await waitFor(() => expect(lastFeedBody()).toEqual({
         availability: 'available', near: NEAR, radiusKm: 2, limit: 20, priceRanges: ['free', 'low'], interests: ['cine'], to: expect.any(String)
-      })
+      }))
+    })
+
+    it('mientras recarga por un filtro, la lista sigue montada con los planes de antes', async () => {
+      withLocation()
+      const next = deferred()
+      getFeed.mockResolvedValueOnce(page([plan('a')])).mockReturnValueOnce(next.promise)
+      await renderHome()
+      await screen.findByText('Plan a')
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.filters }))
+
+      await fireEvent.press(screen.getByRole('checkbox', { name: 'Gratis' }))
+      await fireEvent.press(screen.getByRole('button', { name: FILTERS.apply }))
+
+      expect(await screen.findByLabelText(TEXTS.reloading)).toBeOnTheScreen()
+      expect(screen.getByTestId('feed-list')).toBeOnTheScreen()
+      expect(screen.getByText('Plan a')).toBeOnTheScreen()
+      await act(async () => next.resolve(page([plan('b')])))
+      expect(await screen.findByText('Plan b')).toBeOnTheScreen()
+      expect(screen.queryByLabelText(TEXTS.reloading)).toBeNull()
     })
 
     it('"Limpiar filtros" vuelve al feed sin filtros', async () => {
@@ -286,6 +349,85 @@ describe('HomeScreen (feed)', () => {
 
       await screen.findByRole('button', { name: TEXTS.filters })
       expect(lastFeedBody()).toEqual({ availability: 'available', near: NEAR, radiusKm: 10, limit: 20 })
+    })
+  })
+
+  describe('texto grande del sistema', () => {
+    const toolbarStyle = () => StyleSheet.flatten(screen.getByTestId('feed-toolbar').props.style)
+    const filtersStyle = () => {
+      const { style } = screen.getByRole('button', { name: TEXTS.filters }).props
+      return StyleSheet.flatten(typeof style === 'function' ? style({ pressed: false }) : style)
+    }
+
+    it('con texto normal el segmentado y "Filtros" comparten fila', async () => {
+      withLocation()
+      getFeed.mockResolvedValue(page([]))
+      await renderHome()
+
+      expect(toolbarStyle().flexDirection).toBe('row')
+    })
+
+    it('con texto grande la barra pasa a columna: segmentado a todo el ancho y "Filtros" abajo a la derecha', async () => {
+      useIsLargeText.mockReturnValue(true)
+      withLocation()
+      getFeed.mockResolvedValue(page([]))
+      await renderHome()
+
+      expect(toolbarStyle().flexDirection ?? 'column').toBe('column')
+      expect(filtersStyle().alignSelf).toBe('flex-end')
+      // Las dos opciones siguen ahí y se pueden elegir.
+      await fireEvent.press(screen.getByRole('radio', { name: TEXTS.full }))
+      expect(screen.getByRole('radio', { name: TEXTS.full })).toBeChecked()
+      // Se espera el pedido de "Llenos": si no, su timer (0 ms) corre después del test y React avisa de un act().
+      await waitFor(() => expect(lastFeedBody().availability).toBe('full'))
+    })
+
+    // Con el hook real: el `fontScale` lo informa el sistema (Dimensions). El layout solo se puede ver por estilo
+    // (flexDirection de la barra): la librería de tests no mide posiciones.
+    describe('con el fontScale del sistema', () => {
+      const withFontScale = (fontScale) => {
+        const window = Dimensions.get('window')
+        jest.spyOn(Dimensions, 'get').mockReturnValue({ ...window, fontScale })
+      }
+      beforeEach(() => useIsLargeText.mockImplementation(jest.requireActual('../hooks/useIsLargeText.js').useIsLargeText))
+      afterEach(() => jest.restoreAllMocks())
+
+      it('fontScale 2: barra en columna, "Filtros" accesible por nombre y segmentos de hasta 2 líneas', async () => {
+        withFontScale(2)
+        withLocation()
+        getFeed.mockResolvedValue(page([]))
+        await renderHome()
+
+        expect(toolbarStyle().flexDirection ?? 'column').toBe('column')
+        expect(screen.getByRole('button', { name: 'Filtros' })).toBeOnTheScreen()
+        for (const label of [TEXTS.available, TEXTS.full]) {
+          expect(screen.getByRole('radio', { name: label })).toBeOnTheScreen()
+          expect(screen.getByText(label).props.numberOfLines).toBe(2)
+        }
+      })
+
+      it('fontScale 1: barra en fila', async () => {
+        withFontScale(1)
+        withLocation()
+        getFeed.mockResolvedValue(page([]))
+        await renderHome()
+
+        expect(toolbarStyle().flexDirection).toBe('row')
+        expect(screen.getByText(TEXTS.available).props.numberOfLines).toBe(2)
+      })
+
+      it('el borde: 1.3 ya es texto grande, 1.29 no', async () => {
+        withFontScale(1.29)
+        withLocation()
+        getFeed.mockResolvedValue(page([]))
+        const view = await renderHome()
+        expect(toolbarStyle().flexDirection).toBe('row')
+        await view.unmount()
+
+        withFontScale(1.3)
+        await renderHome()
+        expect(toolbarStyle().flexDirection ?? 'column').toBe('column')
+      })
     })
   })
 })

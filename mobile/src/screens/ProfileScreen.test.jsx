@@ -190,7 +190,9 @@ describe('ProfileScreen', () => {
 
       expect(screen.getByRole('button', { name: TEXTS.career })).toBeDisabled()
       expect(screen.getByRole('button', { name: TEXTS.neighborhood })).toBeDisabled()
-      expect(screen.getByText(TEXTS.careerHint)).toBeOnTheScreen()
+      // Los mismos textos que en el onboarding (StudyFields).
+      expect(screen.getByText(TEXTS.careerHintNoUniversity)).toBeOnTheScreen()
+      expect(screen.getByText(TEXTS.neighborhoodHintNoCity)).toBeOnTheScreen()
     })
 
     it('elegir la fecha de nacimiento manda YYYY-MM-DD', async () => {
@@ -285,7 +287,7 @@ describe('ProfileScreen', () => {
       await changePhoto()
 
       expect(uploadProfilePhoto).toHaveBeenCalledWith(asset)
-      expect((await screen.findByLabelText('Foto de perfil')).props.source).toEqual({ uri: 'https://s3.example/foto.jpg?firma' })
+      expect((await screen.findByLabelText('Foto de perfil')).props.source).toEqual([expect.objectContaining({ uri: 'https://s3.example/foto.jpg?firma' })])
     })
 
     it('si cancela la selección no sube nada ni muestra error', async () => {

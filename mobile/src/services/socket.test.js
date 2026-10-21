@@ -29,8 +29,22 @@ function createFakeSocket (url, options) {
   return socket
 }
 
+// AppState falso: el test dispara los cambios de primer / segundo plano.
+function createFakeAppState () {
+  const listeners = new Set()
+  return {
+    addEventListener: jest.fn((_event, listener) => {
+      listeners.add(listener)
+      return { remove: () => listeners.delete(listener) }
+    }),
+    change: (state) => listeners.forEach((listener) => listener(state)),
+    count: () => listeners.size
+  }
+}
+
 function setup (overrides = {}) {
   const sockets = []
+  const appState = createFakeAppState()
   const io = jest.fn((url, options) => {
     const socket = createFakeSocket(url, options)
     sockets.push(socket)
@@ -42,9 +56,9 @@ function setup (overrides = {}) {
     refreshSession: jest.fn(async () => { session.token = 'access-2' }),
     onSessionExpired: jest.fn()
   }
-  const service = createSocketService({ io, getApiUrl: () => 'http://10.0.2.2:8080/api/v1', auth, ackTimeoutMs: 8000, ...overrides })
+  const service = createSocketService({ io, getApiUrl: () => 'http://10.0.2.2:8080/api/v1', auth, ackTimeoutMs: 8000, appState, ...overrides })
   const current = () => sockets.at(-1)
-  return { service, io, auth, session, sockets, current }
+  return { service, io, auth, session, sockets, current, appState }
 }
 
 const flush = () => new Promise((resolve) => setImmediate(resolve))
@@ -477,5 +491,55 @@ describe('disconnect (logout)', () => {
     expect(socket.disconnect).toHaveBeenCalled()
     expect(service.getStatus()).toBe(SOCKET_STATUS.IDLE)
     expect(() => service.disconnect()).not.toThrow()
+  })
+})
+
+describe('segundo plano', () => {
+  it('corta la conexión al pasar a segundo plano y la retoma al volver, entrando otra vez a las salas', () => {
+    const { service, current, appState } = setup()
+    const listener = jest.fn()
+    service.subscribe('p1', jest.fn())
+    current().open()
+    service.onStatusChange(listener)
+
+    appState.change('background')
+    expect(current().disconnect).toHaveBeenCalledTimes(1)
+    expect(service.getStatus()).toBe(SOCKET_STATUS.RECONNECTING)
+
+    appState.change('active')
+    expect(current().connect).toHaveBeenCalledTimes(1)
+    current().open()
+
+    // Pasa por "conectado" otra vez: `useChat` recupera lo que llegó mientras tanto.
+    expect(listener.mock.calls).toEqual([[SOCKET_STATUS.RECONNECTING], [SOCKET_STATUS.CONNECTED]])
+    expect(current().count('chat:join')).toBe(2)
+  })
+
+  it('en segundo plano no reconecta solo (ni por un reintento programado)', async () => {
+    jest.useFakeTimers()
+    try {
+      const { service, current, appState } = setup({ authRetryDelayMs: 1000 })
+      service.subscribe('p1', jest.fn())
+      current().rejectWith('INTERNAL')
+
+      appState.change('background')
+      jest.advanceTimersByTime(5000)
+
+      expect(current().connect).not.toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('"inactive" no corta nada, y sin salas abiertas no escucha AppState', () => {
+    const { service, current, appState } = setup()
+    const unsubscribe = service.subscribe('p1', jest.fn())
+    current().open()
+
+    appState.change('inactive')
+    expect(current().disconnect).not.toHaveBeenCalled()
+
+    unsubscribe()
+    expect(appState.count()).toBe(0)
   })
 })

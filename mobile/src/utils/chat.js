@@ -1,7 +1,11 @@
-// Funciones puras del chat: ids de idempotencia, fusión de mensajes y formato de la hora.
+// Funciones puras del chat: ids de idempotencia, fusión de mensajes, agrupado y formato de la hora.
+import { isSameSignedFile } from './url.js'
 
 /** Estado de un mensaje en la app. Los que vienen del servidor siempre están `sent`. */
 export const MESSAGE_STATUS = Object.freeze({ SENT: 'sent', PENDING: 'pending', FAILED: 'failed' })
+
+/** Dos mensajes seguidos de la misma persona van en el mismo grupo si entre uno y otro pasan menos que esto. */
+export const GROUP_WINDOW_MS = 5 * 60 * 1000
 
 /** Largo máximo de un mensaje (el servidor valida lo mismo, después de recortar los espacios). */
 export const MAX_MESSAGE_LENGTH = 2000
@@ -34,25 +38,48 @@ export function sortMessages (messages) {
   })
 }
 
+// Quien escribió es el mismo si solo cambió la firma de la URL de su foto (el back la firma de nuevo en cada respuesta).
+function isSameSender (a, b) {
+  if (a === b) return true
+  if (!a || !b) return false
+  return a.id === b.id && a.name === b.name && a.reputation === b.reputation && isSameSignedFile(a.photoUrl, b.photoUrl)
+}
+
+// Un mensaje que volvió a llegar sin cambios (por el polling o al reconectar) conserva el objeto que ya estaba: así
+// la fila memoizada no se vuelve a pintar y el avatar no se vuelve a descargar por una URL firmada nueva.
+function isSameServerMessage (saved, incoming) {
+  if (saved.status !== MESSAGE_STATUS.SENT) return false
+  return Object.keys(incoming).every((key) => (key === 'sender'
+    ? isSameSender(saved.sender, incoming.sender)
+    : key === 'status' || Object.is(saved[key], incoming[key])))
+}
+
 /**
  * Suma mensajes del servidor a la lista, sin duplicar: uno con el mismo `id` reemplaza al que ya estaba, y uno con
- * el `clientId` de un envío propio sin confirmar (pendiente o fallido) lo reemplaza.
- * @param {object[]} current
+ * el `clientId` de un envío propio sin confirmar (pendiente o fallido) lo reemplaza. Lo que llega igual a lo que ya
+ * había no se toca y, si no cambió nada, devuelve la misma lista (`current`).
+ * @param {object[]} current  Ordenada como la devuelve esta función.
  * @param {object[]} incoming  Mensajes tal como los devuelve el servidor.
- * @returns {object[]} lista nueva, del más nuevo al más viejo.
+ * @returns {object[]} lista del más nuevo al más viejo.
  */
 export function mergeMessages (current, incoming) {
   const merged = [...current]
+  let hasChanges = false
   for (const message of incoming) {
-    const saved = { ...message, status: MESSAGE_STATUS.SENT }
-    let index = merged.findIndex((item) => item.id === saved.id)
-    if (index === -1 && saved.clientId) {
-      index = merged.findIndex((item) => isUnsent(item) && item.clientId === saved.clientId)
+    let index = merged.findIndex((item) => item.id === message.id)
+    if (index === -1 && message.clientId) {
+      index = merged.findIndex((item) => isUnsent(item) && item.clientId === message.clientId)
     }
+    const previous = index === -1 ? null : merged[index]
+    if (previous && isSameServerMessage(previous, message)) continue
+    // Si solo cambió la firma de la foto se conserva el `sender` anterior (misma imagen, misma URL para `Image`).
+    const sender = previous && isSameSender(previous.sender, message.sender) ? previous.sender : message.sender
+    const saved = { ...message, sender, status: MESSAGE_STATUS.SENT }
     if (index === -1) merged.push(saved)
     else merged[index] = saved
+    hasChanges = true
   }
-  return sortMessages(merged)
+  return hasChanges ? sortMessages(merged) : current
 }
 
 /**
@@ -82,4 +109,33 @@ export function formatMessageTime (iso, now = new Date()) {
   const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`
   const isToday = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate()
   return isToday ? time : `${pad(date.getDate())}/${pad(date.getMonth() + 1)} ${time}`
+}
+
+const isSameLocalDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+
+// `older` y `newer` son seguidos en el chat: van juntos si los mandó la misma persona, el mismo día y con menos de
+// `GROUP_WINDOW_MS` entre uno y otro.
+function isSameGroup (older, newer) {
+  if (!older || !newer || !older.sender?.id || older.sender.id !== newer.sender?.id) return false
+  const from = new Date(older.createdAt)
+  const to = new Date(newer.createdAt)
+  const gap = to.getTime() - from.getTime()
+  return Number.isFinite(gap) && Math.abs(gap) < GROUP_WINDOW_MS && isSameLocalDay(from, to)
+}
+
+/**
+ * Lugar de un mensaje en su grupo (mensajes seguidos de la misma persona). La lista va del más nuevo al más viejo,
+ * como la deja `sortMessages` para la lista invertida: en pantalla el más viejo queda arriba, así que el "primero"
+ * del grupo (el de arriba, donde va el nombre) es el de índice mayor y el "último" (abajo, donde va el avatar) el
+ * de índice menor.
+ * @param {object[]} messages  Del más nuevo al más viejo.
+ * @param {number} index
+ * @returns {{ isFirst: boolean, isLast: boolean }}
+ */
+export function messageGroupPosition (messages, index) {
+  const message = messages[index]
+  return {
+    isFirst: !isSameGroup(messages[index + 1], message),
+    isLast: !isSameGroup(message, messages[index - 1])
+  }
 }

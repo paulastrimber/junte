@@ -5,7 +5,8 @@ import { LOCATION_STATUS, findAddress, getCurrentCoordinates } from '../services
 export const PLACE_MESSAGES = Object.freeze({
   notFound: 'No encontramos esa dirección. Probá con calle, número y ciudad, o mové el pin en el mapa.',
   denied: 'Sin permiso de ubicación no podemos usar tu posición. Buscá una dirección o mové el pin en el mapa.',
-  unavailable: 'No pudimos obtener tu ubicación. Revisá que el GPS esté encendido.'
+  unavailable: 'No pudimos obtener tu ubicación. Revisá que el GPS esté encendido.',
+  failed: 'No pudimos buscar el lugar. Probá de nuevo o mové el pin en el mapa.'
 })
 
 /**
@@ -26,6 +27,9 @@ export function usePlacePicker (onPick) {
       const { coordinates, failure } = await find()
       if (coordinates) onPick(coordinates)
       else setMessage(failure)
+    } catch {
+      // El geocodificador o el GPS del teléfono fallaron de una forma inesperada: no rompe el formulario, se avisa.
+      setMessage(PLACE_MESSAGES.failed)
     } finally {
       setIsWorking(false)
     }

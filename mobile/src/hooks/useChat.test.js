@@ -234,6 +234,21 @@ describe('useChat: polling cuando el WebSocket no se sostiene', () => {
     expect(listMessages).toHaveBeenCalledTimes(afterReconnect)
   })
 
+  it('un tick del polling sin novedades (solo cambia la firma de las fotos) no cambia la lista ni sus mensajes', async () => {
+    const signed = (signature) => ({ ...OTHER, photoUrl: `https://bucket.s3.amazonaws.com/users/u2/a.jpg?X-Amz-Signature=${signature}` })
+    listMessages.mockResolvedValue({ items: [message(2, { sender: signed('uno') }), message(1, { sender: signed('uno') })], nextCursor: null })
+    const { result } = await setup()
+    await socket.setStatus('unavailable')
+    const before = result.current.messages
+
+    listMessages.mockResolvedValue({ items: [message(2, { sender: signed('dos') }), message(1, { sender: signed('dos') })], nextCursor: null })
+    await act(async () => jest.advanceTimersByTimeAsync(POLL_INTERVAL_MS))
+
+    expect(listMessages).toHaveBeenCalledTimes(2)
+    expect(result.current.messages).toBe(before)
+    expect(result.current.messages[0].sender.photoUrl).toContain('Signature=uno')
+  })
+
   it('con la pantalla fuera de foco no hace polling', async () => {
     const { result } = await setup({ isActive: false })
     listMessages.mockClear()

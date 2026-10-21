@@ -5,7 +5,10 @@
 // - autentica con el access token y, si el servidor lo rechaza por vencido, renueva la sesión UNA vez y reconecta;
 // - después de cada (re)conexión vuelve a entrar a las salas abiertas (el servidor las suelta al desconectar);
 // - manda mensajes con acknowledgement y timeout;
-// - informa el estado de la conexión para que el hook decida si hace falta polling.
+// - informa el estado de la conexión para que el hook decida si hace falta polling;
+// - con la app en segundo plano corta la conexión (sin olvidar las salas) y la retoma al volver: así no gasta batería
+//   ni provoca renders mientras no se ve. Al reconectar se vuelve a entrar a las salas y el chat recupera lo que falte.
+import { AppState as defaultAppState } from 'react-native'
 import { io as defaultIo } from 'socket.io-client'
 
 import { getConfig } from '../config/index.js'
@@ -61,6 +64,7 @@ function errorFromConnect (error) {
  * @param {number} [deps.ackTimeoutMs]
  * @param {number} [deps.maxFailures]
  * @param {number} [deps.authRetryDelayMs]
+ * @param {{ addEventListener: Function }} [deps.appState]  `AppState` de React Native (inyectable para tests).
  */
 export function createSocketService ({
   io = defaultIo,
@@ -68,7 +72,8 @@ export function createSocketService ({
   auth,
   ackTimeoutMs = ACK_TIMEOUT_MS,
   maxFailures = MAX_CONSECUTIVE_FAILURES,
-  authRetryDelayMs = AUTH_RETRY_DELAY_MS
+  authRetryDelayMs = AUTH_RETRY_DELAY_MS,
+  appState = defaultAppState
 }) {
   let socket = null
   let status = SOCKET_STATUS.IDLE
@@ -77,6 +82,9 @@ export function createSocketService ({
   let attemptToken = null
   let hasRefreshed = false
   let retryTimer = null
+  // App en segundo plano con la conexión cortada a propósito: nada vuelve a conectar hasta que vuelva a primer plano.
+  let isPaused = false
+  let appStateSubscription = null
   /** planId → suscriptores `{ onMessage, onJoinError, onHidden }`. */
   const rooms = new Map()
   const statusListeners = new Set()
@@ -108,11 +116,35 @@ export function createSocketService ({
     })
   }
 
+  /** Vuelve a conectar, salvo que se haya soltado esa conexión o que la app esté en segundo plano. */
+  function reconnect (current) {
+    if (socket === current && !isPaused) current.connect()
+  }
+
   function reconnectLater (current) {
     clearTimeout(retryTimer)
-    retryTimer = setTimeout(() => {
-      if (socket === current) current.connect()
-    }, authRetryDelayMs)
+    retryTimer = setTimeout(() => reconnect(current), authRetryDelayMs)
+  }
+
+  // Segundo plano: se corta la conexión pero se conservan las salas. "Reconectando" (y no "conectado") para que, al
+  // volver, el paso a "conectado" dispare la recuperación del historial en `useChat`.
+  function pause () {
+    if (!socket || isPaused) return
+    isPaused = true
+    clearTimeout(retryTimer)
+    socket.disconnect()
+    setStatus(failures >= maxFailures ? SOCKET_STATUS.UNAVAILABLE : SOCKET_STATUS.RECONNECTING)
+  }
+
+  function resume () {
+    if (!isPaused) return
+    isPaused = false
+    socket?.connect()
+  }
+
+  function handleAppStateChange (next) {
+    if (next === 'background') pause()
+    else if (next === 'active') resume()
   }
 
   /**
@@ -142,7 +174,7 @@ export function createSocketService ({
       reconnectLater(current)
       return
     }
-    if (socket === current) current.connect()
+    reconnect(current)
   }
 
   function handleConnectError (current, error) {
@@ -176,6 +208,7 @@ export function createSocketService ({
     })
     socket = current
     setStatus(SOCKET_STATUS.CONNECTING)
+    appStateSubscription = appState.addEventListener('change', handleAppStateChange)
 
     current.on('connect', () => {
       failures = 0
@@ -188,7 +221,7 @@ export function createSocketService ({
       if (reason === 'io client disconnect') return
       setStatus(SOCKET_STATUS.RECONNECTING)
       // Si cortó el servidor, Socket.io no reintenta solo.
-      if (reason === 'io server disconnect') current.connect()
+      if (reason === 'io server disconnect') reconnect(current)
     })
     current.on('connect_error', (error) => handleConnectError(current, error))
     current.on('chat:message', (message) => {
@@ -205,6 +238,9 @@ export function createSocketService ({
   function disconnect () {
     clearTimeout(retryTimer)
     retryTimer = null
+    appStateSubscription?.remove()
+    appStateSubscription = null
+    isPaused = false
     if (socket) {
       socket.removeAllListeners()
       socket.disconnect()

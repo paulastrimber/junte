@@ -101,4 +101,16 @@ describe('usePlacePicker', () => {
 
     expect(result.current.message).toBeNull()
   })
+
+  it('si el buscador o el GPS fallan de forma inesperada avisa, no mueve el pin y no deja la búsqueda colgada', async () => {
+    findAddress.mockRejectedValue(new Error('geocoder caído'))
+    const { result, onPick } = await setup()
+
+    await act(async () => result.current.setAddress('Parque Rodó'))
+    await act(async () => result.current.searchAddress())
+
+    expect(onPick).not.toHaveBeenCalled()
+    expect(result.current.message).toBe(PLACE_MESSAGES.failed)
+    expect(result.current.isWorking).toBe(false)
+  })
 })

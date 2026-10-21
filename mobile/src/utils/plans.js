@@ -72,18 +72,41 @@ export function formatDistance (meters) {
   return `a ${km < 10 ? km.toFixed(1).replace('.', ',') : Math.round(km)} km`
 }
 
+/** Cupo de un plan lleno (también lo dice la `PlanCard` al lector de pantalla). */
+export const FULL_SPOTS_LABEL = 'Lleno'
+
 /**
  * Cupo de un plan. `capacity: null` es cupo ilimitado.
  * @param {{ capacity: number | null, availableSpots: number | null, isFull: boolean }} plan
  */
 export function formatSpots ({ capacity, availableSpots, isFull }) {
   if (capacity === null) return 'Sin límite de cupo'
-  if (isFull) return 'Lleno'
+  if (isFull) return FULL_SPOTS_LABEL
   return availableSpots === 1 ? 'Queda 1 lugar' : `Quedan ${availableSpots} lugares`
 }
 
 const dayText = (date) => `${WEEKDAYS[date.getDay()]} ${pad(date.getDate())}/${pad(date.getMonth() + 1)}`
 const timeText = (date) => `${pad(date.getHours())}:${pad(date.getMinutes())}`
+
+/**
+ * Inscripciones: "3 de 10", o solo la cantidad si el cupo es ilimitado.
+ * @param {{ participantCount: number, capacity: number | null }} plan
+ */
+export function formatJoined ({ participantCount, capacity }) {
+  return capacity === null ? String(participantCount) : `${participantCount} de ${capacity}`
+}
+
+// Duración que se propone al elegir el fin de un plan: la mayoría dura un par de horas.
+const DEFAULT_DURATION_MS = 2 * 60 * 60 * 1000
+
+/**
+ * Fecha que propone el selector de "Termina": dos horas después del inicio (o nada si todavía no hay inicio).
+ * @param {Date | null} startsAt
+ * @returns {Date | undefined}
+ */
+export function defaultEndsAt (startsAt) {
+  return startsAt ? new Date(startsAt.getTime() + DEFAULT_DURATION_MS) : undefined
+}
 
 /** @param {Date} date @returns {string} "sáb 25/10 · 18:00" en la hora del teléfono. */
 export function formatDateTime (date) {

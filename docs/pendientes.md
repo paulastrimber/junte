@@ -426,3 +426,71 @@ Decidido con Domenico el 2026-10-14: [endpoints y métricas de admin](#endpoints
 - **Nada de S6 se probó con docker compose:** Docker Desktop no arrancó en la máquina donde se hizo (se cae al iniciar porque no puede borrar un socket viejo en la carpeta `docker-secrets-engine` de AppData). Falta: `nginx -t`, `smoke.sh` (con los checks nuevos del panel) y `chat:hidden` entre dos instancias con Redis.
 - ✅ **El panel se probó en un navegador** (2026-10-14) contra el back real con MongoDB en memoria y las migraciones, servido con las mismas cabeceras que Nginx y `/api/v1` reescrito a `/internal` (un entorno temporal, fuera del repo): login, cuenta sin rol rechazada, cola con vista previa, ocultar y volver a mostrar, resolver, suspender (con confirmación), métricas, catálogos (buscar, editar, agregar, key repetida → 409 con código de seguimiento) y cerrar sesión. Sin violaciones de CSP; un mensaje y un nombre con HTML (`<script>`, `onerror`) se ven como texto.
 - **La app no se probó en un teléfono:** el modo avión (NetInfo real), la cola al volver la red, la pulsación larga y el aviso del chat, ni la app en segundo plano. Verificado con tests (jest) y lint.
+
+## Front: decisiones del equipo de agentes (2026-10-17)
+
+Decidido por el líder del equipo de agentes del front (rama `front-agentes`), sin cambios en el back ni en el contrato de la API.
+
+- ✅ **Fotos con `expo-image`.** `Avatar` (el único que dibuja imágenes) pasa a `expo-image` con `cacheKey` = la URL sin firma (`withoutSignature`), `cachePolicy='memory-disk'`, una `transition` corta y `recyclingKey` en las listas (chat). Se borra `useStablePhotoUri`: el caché por clave ya evita la re-descarga y el parpadeo cuando el back re-firma. Si la carga falla se muestra la inicial. Al cerrar sesión se vacían los cachés de memoria y disco (son fotos de otras personas). **Es un módulo nativo: hace falta un development build nuevo** (EAS, perfil `development`); Expo Go ya lo trae.
+  - Por qué: caché en disco por archivo y no por URL (hoy, al reabrir la app, cada foto llega con otra firma y se vuelve a bajar), menos lógica propia y reciclado correcto en listas largas.
+- ✅ **QR: se queda `react-native-qrcode-svg`.** Ya dibuja un solo `Path`, no es nativo y funciona; cambiarla no mejora nada medible y suma riesgo antes de la entrega.
+- ✅ **QR: renovación sin ocultar uno vigente.** Si falla la renovación por red y el QR que se ve todavía no venció, sigue a la vista con un aviso (`Notice` de advertencia: "Sin conexión. Este QR vale hasta las HH:MM; reintentamos solo.") y se reintenta cada 5 s (`QR_MIN_REFRESH_MS`). Recién al vencer pasa a error con "Reintentar". Si la respuesta es de "no disponible" (`CHECKIN_WINDOW_CLOSED`, `PLAN_CLOSED`…) se oculta enseguida. Lo mismo al volver de segundo plano: solo se oculta si ya venció. El cambio de un QR al siguiente es instantáneo (sin animación: un lector podría leer a mitad de un fundido).
+  - Accesibilidad: el QR es una imagen con nombre ("Código QR de asistencia. Se renueva solo."); la renovación no se anuncia (sería ruido cada minuto y medio), el aviso de sin conexión sí (`polite`).
+- ✅ **Chat: mensajes agrupados.** Un grupo son mensajes seguidos de la misma persona, a menos de 5 minutos entre uno y el siguiente y el mismo día. En los ajenos, el nombre va solo en el primero del grupo y el avatar solo en el último (abajo, como en cualquier chat); los demás dejan el lugar del avatar vacío para que las burbujas queden alineadas. Entre mensajes del mismo grupo el espacio es `spacing.xxs`; entre grupos, `spacing.md`. La "cola" de la burbuja (esquina chica) solo en el último del grupo. Los propios se agrupan igual (solo cambia el espaciado y la cola).
+  - Accesibilidad: cada mensaje se anuncia completo aunque no se vea el nombre: "Ana: texto. 14:32" (o "Vos: …" en los propios).
+  - Textos de la pantalla: "No pudimos cargar el chat" (sin punto, como el resto de los títulos de error) y, para un tipo desconocido, "Actualizá la app para ver este mensaje". El resto ya estaba en voseo y no hay ningún "Error:".
+- ✅ **Selector segmentado con texto grande.** Las etiquetas pasan a hasta 2 líneas (nunca "…"). En el inicio, con `fontScale ≥ 1.3` la barra deja de ser una fila: el segmentado ocupa todo el ancho y "Filtros (n)" baja a la línea siguiente, alineado a la derecha. En "Mis planes" los dos segmentados ya van uno abajo del otro: alcanza con las 2 líneas.
+  - Por qué: una regla por `fontScale` es predecible y se puede testear; un `flexWrap` dependía del largo de cada texto.
+
+### Sin probar en un teléfono
+- `expo-image` en un development build nuevo: que la foto no parpadee al re-firmar, que se vea sin red después de reabrir la app y que el caché se vacíe al cerrar sesión.
+- La renovación del QR con el modo avión prendido y apagado a mitad de la vida del QR, y que un lector real lea el QR justo después de cambiar.
+- El agrupado del chat con texto grande, con TalkBack y VoiceOver.
+- El segmentado y la barra del inicio con el texto más grande del sistema en Android e iOS.
+- Sigue abierto de S5: con el aviso de polling visible, el primer mensaje queda en parte debajo del aviso.
+
+### Checklist manual en el teléfono
+Lo que jest no cubre de estos cambios. Marcar cada punto con la fecha, el teléfono y la versión del sistema.
+
+#### Fotos con `expo-image` (development build nuevo)
+
+`expo-image` es un módulo nativo: hace falta un development build nuevo (EAS, perfil `development`) antes de probar. Un build viejo falla al abrir cualquier pantalla con fotos.
+
+- [ ] El build nuevo abre sin errores en Android e iOS.
+- [ ] En el chat y en la lista de participantes, las fotos no parpadean cuando llega una respuesta nueva del back (la URL vuelve con otra firma): dejar el chat abierto con polling y mirar los avatares durante un minuto.
+- [ ] Sin red, al reabrir la app (matarla y volver a abrirla), las fotos que ya se vieron se siguen viendo.
+- [ ] Una foto de perfil nueva (subida desde otro teléfono) sí aparece: no se queda la vieja del caché.
+- [ ] Al cerrar sesión ("Cerrar sesión" y "Cerrar todas las sesiones"), en modo avión y entrando con otra cuenta, las fotos de la sesión anterior ya no aparecen (el caché se vació).
+- [ ] Una foto que no carga (URL vencida o borrada) muestra la inicial, no un círculo vacío.
+
+#### QR de asistencia
+
+- [ ] Con el QR a la vista, prender el modo avión a mitad de su vida (unos 40 s después de que apareció): el QR sigue a la vista y, al tocar la renovación (~15 s antes de vencer), aparece "Sin conexión. Este QR vale hasta las HH:MM; reintentamos solo." con la hora correcta.
+- [ ] Apagar el modo avión antes de que venza: en 5 s o menos el aviso desaparece y el QR cambia por uno nuevo.
+- [ ] Dejar el modo avión hasta que venza: el QR se oculta y aparece "No pudimos mostrar el QR" con "Reintentar"; sin red no se reintenta solo, y "Reintentar" con red vuelve a mostrar uno.
+- [ ] Un lector real (otro teléfono con la app, pantalla de check-in) lee el QR justo después del cambio, en el primer segundo: el cambio es instantáneo, sin fundido.
+- [ ] Mandar la app a segundo plano 1 minuto y volver: si el QR todavía vale, no se oculta; si ya venció (dejarla 2 minutos), se oculta y aparece uno nuevo.
+- [ ] Con el reloj del teléfono en hora automática y, después, adelantado 2 minutos a mano: el QR se muestra igual y vence a su hora: la vida del QR se mide con el header `Date` del servidor y se cuenta desde que llegó la respuesta (BUG-QA-9, corregido). No cubre cambiar el reloj durante los ~90 s del QR.
+- [ ] Con TalkBack y VoiceOver: el QR se anuncia como "Código QR de asistencia. Se renueva solo."; la renovación normal no se anuncia; el aviso de sin conexión sí, sin cortar lo que se estaba leyendo.
+
+#### Chat agrupado
+
+- [ ] Con TalkBack (Android) y VoiceOver (iOS): cada burbuja se lee completa, "Ana: texto. 14:32" (o "Vos: …" en las propias), también las del medio de un grupo que no muestran el nombre; el avatar no se lee aparte.
+- [ ] El foco del lector recorre los mensajes en orden (de arriba hacia abajo) aunque la lista esté invertida.
+- [ ] Con el texto más grande del sistema: el nombre del primero del grupo, las burbujas y el avatar del último quedan alineados; nada se corta ni se superpone; el espacio entre grupos se distingue del espacio dentro de un grupo.
+- [ ] Mensajes alrededor de la medianoche (23:59 y 00:01) quedan en grupos distintos.
+- [ ] Un mensaje de tipo desconocido muestra "Actualizá la app para ver este mensaje".
+
+#### Selector segmentado y barra del inicio con texto grande
+
+- [ ] Android (Ajustes → Pantalla → Tamaño de fuente al máximo) y iOS (Accesibilidad → Pantalla y tamaño del texto → Texto más grande al máximo):
+  - [ ] En el inicio, la barra pasa a columna: el segmentado ("Con cupo / Llenos") ocupa todo el ancho y "Filtros (n)" queda abajo, a la derecha.
+  - [ ] Las etiquetas del segmentado usan hasta 2 líneas, sin "…", y los dos segmentos quedan del mismo alto.
+  - [ ] En "Mis planes", los dos segmentados se leen enteros en 2 líneas.
+- [ ] Cambiar el tamaño de la fuente con la app abierta (volver desde Ajustes): la barra cambia de fila a columna (y al revés) sin reabrir la app.
+- [ ] Con el tamaño de fuente normal, la barra sigue en una fila.
+
+### Corregido después de QA
+- **BUG-QA-8:** un QR que vencía antes de su renovación dejaba la pantalla en "Generando el QR…" para siempre. Ahora se oculta y la renovación sigue en pie (o pasa a error con "Reintentar" si ya había fallado).
+- **BUG-QA-9:** con el reloj del teléfono adelantado, cada QR se daba por vencido al llegar. Ahora la vida se calcula con la hora del servidor (header `Date`) y se ancla al momento en que llegó la respuesta; sin header se usa `expiresAt` tal cual.
+- **Dependencias:** parches de `expo`, `expo-asset`, `expo-constants`, `expo-dev-client` y `jest-expo` alineados con `expo install --fix`; `expo-doctor` 21/21.

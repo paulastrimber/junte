@@ -1,4 +1,4 @@
-import { View } from 'react-native'
+import { StyleSheet, View } from 'react-native'
 
 import { Button } from '../components/Button.jsx'
 import { ErrorBanner } from '../components/ErrorBanner.jsx'
@@ -69,16 +69,16 @@ export default function RegisterScreen ({ navigation }) {
         editable={!isSubmitting}
         onSubmitEditing={submit}
       />
-      <ErrorBanner message={formError?.message} requestId={formError?.requestId} />
+      <ErrorBanner error={formError} />
       <View style={styles.actions}>
         <Button title={TEXTS.submit} onPress={submit} loading={isSubmitting} />
-        <Button title={TEXTS.login} variant='ghost' disabled={isSubmitting} onPress={() => navigation.navigate('Login')} />
+        <Button title={TEXTS.login} variant='ghost' disabled={isSubmitting} onPress={() => navigation.goBack()} />
       </View>
     </Screen>
   )
 }
 
-const styles = {
+const styles = StyleSheet.create({
   intro: { gap: spacing.lg, marginBottom: spacing.sm },
   actions: { gap: spacing.xs, marginTop: spacing.sm }
-}
+})

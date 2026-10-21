@@ -7,10 +7,10 @@ React Native con Expo + EAS Build. **Nunca accede a MongoDB ni recibe credencial
 | Rol | Pieza | Hace | Nunca hace |
 |-----|-------|------|-----------|
 | **View** | `screens/`, `components/` | Renderizan y emiten eventos | `fetch`/`axios`, leer tokens, lógica de negocio |
-| **Controller** | `hooks/` (`usePlan`, `usePlanActions`, `usePlanQr`, `useCheckIn`, `useMyPlans`) | Orquestan: llaman services, manejan loading/error, devuelven estado listo para pintar | Renderizar |
+| **Controller** | `hooks/` (`usePlanDetail`, `usePlanActions`, `usePlanQr`, `useCheckIn`, `useMyPlans`, `useFeed`…) | Orquestan: llaman services (también los del dispositivo: cámara, ubicación, calendario), manejan loading/error, devuelven estado listo para pintar | Renderizar |
 | **Model** | `services/` + `contexts/` | Cliente HTTP, Socket.io, auth/tokens, FCM, ubicación, persistencia offline; estado global mínimo | Conocer pantallas |
 
-Regla de oro: **una screen nunca llama a la API directamente**; siempre a través de un hook.
+Regla de oro: **una screen nunca llama a la API directamente**; siempre a través de un hook. Tampoco importa services del dispositivo (cámara, ubicación): el hook expone el dato ya resuelto (p. ej. `useFeed().locationNotice`, `useCameraPermission()`).
 
 ```
 screens ──▶ hooks ──▶ services ──▶ API
@@ -58,7 +58,15 @@ mobile/
 - Interceptor de request: agrega `Authorization: Bearer <access>` (salvo en las requests con `skipAuth: true`: register, login y refresh).
 - Interceptor de response ante 401 `TOKEN_EXPIRED`/`UNAUTHENTICATED`: **un solo refresh en vuelo** (las demás requests esperan esa promesa), reintenta una vez cada request. Una request lenta que falla después de que otra ya renovó el token solo se reintenta (no hace otro refresh). Si el refresh es rechazado (401) → se avisa a `AuthContext` y se vuelve al login; si falla por red, la sesión se conserva. `ACCOUNT_SUSPENDED` cierra la sesión sin intentar el refresh.
 - La sesión (token en memoria, refresh, aviso de sesión terminada) se registra con `configureApiAuth(authService.apiAuth)` al arrancar `App`.
-- Todo error se convierte en `ApiError { status, code, message, requestId }`. Las pantallas muestran `message` y, en desarrollo, el `requestId` para rastrear en logs.
+- Todo error se convierte en `ApiError { status, code, message, requestId }`.
+
+## Errores en la UI (hooks → screens)
+
+- **Todo hook expone sus errores como `ViewError`**: `{ code, message, requestId }` (en `useCheckIn`, más `canRetry`). Se arma con una sola función, `toViewError(error, overrides?)` de `utils/errorMessages.js`, que elige el texto por `code` (los textos propios de una acción, como los del chat o los de inscribirse, van como `overrides` en el hook) y usa el `message` del servidor cuando el `code` no tiene uno propio. Nunca un `string` suelto: se perdería el `requestId`.
+- **Una screen nunca elige textos de error** (no llama a `messageForError`): pasa el `ViewError` a `ErrorState` (la pantalla o el bloque no cargó), a `ErrorBanner` (falló una acción, un formulario, un refresco o "cargar más") o lo pinta tal cual.
+- `ErrorBanner` y `ErrorState` muestran el `requestId` solo en desarrollo (`__DEV__`). Excepción: la pantalla "Estado del servidor" muestra `code` y `requestId` siempre (es su propósito).
+- Los errores por campo siguen como `errors: Record<campo, string>` (de `fieldErrorsFrom`); el general del formulario es `formError: ViewError | null`. `CAPACITY_BELOW_PARTICIPANTS` se muestra en el campo del cupo con el texto del servidor.
+- Un error que se ignora a propósito (las estadísticas del perfil) se comenta y se loguea solo en desarrollo, con `code` y `requestId`.
 
 ## Onboarding y selectores
 
@@ -68,11 +76,13 @@ mobile/
 
 ## Navegación y pantallas de planes (S3)
 
-- Con sesión y onboarding hecho, la app son **tres tabs inferiores**, cada uno con su stack: **Planes** (feed → detalle → editar), **Crear** y **Perfil** (perfil → estado del servidor).
-- **HomeScreen (feed)**: `FlatList` con scroll infinito por `nextCursor`, pull-to-refresh y los cuatro estados. `useFeed` pide la ubicación; si la hay, lee las franjas ocupadas del calendario (si hay permiso) y consulta `POST /feed`; sin ubicación degrada a `GET /plans` (por fecha) y lo explica. Las páginas siguientes repiten exactamente la misma consulta con el cursor.
+- Con sesión y onboarding hecho, la app son **cuatro tabs inferiores**, cada uno con su stack: **Planes** (feed → detalle → editar), **Mis planes** (mis planes → detalle), **Crear** y **Perfil** (perfil → estado del servidor). Las pantallas que se usan poco y arrastran módulos pesados (crear/editar con el mapa, QR, check-in con la cámara, estado del servidor) se cargan al abrirlas (`getComponent`); sus títulos viven en `navigation/titles.js`. `metro.config.js` activa `inlineRequires`: cada módulo se evalúa en su primer uso.
+- **HomeScreen (feed)**: `FlatList` con scroll infinito por `nextCursor`, pull-to-refresh y los cuatro estados. `useFeed` pide la ubicación; si la hay, lee las franjas ocupadas del calendario (si hay permiso) y consulta `POST /feed`; sin ubicación degrada a `GET /plans` (por fecha) y lo explica (`locationNotice`). Las páginas siguientes repiten exactamente la misma consulta con el cursor.
+- **Errores de una lista** (`useFeed`, `usePagedList`): `error` si falló la primera carga (pantalla de error con los filtros arriba), `refreshError` si falló un pull-to-refresh (se conservan los planes y se avisa arriba, con "Reintentar") y `loadMoreError` si falló una página siguiente (aviso al pie).
 - **Secciones "Con cupo" / "Llenos"**: el feed principal trae planes con lugar; los llenos van aparte (`availability=full`), se pueden abrir pero no admiten inscripción.
-- **Filtros** (`FeedFilters` + `useFeedFilters`): distancia máxima (0.5, 1, 2, 5, 10, 25 o 50 km; por defecto 10), fecha (hoy, 7 días, 30 días), costo (uno o varios rangos, que la app lee de `GET /plans/filters`) y tipo de actividad (intereses del catálogo). Son predefinidos: nunca se escribe una consulta.
-- **PlanScreen**: detalle con horario de inicio y fin, lugar, costo, cupo ("Sin límite de cupo" si es ilimitado), inscriptos y quién organiza. El creador ve "Editar plan".
+- **Filtros** (`FeedFilters` + `useFeedFilters`): distancia máxima (0.5, 1, 2, 5, 10, 25 o 50 km; por defecto 10), fecha (hoy, 7 días, 30 días), costo (uno o varios rangos, que la app lee de `GET /plans/filters`) y tipo de actividad (intereses del catálogo). Son predefinidos: nunca se escribe una consulta. Se aplican solos, sin botón: la consulta sale cuando pasan 400 ms sin cambios (`FILTERS_DEBOUNCE_MS`; cambiar "Con cupo" / "Llenos" va enseguida), cancela la anterior y los planes que se veían quedan en pantalla hasta que llega la respuesta (`isReloading`). Mientras se tocan, `useFeed` reutiliza la ubicación y las franjas del calendario de la última consulta (hasta 60 s), así cada toque no vuelve a pedir el GPS ni a leer el calendario. El pull-to-refresh y "Reintentar" las piden de nuevo.
+- **PlanScreen**: detalle con horario de inicio y fin, lugar, costo, cupo ("Sin límite de cupo" si es ilimitado), inscriptos y quién organiza. El creador ve "Editar plan". La orquesta `usePlanDetail` (plan, acciones, anotados, refrescos y confirmaciones): "Cancelar plan" y "Darme de baja" piden confirmación antes de mandarse (cancelar no se deshace; el lugar liberado lo puede ocupar otra persona).
+- **Volver a una pantalla**: `useRefreshOnFocus(navigation, refresh)` (en `hooks/useScreenFocus.js`) vuelve a pedir los datos en cada `focus` **salvo el primero**, que React Navigation emite al montar (si no, cada entrada pedía todo dos veces). Lo usan el detalle del plan y Mis planes. `useScreenFocus(navigation)` dice si la pantalla está en primer plano (el chat hace polling solo entonces). El detalle también se refresca cuando la app vuelve de segundo plano (`background` → `active`, no un `inactive`), solo si está a la vista, y entonces pide el plan y los anotados sin pasar por "cargando". Si un refresco del detalle falla, el plan sigue a la vista con un aviso (`refreshError`).
 - **CreatePlanScreen** (crear y editar): `LocationPicker` (buscador de dirección + "Usar mi ubicación" + mapa de `react-native-maps` con un pin arrastrable), nombre del lugar, fecha y hora de inicio y de fin (`DateTimeField`), interruptor "Cupo ilimitado", costo e intereses. Al editar manda solo lo que cambió. Con el perfil incompleto, en lugar del formulario explica qué falta.
 - El mapa en Android necesita la clave de Google Maps (`GOOGLE_MAPS_ANDROID_API_KEY`), la única excepción a "nada secreto en el binario": ver [09-seguridad.md](09-seguridad.md#secretos). Requiere un **development build** (no funciona en Expo Go).
 
@@ -87,6 +97,7 @@ mobile/
 - Un `connect_error` con `TOKEN_EXPIRED`/`UNAUTHENTICATED` renueva la sesión **una vez** con el mismo refresh único que usa el cliente HTTP (`authService.refreshSession` es *single-flight*: el refresh token rota y dos canjes a la vez cerrarían la sesión) y reconecta; `ACCOUNT_SUSPENDED` o un segundo rechazo terminan la sesión.
 - Al (re)conectar vuelve a hacer `chat:join` de las salas abiertas y `useChat` pide la primera página por REST y la fusiona por `id`/`clientId`.
 - `useChat` muestra el mensaje propio como pendiente, lo manda por `chat:send` y, si no hay conexión o el ack no llega en 8 s, por `POST /plans/:id/messages` con el mismo `clientId` (el back no lo duplica). Un error del servidor (permiso, validación) lo deja "No se envió · Reintentar".
+- Con la app en segundo plano el socket se corta (sin olvidar las salas) y se reconecta al volver a primer plano; al conectar se vuelven a hacer los `chat:join` y `useChat` recupera la primera página. Un `inactive` (centro de control, diálogos) no corta nada.
 - Si el WebSocket falla 3 veces seguidas, `useChat` pasa a polling de `GET /plans/:id/messages` cada 5 s mientras la pantalla está activa, y lo avisa en un banner.
 - Push: como el back envía directo por FCM, el token se obtiene con `getDevicePushTokenAsync()` (token nativo FCM), **no** con el token de Expo Push. Se registra en `POST /devices` y se borra con `DELETE /devices/:token` al cerrar sesión.
 - Push solo se prueba en un **development build** (Expo Go no lo soporta).
@@ -127,7 +138,8 @@ Pedirlos **en el momento en que se usan**, explicando para qué, y degradar con 
 - Layout con Flexbox (`flexDirection`, `justifyContent`, `alignItems`, `gap`), estilos con `StyleSheet.create`.
 - Listas largas con `FlatList` (nunca `map` dentro de un `ScrollView` para el feed o el chat).
 - Componentes de lista con `React.memo` y `keyExtractor` estable.
-- Toda pantalla contempla cuatro estados: **cargando, vacío, error, con datos**.
+- Toda pantalla contempla cuatro estados: **cargando, vacío, error, con datos**, siempre con los mismos componentes: `LoadingState` / `PlanCardSkeleton`, `EmptyState`, `ErrorState` (o `ErrorBanner` para una acción o un refresco) y `Notice` para avisos que no son errores.
+- Colores, tipografía, espaciado, componentes base y reglas de accesibilidad: [diseno-ui.md](../practicas/diseno-ui.md).
 
 ## Entornos (EAS)
 

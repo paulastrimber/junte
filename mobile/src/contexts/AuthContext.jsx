@@ -1,5 +1,6 @@
 import { createContext, useCallback, useEffect, useMemo, useState } from 'react'
 
+import { clearPhotoCache } from '../components/Avatar.jsx'
 import { authService as defaultService } from '../services/auth.js'
 
 // Estado global mínimo de la sesión (Model de la app): quién está logueado y en qué fase.
@@ -36,6 +37,7 @@ export function AuthProvider ({ service = defaultService, children }) {
 
   // El cliente HTTP avisa cuando el refresh es rechazado: se vuelve al login conservando el motivo.
   useEffect(() => service.onSessionExpired((reason) => {
+    clearPhotoCache()
     setState({ status: AUTH_STATUS.SIGNED_OUT, user: null, error: null, sessionEndedBy: reason })
   }), [service])
 
@@ -44,7 +46,10 @@ export function AuthProvider ({ service = defaultService, children }) {
     return user
   }, [])
 
+  // Las fotos cacheadas son de otras personas: no quedan en el teléfono para la próxima sesión. `clearPhotoCache`
+  // nunca rechaza y no se espera: un fallo o una demora del caché no traban el cierre de sesión.
   const signedOut = useCallback(() => {
+    clearPhotoCache()
     setState({ status: AUTH_STATUS.SIGNED_OUT, user: null, error: null, sessionEndedBy: null })
   }, [])
 

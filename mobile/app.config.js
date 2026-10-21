@@ -12,6 +12,15 @@
 // que estar RESTRINGIDA en Google Cloud a esta app (nombre de paquete + huella SHA-1) y a "Maps SDK for Android".
 // No se commitea: sale de mobile/.env en local y de las variables de entorno de EAS en los builds.
 
+import { fileURLToPath } from 'node:url'
+
+import { loadProjectEnv } from '@expo/env'
+
+// `expo export` lee esta configuración ANTES de cargar mobile/.env (lo carga recién al empaquetar; `expo start` sí lo
+// carga primero), así que sin esto falla con "Falta EXPO_PUBLIC_API_URL" aunque el .env la tenga. Es la misma carga
+// que hace Expo CLI: no pisa variables ya definidas (EAS, terminal) y respeta EXPO_NO_DOTENV.
+loadProjectEnv(fileURLToPath(new URL('.', import.meta.url)), { mode: process.env.NODE_ENV, silent: true })
+
 // Identificador de la app en Android (`package`) e iOS (`bundleIdentifier`). Es permanente: no se cambia una vez
 // publicada, y la clave de Google Maps se restringe a este paquete + la huella SHA-1 del certificado de firma.
 const APP_ID = 'com.junte.app'
@@ -91,6 +100,8 @@ export default ({ config }) => ({
     'expo-dev-client',
     // Tokens en Keychain / Keystore.
     'expo-secure-store',
+    // Fotos de perfil con caché en disco (la URL firmada cambia; la caché va por la ruta sin firma).
+    'expo-image',
     // Foto de perfil: solo se elige de la galería (no se pide acceso a la cámara).
     ['expo-image-picker', { photosPermission: 'junte necesita acceder a tus fotos para que elijas tu foto de perfil.', cameraPermission: false, microphonePermission: false }],
     '@react-native-community/datetimepicker',

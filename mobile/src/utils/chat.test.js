@@ -1,4 +1,4 @@
-import { MESSAGE_STATUS, createClientId, formatMessageTime, mergeMessages, mergeRecoveredPage, sortMessages } from './chat.js'
+import { GROUP_WINDOW_MS, MESSAGE_STATUS, createClientId, formatMessageTime, mergeMessages, mergeRecoveredPage, messageGroupPosition, sortMessages } from './chat.js'
 
 const message = (id, createdAt, extra = {}) => ({ id, planId: 'p1', sender: { id: 'u1', name: 'Ana' }, type: 'text', text: id, clientId: null, createdAt, ...extra })
 const sent = (id, createdAt, extra) => ({ ...message(id, createdAt, extra), status: MESSAGE_STATUS.SENT })
@@ -71,6 +71,43 @@ describe('mergeMessages', () => {
   })
 })
 
+describe('mergeMessages: identidad de lo que no cambió', () => {
+  const photo = (signature) => `https://bucket.s3.amazonaws.com/users/u1/foto.jpg?X-Amz-Expires=600&X-Amz-Signature=${signature}`
+  const withPhoto = (id, createdAt, signature) => message(id, createdAt, { sender: { id: 'u1', name: 'Ana', photoUrl: photo(signature) } })
+
+  it('si llegan los mismos mensajes devuelve la misma lista', () => {
+    const current = mergeMessages([], [message('m2', '2026-10-14T10:01:00Z'), message('m1', '2026-10-14T10:00:00Z')])
+
+    expect(mergeMessages(current, [message('m1', '2026-10-14T10:00:00Z'), message('m2', '2026-10-14T10:01:00Z')])).toBe(current)
+  })
+
+  it('si solo cambió la firma de la foto conserva los objetos (y la URL que ya se cargó)', () => {
+    const current = mergeMessages([], [withPhoto('m1', '2026-10-14T10:00:00Z', 'a')])
+
+    const merged = mergeMessages(current, [withPhoto('m1', '2026-10-14T10:00:00Z', 'b')])
+
+    expect(merged).toBe(current)
+    expect(merged[0].sender.photoUrl).toBe(photo('a'))
+  })
+
+  it('con un mensaje nuevo conserva los objetos de los que no cambiaron', () => {
+    const current = mergeMessages([], [withPhoto('m1', '2026-10-14T10:00:00Z', 'a')])
+
+    const merged = mergeMessages(current, [withPhoto('m2', '2026-10-14T10:01:00Z', 'b'), withPhoto('m1', '2026-10-14T10:00:00Z', 'b')])
+
+    expect(ids(merged)).toEqual(['m2', 'm1'])
+    expect(merged[1]).toBe(current[0])
+  })
+
+  it('si cambió algo del mensaje o la foto es otra, lo reemplaza', () => {
+    const current = mergeMessages([], [withPhoto('m1', '2026-10-14T10:00:00Z', 'a')])
+    const otherPhoto = { ...withPhoto('m1', '2026-10-14T10:00:00Z', 'a'), sender: { id: 'u1', name: 'Ana', photoUrl: 'https://bucket.s3.amazonaws.com/users/u1/otra.jpg?X-Amz-Signature=c' } }
+
+    expect(mergeMessages(current, [{ ...withPhoto('m1', '2026-10-14T10:00:00Z', 'a'), text: 'editado' }])[0].text).toBe('editado')
+    expect(mergeMessages(current, [otherPhoto])[0].sender.photoUrl).toContain('otra.jpg')
+  })
+})
+
 describe('mergeRecoveredPage', () => {
   it('con mensajes en común solo suma los que faltaban', () => {
     const current = [sent('m2', '2026-10-14T10:02:00Z'), sent('m1', '2026-10-14T10:01:00Z')]
@@ -124,5 +161,95 @@ describe('formatMessageTime', () => {
 
   it('una fecha inválida no rompe', () => {
     expect(formatMessageTime('ayer', now)).toBe('')
+  })
+})
+
+describe('messageGroupPosition', () => {
+  // Hora local (el corte de día es el del teléfono).
+  const at = (hours, minutes) => new Date(2026, 9, 25, hours, minutes).toISOString()
+  const from = (senderId, createdAt) => sent(`${senderId}-${createdAt}`, createdAt, { sender: { id: senderId, name: senderId } })
+  // Del más nuevo al más viejo, como la lista invertida.
+  const positions = (oldestFirst) => {
+    const list = [...oldestFirst].reverse()
+    return list.map((_, index) => messageGroupPosition(list, index)).reverse()
+  }
+
+  it('agrupa los seguidos de la misma persona: nombre en el primero (arriba) y avatar en el último (abajo)', () => {
+    expect(positions([from('ana', at(14, 0)), from('ana', at(14, 2)), from('ana', at(14, 6))])).toEqual([
+      { isFirst: true, isLast: false },
+      { isFirst: false, isLast: false },
+      { isFirst: false, isLast: true }
+    ])
+  })
+
+  it('corta el grupo si cambia quien escribe', () => {
+    expect(positions([from('ana', at(14, 0)), from('beto', at(14, 1)), from('ana', at(14, 2))])).toEqual([
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true }
+    ])
+  })
+
+  it('corta el grupo con 5 minutos o más entre uno y el siguiente', () => {
+    expect(positions([from('ana', at(14, 0)), from('ana', at(14, 5))])).toEqual([
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true }
+    ])
+  })
+
+  it('corta el grupo al cambiar de día, aunque pasen menos de 5 minutos', () => {
+    expect(positions([from('ana', at(23, 58)), from('ana', new Date(2026, 9, 26, 0, 1).toISOString())])).toEqual([
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true }
+    ])
+  })
+
+  // Borde implementado (y documentado en pendientes.md: "a menos de 5 minutos"): 5 min justos ya cortan.
+  it('el borde de la ventana: 5 min - 1 ms agrupa, 5 min justos cortan', () => {
+    const base = new Date(2026, 9, 25, 14, 0).getTime()
+    const iso = (offset) => new Date(base + offset).toISOString()
+
+    expect(positions([from('ana', iso(0)), from('ana', iso(GROUP_WINDOW_MS - 1))])).toEqual([
+      { isFirst: true, isLast: false },
+      { isFirst: false, isLast: true }
+    ])
+    expect(positions([from('ana', iso(0)), from('ana', iso(GROUP_WINDOW_MS))])).toEqual([
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true }
+    ])
+    expect(positions([from('ana', iso(0)), from('ana', iso(GROUP_WINDOW_MS + 1))])).toEqual([
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true }
+    ])
+  })
+
+  it('corta el grupo de 23:59 a 00:01 (2 minutos, pero otro día)', () => {
+    expect(positions([from('ana', new Date(2026, 9, 25, 23, 59).toISOString()), from('ana', new Date(2026, 9, 26, 0, 1).toISOString())])).toEqual([
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: true }
+    ])
+  })
+
+  it('lee la lista invertida: en el índice 0 (el más nuevo) va el avatar, en el último índice el nombre', () => {
+    // Sin el helper `positions`: la lista tal como la recibe la FlatList invertida.
+    const newestFirst = [from('ana', at(14, 4)), from('ana', at(14, 2)), from('ana', at(14, 0))]
+
+    expect(messageGroupPosition(newestFirst, 0)).toEqual({ isFirst: false, isLast: true })
+    expect(messageGroupPosition(newestFirst, 1)).toEqual({ isFirst: false, isLast: false })
+    expect(messageGroupPosition(newestFirst, 2)).toEqual({ isFirst: true, isLast: false })
+  })
+
+  it('cambio de persona en el medio: cada tramo es su propio grupo', () => {
+    expect(positions([from('ana', at(14, 0)), from('ana', at(14, 1)), from('beto', at(14, 2)), from('ana', at(14, 3)), from('ana', at(14, 4))])).toEqual([
+      { isFirst: true, isLast: false },
+      { isFirst: false, isLast: true },
+      { isFirst: true, isLast: true },
+      { isFirst: true, isLast: false },
+      { isFirst: false, isLast: true }
+    ])
+  })
+
+  it('un mensaje solo es primero y último a la vez', () => {
+    expect(messageGroupPosition([from('ana', at(14, 0))], 0)).toEqual({ isFirst: true, isLast: true })
   })
 })

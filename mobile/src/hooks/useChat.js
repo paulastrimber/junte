@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { toApiError } from '../services/api/client.js'
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import { listMessages, sendMessage } from '../services/api/messages.js'
 import { OUTBOX_STATUS, OUTBOX_TYPE, connectivity, isTransportFailure, outbox, readCache, readThrough } from '../services/offline/index.js'
 import { SOCKET_STATUS, socketService } from '../services/socket.js'
 import { MESSAGE_STATUS, createClientId, mergeMessages, mergeRecoveredPage, sortMessages } from '../utils/chat.js'
+import { CHAT_ERROR_MESSAGES, toViewError } from '../utils/errorMessages.js'
 import { useIsForeground } from './useOffline.js'
 
 export const CHAT_STATUS = Object.freeze({ LOADING: 'loading', READY: 'ready', ERROR: 'error' })
@@ -21,6 +21,10 @@ const PAGE_SIZE = 30
 const TRANSPORT_FAILURES = new Set([CLIENT_ERROR_CODES.NETWORK_ERROR, CLIENT_ERROR_CODES.TIMEOUT])
 // Se perdió el acceso al chat (p. ej. se dio de baja del plan): no hay nada que reintentar.
 const ACCESS_LOST = new Set(['FORBIDDEN', 'NOT_FOUND'])
+
+// Errores del chat listos para pintar: el mismo `code` (FORBIDDEN, NOT_FOUND…) significa otra cosa que en el resto
+// de la app, por eso lleva sus propios textos.
+const chatError = (failure) => toViewError(failure, CHAT_ERROR_MESSAGES)
 
 const INITIAL_STATE = Object.freeze({
   status: CHAT_STATUS.LOADING,
@@ -47,7 +51,7 @@ function fromOutbox (item, author) {
     createdAt: item.createdAt,
     status: failed ? MESSAGE_STATUS.FAILED : MESSAGE_STATUS.PENDING,
     queued: !failed,
-    error: item.error ? new ApiError(item.error) : null
+    error: item.error ? chatError(new ApiError(item.error)) : null
   }
 }
 
@@ -72,6 +76,8 @@ function withQueued (messages, queued) {
  * @param {{ id: string, name: string | null, photoUrl: string | null, reputation?: number } | null} options.user  Quien escribe (autor de los pendientes).
  * @param {boolean} [options.isActive]  La pantalla está en primer plano: solo entonces hace polling.
  * @param {string} [options.planTitle]  Para mostrar los pendientes fuera del chat.
+ * Errores (`ViewError`): `error` (no se pudo cargar o se perdió el acceso), `loadOlderError` y el `error` de cada
+ * mensaje que no se envió.
  */
 export function useChat (planId, { user, isActive = true, planTitle = null }) {
   const [state, setState] = useState(INITIAL_STATE)
@@ -118,7 +124,7 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
       }))
     } catch (failure) {
       if (generation !== generationRef.current) return
-      setState((current) => ({ ...INITIAL_STATE, status: CHAT_STATUS.ERROR, messages: current.messages, error: toApiError(failure) }))
+      setState((current) => ({ ...INITIAL_STATE, status: CHAT_STATUS.ERROR, messages: current.messages, error: chatError(failure) }))
     }
   }, [planId, cacheKey, queuedMessages])
 
@@ -143,11 +149,13 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
         const { messages, isReplaced } = mergeRecoveredPage(current.messages, page)
         // Si se estaba mostrando lo guardado, el cursor para ir hacia atrás es el de la página nueva.
         const nextCursor = isReplaced || current.savedAt ? page.nextCursor : current.nextCursor
+        // Sin nada nuevo (lo normal en cada tick del polling) se devuelve el mismo estado: React no vuelve a pintar.
+        if (messages === current.messages && nextCursor === current.nextCursor && !current.savedAt) return current
         return { ...current, messages, nextCursor, savedAt: null }
       })
     } catch (failure) {
       if (generation !== generationRef.current) return
-      const error = toApiError(failure)
+      const error = chatError(failure)
       if (ACCESS_LOST.has(error.code)) setState((current) => ({ ...current, status: CHAT_STATUS.ERROR, error }))
     }
   }, [planId, cacheKey])
@@ -162,9 +170,12 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
     const stopStatus = socketService.onStatusChange(setSocketStatus)
     const unsubscribe = socketService.subscribe(
       planId,
-      (message) => setState((current) => ({ ...current, messages: mergeMessages(current.messages, [message]) })),
-      (error) => {
-        if (ACCESS_LOST.has(error.code)) setState((current) => ({ ...current, status: CHAT_STATUS.ERROR, error }))
+      (message) => setState((current) => {
+        const messages = mergeMessages(current.messages, [message])
+        return messages === current.messages ? current : { ...current, messages }
+      }),
+      (failure) => {
+        if (ACCESS_LOST.has(failure?.code)) setState((current) => ({ ...current, status: CHAT_STATUS.ERROR, error: chatError(failure) }))
       },
       // Un admin lo ocultó: deja de verse (el historial ya no lo trae).
       (messageId) => setState((current) => ({ ...current, messages: current.messages.filter((message) => message.id !== messageId) }))
@@ -200,7 +211,7 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
       setState((current) => ({ ...current, messages: mergeMessages(current.messages, page.items), nextCursor: page.nextCursor, isLoadingOlder: false }))
     } catch (failure) {
       if (generation !== generationRef.current) return
-      setState((current) => ({ ...current, isLoadingOlder: false, loadOlderError: toApiError(failure) }))
+      setState((current) => ({ ...current, isLoadingOlder: false, loadOlderError: toViewError(failure) }))
     } finally {
       if (generation === generationRef.current) isLoadingOlderRef.current = false
     }
@@ -225,8 +236,9 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
       if (outcome.result) setState((current) => ({ ...current, messages: mergeMessages(current.messages, [outcome.result]) }))
       return
     }
-    markUnsent(item.payload.clientId, { status: MESSAGE_STATUS.FAILED, queued: false, error: outcome.error })
-    showAccessLost(outcome.error)
+    const error = chatError(outcome.error)
+    markUnsent(item.payload.clientId, { status: MESSAGE_STATUS.FAILED, queued: false, error })
+    showAccessLost(error)
   }), [planId, markUnsent, showAccessLost])
 
   const deliver = useCallback(async ({ clientId, text }) => {
@@ -246,7 +258,7 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
       }
       setState((current) => ({ ...current, messages: mergeMessages(current.messages, [saved]) }))
     } catch (failure) {
-      const error = toApiError(failure)
+      const error = chatError(failure)
       if (isTransportFailure(error)) return enqueue()
       markUnsent(clientId, { status: MESSAGE_STATUS.FAILED, queued: false, error })
       showAccessLost(error)
