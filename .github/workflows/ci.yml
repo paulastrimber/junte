@@ -67,7 +67,7 @@ jobs:
         run: docker compose -f infra/docker-compose.dev.yml run --rm --no-deps nginx nginx -t
 
   infra:
-    name: Infra (cfn-lint)
+    name: Infra (cfn-lint, shellcheck)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -76,3 +76,5 @@ jobs:
         run: pipx install cfn-lint==1.57.0
       - name: cfn-lint
         run: cfn-lint --regions us-east-1 -- infra/templates/*.yml
+      - name: shellcheck de infra/scripts
+        run: docker run --rm -v "$PWD/infra/scripts:/scripts:ro" koalaman/shellcheck:v0.11.0 -s bash /scripts/aws.sh

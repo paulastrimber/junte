@@ -139,12 +139,42 @@ tasks:
 
   # ── Infra (CloudFormation) ───────────────────────────────────────
   infra:lint:
-    desc: cfn-lint de infra/templates (en Docker, misma versión que CI; no usa credenciales de AWS)
+    desc: cfn-lint de infra/templates y shellcheck de infra/scripts (en Docker, mismas versiones que CI; sin credenciales de AWS)
     cmds:
       - >-
         docker run --rm -v "$PWD/infra:/infra:ro" -w /infra python:3.13.15-slim
         sh -c 'pip install -q --disable-pip-version-check --root-user-action=ignore cfn-lint==1.57.0
         && cfn-lint --regions us-east-1 -- templates/*.yml'
+      - docker run --rm -v "$PWD/infra/scripts:/scripts:ro" koalaman/shellcheck:v0.11.0 -s bash /scripts/aws.sh
+
+  # ── AWS (despliegue) ─────────────────────────────────────────────
+  # ENV=dev (cuenta A, perfil junte-dev) o ENV=entrega (cuenta B, perfil junte-entrega).
+  # Piden confirmación antes de crear o borrar (YES=1 la omite). Ver docs/infra/plan-aws.md.
+  aws:up:
+    desc: 'Enciende la sesión en AWS: egress, redis, back y front (cobran por hora)'
+    vars: { ENV: '{{.ENV | default "dev"}}' }
+    cmds: ['bash infra/scripts/aws.sh up {{.ENV}}']
+
+  aws:down:
+    desc: Apaga la sesión (front, back, redis, egress) y verifica que no quede nada cobrando
+    vars: { ENV: '{{.ENV | default "dev"}}' }
+    cmds: ['bash infra/scripts/aws.sh down {{.ENV}}']
+
+  aws:status:
+    desc: Qué stacks existen, qué cobra por hora y si la API responde
+    vars: { ENV: '{{.ENV | default "dev"}}' }
+    cmds: ['bash infra/scripts/aws.sh status {{.ENV}}']
+
+  aws:deploy:
+    desc: 'Un solo stack con change set y confirmación (STACK=network|base|dns|mongo|egress|redis|back|front, PARAMS="Clave=Valor ...")'
+    vars: { ENV: '{{.ENV | default "dev"}}' }
+    requires: { vars: [STACK] }
+    cmds: ['bash infra/scripts/aws.sh deploy {{.ENV}} {{.STACK}} {{.PARAMS}}']
+
+  back:release:
+    desc: Construye la imagen del back (linux/amd64), la sube a ECR y actualiza las instancias de a una
+    vars: { ENV: '{{.ENV | default "dev"}}' }
+    cmds: ['bash infra/scripts/aws.sh release {{.ENV}}']
 
   # ── App móvil ────────────────────────────────────────────────────
   mobile:start:
