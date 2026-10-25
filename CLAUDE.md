@@ -156,7 +156,8 @@ task ci           # lint + tests + migraciones + nginx -t (antes de cada PR)
 task front:smoke  # smoke test de Nginx contra el entorno local
 task aws:up ENV=dev     # enciende la sesión en AWS (egress, redis, back, front); aws:down la apaga
 task aws:status ENV=dev # qué stacks hay, qué cobra por hora y si la API responde
-task back:release ENV=dev # imagen del back (linux/amd64) a ECR y actualización de las instancias de a una
+task back:release ENV=dev # imagen del back (linux/amd64) a ECR, migraciones y actualización de las instancias de a una
+task aws:mongo-init ENV=dev # replica set (1 o 3 nodos), usuarios, secreto mongo-app-uri y backup cada hora; aws:migrate, aws:backup
 task --list       # todo lo demás
 ```
 

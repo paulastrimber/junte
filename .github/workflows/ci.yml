@@ -76,5 +76,5 @@ jobs:
         run: pipx install cfn-lint==1.57.0
       - name: cfn-lint
         run: cfn-lint --regions us-east-1 -- infra/templates/*.yml
-      - name: shellcheck de infra/scripts
-        run: docker run --rm -v "$PWD/infra/scripts:/scripts:ro" koalaman/shellcheck:v0.11.0 -s bash /scripts/aws.sh
+      - name: shellcheck de los scripts de AWS
+        run: docker run --rm -v "$PWD/infra:/infra:ro" koalaman/shellcheck:v0.11.0 -s bash /infra/scripts/aws.sh /infra/mongo/aws/init-replica-set.sh /infra/mongo/aws/create-app-uri.sh /infra/mongo/aws/verify-replica-set.sh /infra/mongo/aws/install-backup.sh /infra/mongo/aws/migrate.sh

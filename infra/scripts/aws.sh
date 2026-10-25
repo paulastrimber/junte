@@ -6,7 +6,10 @@
 #   aws.sh down    <env>                 la apaga (al revés) y verifica que no quede nada cobrando
 #   aws.sh status  <env>                 qué stacks existen, qué cobra por hora y si la API responde
 #   aws.sh deploy  <env> <stack> [K=V…]  un solo stack, con change set y confirmación
-#   aws.sh release <env>                 construye la imagen del back, la sube a ECR y actualiza las instancias
+#   aws.sh release <env>                 construye la imagen del back, la sube a ECR, migra y actualiza las instancias
+#   aws.sh mongo-init <env>              replica set, usuarios, secreto mongo-app-uri y backup (1 o 3 nodos)
+#   aws.sh migrate <env> [tag]           migraciones y catálogos desde una instancia del back
+#   aws.sh backup  <env>                 dispara un backup de MongoDB a S3 ahora
 #
 # <env> es dev (cuenta A, perfil junte-dev) o entrega (cuenta B, perfil junte-entrega).
 # Pide confirmación antes de crear o borrar (YES=1 la omite). Nunca imprime el ID de la cuenta ni
@@ -16,6 +19,7 @@ set -euo pipefail
 REGION=us-east-1
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 TEMPLATES=$ROOT/infra/templates
+MONGO_SCRIPTS=$ROOT/infra/mongo/aws
 # Los de sesión cobran por hora: se encienden y se borran en cada sesión. Los permanentes no se borran nunca desde acá.
 SESSION_STACKS='egress redis back front'
 ALL_STACKS='network base dns mongo egress redis back front'
@@ -26,7 +30,7 @@ redact () { sed -E 's/[0-9]{12}/<cuenta>/g'; }
 info () { printf '\n==> %s\n' "$*"; }
 
 usage () {
-  sed -n '5,9p' "$0" | sed 's/^# \{0,1\}//' >&2
+  sed -n '5,12p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -223,6 +227,7 @@ cmd_up () {
   deploy_stack egress
   deploy_stack redis
   deploy_stack back
+  run_migrations ''
   sync_nginx_config
   deploy_stack front
 
@@ -320,6 +325,7 @@ cmd_release () {
     echo "Imagen subida. $(stack_name back) no está encendido: la va a usar cuando se despliegue (task aws:up)."
     return
   fi
+  run_migrations "$tag"
   local target_group id
   target_group=$(output_of back BackTargetGroupArn)
   [ -n "$target_group" ] || die "$(stack_name back) no tiene el output BackTargetGroupArn: actualizalo con task aws:deploy ENV=$ENV_NAME STACK=back"
@@ -329,6 +335,138 @@ cmd_release () {
   local url; url=$(output_of front ApiUrl)
   if [ -n "$url" ]; then wait_health "$url" || true; fi
   echo "Back actualizado a $tag."
+}
+
+# ssm_run <instancia> <script> [Clave=Valor…]: corre un script de infra/mongo/aws por Session Manager con esas
+# variables de entorno (sin comillas simples en los valores) y muestra su salida. Falla si el script falla.
+ssm_run () {
+  local id=$1 script=$2; shift 2
+  local parameters command_id status _
+  # shellcheck disable=SC2016 # los ${…} son de JavaScript, no de bash
+  parameters=$(node -e '
+    const [file, ...vars] = process.argv.slice(1)
+    const lines = []
+    for (const pair of vars) {
+      const i = pair.indexOf("=")
+      const value = pair.slice(i + 1)
+      if (i < 1 || value.includes("\x27")) { console.error(`variable inválida: ${pair}`); process.exit(1) }
+      lines.push(`export ${pair.slice(0, i)}=\x27${value}\x27`)
+    }
+    lines.push(...require("fs").readFileSync(file, "utf8").split("\n"))
+    console.log(JSON.stringify({ commands: lines, executionTimeout: ["1800"] }))
+  ' "$script" "$@") || exit 1
+  command_id=$(aws_ ssm send-command --instance-ids "$id" --document-name AWS-RunShellScript \
+    --comment "junte $(basename "$script")" --parameters "$parameters" --query Command.CommandId --output text)
+  # Sin `ssm wait`: se rinde a los ~8 minutos y un backup o muchas migraciones pueden tardar más.
+  status=Pending
+  for _ in $(seq 1 360); do
+    status=$(aws_ ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --query Status --output text 2>/dev/null || echo Pending)
+    case "$status" in Pending | InProgress | Delayed) sleep 5 ;; *) break ;; esac
+  done
+  aws_ ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --query StandardOutputContent --output text | redact
+  if [ "$status" != Success ]; then
+    aws_ ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --query StandardErrorContent --output text | redact | tail -20 >&2
+    die "falló $(basename "$script") en $id ($status)"
+  fi
+}
+
+wait_ssm_online () {
+  local id=$1 _ ping=''
+  for _ in $(seq 1 60); do
+    ping=$(aws_ ssm describe-instance-information --filters "Key=InstanceIds,Values=$id" \
+      --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)
+    if [ "$ping" = Online ]; then return 0; fi
+    sleep 10
+  done
+  die "$id no aparece en Session Manager después de 10 minutos"
+}
+
+# Espera a que el arranque del nodo deje el contenedor de Mongo corriendo (baja la imagen por el NAT).
+wait_mongo_running () {
+  local id=$1 _ check
+  check=$(mktemp)
+  # shellcheck disable=SC2016 # se evalúa en la instancia, no acá
+  echo '[ "$(docker inspect -f "{{.State.Running}}" mongo 2>/dev/null)" = true ]' > "$check"
+  for _ in $(seq 1 40); do
+    if ssm_run "$id" "$check" >/dev/null 2>&1; then rm -f "$check"; return 0; fi
+    sleep 15
+  done
+  rm -f "$check"
+  die "en $id el contenedor de Mongo no arrancó en 10 minutos: ¿está encendido egress? (el nodo baja Docker y la imagen por el NAT)"
+}
+
+mongo_nodes () {
+  local name
+  for name in NodeAInstanceId NodeBInstanceId NodeCInstanceId; do output_of mongo "$name"; done | grep . || true
+}
+
+# run_migrations <tag>: migraciones y catálogos desde la primera instancia del back ('' = el tag que corre).
+run_migrations () {
+  local tag=$1 id hosts
+  id=$(output_of back BackAInstanceId)
+  hosts=$(output_of mongo MongoHosts)
+  [ -n "$id" ] || die "falta $(stack_name back): las migraciones corren desde una instancia del back (task aws:up)"
+  [ -n "$hosts" ] || die "falta $(stack_name mongo)"
+  info "Migraciones y catálogos (desde $id${tag:+, imagen $tag})"
+  wait_ssm_online "$id"
+  ssm_run "$id" "$MONGO_SCRIPTS/migrate.sh" "ENV_NAME=$ENV_NAME" "REGION=$REGION" "HOSTS=$hosts" "IMAGE_TAG=$tag"
+}
+
+cmd_mongo_init () {
+  preflight
+  require_stack mongo 'paso 1.6'
+  require_stack base 'pasos 1.1 y 1.2'
+  local hosts bucket nodes first id
+  hosts=$(output_of mongo MongoHosts)
+  bucket=$(output_of base OpsBucket)
+  nodes=$(mongo_nodes | tr '\n' ' ')
+  first=${nodes%% *}
+  echo "Replica set rs0: $hosts"
+  echo "Inicia el replica set y los usuarios (lo que falte), crea o actualiza junte/$ENV_NAME/mongo-app-uri (0,40 USD/mes)"
+  echo "e instala en cada nodo el backup cada hora a s3://$bucket/backups/ (el primero corre enseguida)."
+  confirm '¿Seguir?'
+  for id in $nodes; do
+    info "Esperando a $id (Session Manager y contenedor de Mongo)"
+    wait_ssm_online "$id"
+    wait_mongo_running "$id"
+  done
+  info "Replica set y usuarios (en $first)"
+  ssm_run "$first" "$MONGO_SCRIPTS/init-replica-set.sh" "ENV_NAME=$ENV_NAME" "REGION=$REGION" "HOSTS=$hosts"
+  info 'Secreto mongo-app-uri'
+  ssm_run "$first" "$MONGO_SCRIPTS/create-app-uri.sh" "ENV_NAME=$ENV_NAME" "REGION=$REGION" "HOSTS=$hosts"
+  for id in $nodes; do
+    info "Backup periódico en $id"
+    ssm_run "$id" "$MONGO_SCRIPTS/install-backup.sh" "ENV_NAME=$ENV_NAME" "REGION=$REGION" "OPS_BUCKET=$bucket"
+  done
+  info 'Verificación'
+  ssm_run "$first" "$MONGO_SCRIPTS/verify-replica-set.sh" "ENV_NAME=$ENV_NAME" "REGION=$REGION" "HOSTS=$hosts"
+}
+
+cmd_migrate () {
+  preflight
+  require_stack mongo 'paso 1.6'
+  require_stack back 'paso 1.8: task aws:up'
+  echo "Aplica las migraciones pendientes y suma los catálogos nuevos en junte (usuario junte_migrations)."
+  confirm '¿Migrar?'
+  run_migrations "${1:-}"
+}
+
+cmd_backup () {
+  preflight
+  require_stack mongo 'paso 1.6'
+  local bucket id check
+  bucket=$(output_of base OpsBucket)
+  echo "Dispara el backup en cada nodo (lo hace uno solo) y lo sube a s3://$bucket/backups/."
+  confirm '¿Hacer el backup ahora?'
+  check=$(mktemp)
+  echo 'systemctl start junte-mongo-backup.service; journalctl -u junte-mongo-backup.service -n 2 --no-pager -o cat' > "$check"
+  for id in $(mongo_nodes); do
+    info "$id"
+    ssm_run "$id" "$check" || { rm -f "$check"; exit 1; }
+  done
+  rm -f "$check"
+  info 'Últimos backups'
+  aws_ s3 ls "s3://$bucket/backups/" | tail -5
 }
 
 [ $# -ge 2 ] || usage
@@ -346,6 +484,9 @@ case "$COMMAND" in
   down) cmd_down ;;
   status) cmd_status ;;
   release) cmd_release ;;
+  mongo-init) cmd_mongo_init ;;
+  migrate) cmd_migrate "$@" ;;
+  backup) cmd_backup ;;
   deploy)
     [ $# -ge 1 ] || die "falta el stack (opciones: $ALL_STACKS)"
     preflight

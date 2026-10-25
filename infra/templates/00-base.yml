@@ -409,9 +409,9 @@ Resources:
                   - !Ref MongoMigrationsSecret
                   - !Ref MongoBackupSecret
                   - !Ref MongoKeyFileSecret
-              - Sid: Backups
+              - Sid: Backups # DeleteObject: el backup sube .partial, lo renombra al terminar y borra los fallidos
                 Effect: Allow
-                Action: [s3:PutObject, s3:GetObject]
+                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
                 Resource: !Sub '${OpsBucket.Arn}/backups/*'
               - Sid: BackupsList # para elegir qué backup restaurar
                 Effect: Allow
