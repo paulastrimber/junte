@@ -307,8 +307,10 @@ cmd_release () {
   confirm '¿Construir y subir la imagen del back?'
 
   # Las EC2 t3 son x86_64: desde una Mac con Apple Silicon hay que construir para linux/amd64.
+  # Sin provenance ni SBOM, Docker sube una sola imagen y no un índice con anexos: el escaneo de
+  # ECR analiza imágenes (no índices) y la regla "conservar las últimas 5" cuenta cada pieza.
   info "Construyendo back-service (target prod, linux/amd64)"
-  docker build --platform linux/amd64 --target prod -t "$repository:$tag" -t "$repository:latest" "$ROOT/back-service" 2>&1 | redact
+  docker build --platform linux/amd64 --provenance=false --sbom=false --target prod -t "$repository:$tag" -t "$repository:latest" "$ROOT/back-service" 2>&1 | redact
   info 'Subiendo a ECR'
   aws_ ecr get-login-password | docker login --username AWS --password-stdin "${repository%%/*}" >/dev/null
   docker push --quiet "$repository:$tag" | redact
