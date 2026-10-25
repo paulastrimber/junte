@@ -2,7 +2,7 @@
 
 Plan de trabajo de la responsable de AWS: qué hay hecho, qué falta, en qué orden hacerlo, cuánto cuesta y cómo verificarlo.
 
-**Estado (2026-10-19):** en la cuenta A están desplegados `junte-dev-network` (pasos 1.3 y 1.4, `10-network.yml`) y `junte-dev-base` (pasos 1.1 y 1.2, `00-base.yml`; evidencia en [docs/evidencia/](../evidencia/s1-base-pasos-1.1-1.2.md)). Escritos y validados con `cfn-lint` (también en CI), sin desplegar todavía: `01-dns-cert.yml`, `20-egress.yml`, `30-redis.yml`, `31-mongo.yml`, `40-back.yml` y `50-front.yml` (pasos 1.5 a 1.9). Para desplegar `01-dns-cert` falta el dominio (`ZoneName`), y `40-back` usa la lectura de secretos por SDK del back (implementada el 2026-10-21, sin probar en AWS).
+**Estado (2026-10-25):** en la cuenta A están desplegados `junte-dev-network` (pasos 1.3 y 1.4), `junte-dev-base` (pasos 1.1 y 1.2) y `junte-dev-mongo` (paso 1.6: replica set `rs0` de 1 nodo inicializado, usuarios creados y secreto `junte/dev/mongo-app-uri`). `junte-dev-egress` (paso 1.5) se probó y se enciende y apaga por sesión. Evidencia en [docs/evidencia/](../evidencia/). Faltan: dominio (pedido por GitHub Education) para `dns`, `redis`, la imagen del back y `back` y `front`. Los comandos de despliegue son `task aws:*` y `task back:release` (ver [Rutina de cada sesión](#rutina-de-cada-sesión)).
 
 Escrito el 2026-10-12 a partir del informe de arquitectura (`docs/junte.pdf`), `CLAUDE.md`, `docs/` e `infra/`.
 
