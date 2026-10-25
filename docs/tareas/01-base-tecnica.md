@@ -13,9 +13,9 @@
 - [x] ✅ **S1-INF-02 · docker-compose de desarrollo** (`infra/docker-compose.dev.yml`): MongoDB replica set de 1 nodo (con `rs.initiate` automático), Redis, back con recarga, Nginx con la config real.
   *Acepta:* `task up` levanta todo; `curl localhost:8080/health` → 200; `curl localhost:8080/api/v1/...` llega al back como `/internal/...`.
 - [x] ✅ **S1-INF-03 · Taskfile** con los comandos de [Taskfile.yml](../../Taskfile.yml) funcionando.
-- [ ] 🔄 **S1-INF-04 · CI** (GitHub Actions): lint, tests back, migraciones up/down/up, tests app, `nginx -t`.
+- [x] ✅ **S1-INF-04 · CI** (GitHub Actions): lint, tests back, migraciones up/down/up, tests app, `nginx -t`; desde el 2026-10-21 también `cfn-lint` de `infra/templates/` y `shellcheck` de los scripts de AWS.
   *Acepta:* un PR con un test roto queda en rojo.
-  *Estado:* `.github/workflows/ci.yml` escrito y sus pasos verificados localmente con `task ci`; falta ver el primer run en GitHub (no se hizo push).
+  *Estado:* corre en cada PR y en `main`. Quedó en rojo del 15 al 19/10 por dos tests del chat con fecha fija, hasta el arreglo del #14.
 
 ## Back service
 
@@ -25,7 +25,7 @@
   *Acepta:* sin `MONGO_URI` el proceso no arranca y dice qué falta.
 - [x] ✅ **S1-BE-03 · Middlewares base:** `requestId`, `httpLogger` (pino con `redact`), `notFound`, `errorHandler`, `AppError` + catálogo.
   *Acepta:* test de contrato: ruta inexistente → 404 `{ code: 'NOT_FOUND', message, requestId }`, sin stack.
-- [x] ✅ **S1-BE-04 · `GET /internal/health`**: 200 si Mongo y Redis responden, 503 si no.
+- [x] ✅ **S1-BE-04 · `GET /internal/health`**: 503 si Mongo no responde; con Redis caído, 200 y `status: 'degraded'` (cambio del 2026-10-19, #15: si no, el ALB interno sacaba a todas las instancias).
 - [x] ✅ **S1-BE-05 · Modelos Mongoose** de las 7 colecciones según [07](../arquitectura/07-modelo-de-datos.md), incluidos `role` y `status` en `users`. `autoIndex: false`, `autoCreate: false`.
 - [x] ✅ **S1-BE-06 · migrate-mongo** configurado (ESM) + migraciones iniciales: una por colección con sus índices, validadores `$jsonSchema` críticos.
   *Acepta:* `task db:migrate` sobre base vacía crea todos los índices de la tabla; `down` los elimina.
@@ -49,26 +49,34 @@
 
 ## Infraestructura AWS
 
-⛔ **Traspaso al equipo de AWS.** Fuera del alcance del equipo de la app: lo implementan y cierran las personas que se encargan de AWS (decidido 2026-10-11). Las tareas siguen abiertas en este tablero hasta que ellas las marquen.
+⛔ **Traspaso al equipo de AWS.** Fuera del alcance del equipo de la app: lo implementan y cierran las personas que se encargan de AWS (decidido 2026-10-11).
+
+**Estado (2026-10-25, Paula):** templates de los 8 stacks en `infra/templates/`, comandos `task aws:*` y `task back:release`. En la cuenta A (dev, versión reducida) están desplegados y verificados la red, la base, MongoDB, Redis y el back detrás del ALB interno ([evidencia](../evidencia/)). Falta el dominio para el paso 1.9 (pedido por GitHub Education). La topología completa (3 nodos de MongoDB, 2 NAT, 2 back, 2 Nginx) se monta en la cuenta B en el sprint 7. Detalle en [plan-aws.md](../infra/plan-aws.md).
 
 **Qué necesitan saber del lado de la app y el back:**
 
 - **Decisiones que les tocan** (propuestas en [pendientes](../pendientes.md)): [Redis](../pendientes.md#redis) (ElastiCache con réplica en la otra AZ), cómo corre el back en EC2 (contenedor con el target `prod` del `Dockerfile` o proceso con systemd) y [TLS interno](../pendientes.md#tls-interno).
-- **Secretos:** `src/config/index.js` deja `resolveSecrets(env)` como punto de extensión. Falta elegir entre SDK al arrancar (`@aws-sdk/client-secrets-manager`) o variables inyectadas por user-data/systemd. Hasta entonces `NODE_ENV=production` rechaza `JWT_SECRET` con valores del repo.
+- ✅ **Secretos:** decidido SDK al arrancar e implementado (`src/config/secrets.js`, #21/#22): con `JWT_SECRET_ID` y `MONGO_URI_SECRET_ID` el back lee `JWT_SECRET` y `MONGO_URI` de Secrets Manager. Probado en AWS el 2026-10-25.
 - **Variables que el back exige:** `MONGO_URI`, `MONGO_DB_NAME`, `REDIS_URL`, `JWT_SECRET` (ver `back-service/.env.example`). Desde el Sprint 2 se suman `S3_BUCKET` y `AWS_REGION` (opcionales en desarrollo/test, **obligatorias con `NODE_ENV=production`**; ver `.env.example`). No hay credenciales en el código: usa el rol IAM de la instancia.
-- **S3 (lo necesita el Sprint 2 para fotos):** bucket privado con Block Public Access. El rol del back necesita `s3:PutObject` y `s3:GetObject` sobre el bucket (`HeadObject` se autoriza con `GetObject`); las claves llevan prefijo del dueño (`users/<userId>/…`, `plans/<planId>/…`). Sin CORS: la app móvil no es un navegador.
+- **S3 (lo necesita el Sprint 2 para fotos):** bucket privado con Block Public Access. El rol del back necesita `s3:PutObject`, `s3:GetObject` y `s3:DeleteObject` sobre `users/*` y `plans/*`, y `s3:ListBucket` sobre el bucket (sin él, `HeadObject` de una clave inexistente da 403 en vez de 404; ver el rol en `infra/templates/00-base.yml`); las claves llevan prefijo del dueño (`users/<userId>/…`, `plans/<planId>/…`). Sin CORS: la app móvil no es un navegador.
 - **Dominios y DNS (S1-INF-10):** cuando existan, reemplazar los `*.invalid` de `mobile/eas.json`. Hasta entonces `app.config.js` aborta los builds de `preview` y `production`.
 - **Health checks de los ALB:** público → Nginx `/health`; interno → `/internal/health` en `:3000`. Ambos con idle timeout de 300 s.
 - **Verificación pendiente de punta a punta:** el proxy WebSocket de Nginx (upgrade, 300 s) solo se probará con Socket.io en el Sprint 5.
 
-- [ ] ⛔ **S1-INF-05 · VPC:** subredes públicas (2 AZ), privadas de borde y aplicación (2 AZ), de datos (3 AZ); IGW; **NAT por AZ**; tablas de rutas; VPC endpoints (S3, Secrets Manager, Logs, SSM).
-- [ ] ⛔ **S1-INF-06 · Security Groups** con la cadena de [02](../arquitectura/02-comunicacion-y-red.md#matriz-de-security-groups).
-- [ ] ⛔ **S1-INF-07 · S3 privado, Secrets Manager, roles IAM** de mínimo privilegio, Redis privado.
-- [ ] ⛔ **S1-INF-08 · MongoDB replica set** de 3 nodos en 3 AZ, autenticación, usuario de la app, migraciones aplicadas.
+- [x] ✅ **S1-INF-05 · VPC:** subredes públicas (2 AZ), privadas de borde y aplicación (2 AZ), de datos (3 AZ); IGW; **NAT por AZ**; tablas de rutas; VPC endpoints (S3, Secrets Manager, Logs, SSM).
+  *Estado:* `10-network.yml` y `20-egress.yml` (Paula, #12 y #19). Desplegado en dev con **1 NAT** (desvío temporal de ADR-0005, documentado en el plan); el NAT por zona y los endpoints de interfaz están en los parámetros de entrega y se verifican en la cuenta B (S7-QA-07). Evidencia: PR #12 (red) y [NAT](../evidencia/s1-pasos-1.5-1.6-egress-mongo.md).
+- [x] ✅ **S1-INF-06 · Security Groups** con la cadena de [02](../arquitectura/02-comunicacion-y-red.md#matriz-de-security-groups).
+  *Estado:* los seis grupos, sin el 22 ni el 80 y sin salida "todo permitido" (#12). La prueba de aislamiento con todas las capas encendidas es S7-QA-04.
+- [x] ✅ **S1-INF-07 · S3 privado, Secrets Manager, roles IAM** de mínimo privilegio, Redis privado.
+  *Estado:* `00-base.yml` y `30-redis.yml` (#13, #19); fotos privadas (URL sin firma → 403), 7 secretos, Redis en ElastiCache detrás de `sg-redis`. **Limitación:** los roles por capa están escritos detrás de `CreateIamRoles`, pero el lab no permite crearlos (todas las EC2 usan `LabInstanceProfile`). Evidencia: [base](../evidencia/s1-base-pasos-1.1-1.2.md) y [Redis y back](../evidencia/s1-pasos-1.7-1.8-redis-back.md).
+- [ ] 🔄 (Paula) **S1-INF-08 · MongoDB replica set** de 3 nodos en 3 AZ, autenticación, usuario de la app, migraciones aplicadas.
   *Acepta:* `rs.status()` con 3 miembros; apagar el primario elige otro.
-- [ ] ⛔ **S1-INF-09 · ALB interno** (:3000, health `/internal/health`, **idle 300 s**) + back en 2 AZ.
+  *Estado:* en dev, replica set de **1 nodo** con autenticación, `keyFile`, 4 usuarios de mínimo privilegio, transacciones, 20 migraciones y los 14 índices obligatorios ([evidencia](../evidencia/s1-pasos-1.5-1.6-egress-mongo.md)). El replica set de 3 nodos y la elección de primario se probaron en Docker local; **falta en AWS (cuenta B, `task aws:mongo-init`)**.
+- [ ] 🔄 (Paula) **S1-INF-09 · ALB interno** (:3000, health `/internal/health`, **idle 300 s**) + back en 2 AZ.
+  *Estado:* `40-back.yml` desplegado en dev con **1 instancia**: destino `healthy`, el back lee los secretos con el SDK y su health da Mongo y Redis `up` ([evidencia](../evidencia/s1-pasos-1.7-1.8-redis-back.md)). **Falta en AWS:** 2 instancias en 2 AZ (cuenta B) y probar el ALB interno desde Nginx (necesita S1-INF-10).
 - [ ] ⛔ **S1-INF-10 · Nginx en 2 AZ + ALB público** (443, ACM, :8080, **idle 300 s**), DNS.
   *Acepta:* `https://<dominio>/health` → 200; las instancias no tienen IP pública; desde Internet no responden 8080/3000/22.
+  *Estado:* bloqueada por el dominio (pedido por GitHub Education). `01-dns-cert.yml` y `50-front.yml` escritos y validados con `cfn-lint` (#20).
 
 ## Documentación
 
