@@ -1,0 +1,4 @@
+[
+  { "ParameterKey": "Env", "ParameterValue": "entrega" },
+  { "ParameterKey": "CreateCertificate", "ParameterValue": "false" }
+]

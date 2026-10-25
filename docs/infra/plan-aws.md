@@ -2,7 +2,7 @@
 
 Plan de trabajo de la responsable de AWS: qué hay hecho, qué falta, en qué orden hacerlo, cuánto cuesta y cómo verificarlo.
 
-**Estado (2026-10-19):** en la cuenta A están desplegados `junte-dev-network` (pasos 1.3 y 1.4, `10-network.yml`) y `junte-dev-base` (pasos 1.1 y 1.2, `00-base.yml`; evidencia en [docs/evidencia/](../evidencia/s1-base-pasos-1.1-1.2.md)). Escritos y validados con `cfn-lint` (también en CI), sin desplegar todavía: `20-egress.yml`, `30-redis.yml` y `31-mongo.yml` (pasos 1.5 a 1.7). Faltan `01-dns-cert.yml`, `40-back.yml` y `50-front.yml`.
+**Estado (2026-10-19):** en la cuenta A están desplegados `junte-dev-network` (pasos 1.3 y 1.4, `10-network.yml`) y `junte-dev-base` (pasos 1.1 y 1.2, `00-base.yml`; evidencia en [docs/evidencia/](../evidencia/s1-base-pasos-1.1-1.2.md)). Escritos y validados con `cfn-lint` (también en CI), sin desplegar todavía: `01-dns-cert.yml`, `20-egress.yml`, `30-redis.yml`, `31-mongo.yml`, `40-back.yml` y `50-front.yml` (pasos 1.5 a 1.9). Para desplegar `01-dns-cert` falta el dominio (`ZoneName`), y `40-back` necesita que el back lea los secretos con el SDK (ver [pendientes](../pendientes.md)).
 
 Escrito el 2026-10-12 a partir del informe de arquitectura (`docs/junte.pdf`), `CLAUDE.md`, `docs/` e `infra/`.
 
@@ -62,6 +62,10 @@ Hecho:
   - `30-redis`: ElastiCache `ReplicationGroup`, Redis 7.1, 1 nodo o primario y réplica con failover (`NodeCount`), sin TLS en tránsito ni `AuthToken` (límite documentado), cifrado en reposo. Exporta `junte-<env>-RedisUrl` para `40-back`.
   - `31-mongo`: 1 o 3 EC2 Amazon Linux 2023 con Docker y `mongo:9.0.2-noble`, IP privada fija (`10.0.30.10`, `10.0.31.10`, `10.0.32.10`), disco de datos gp3 cifrado con `DeletionPolicy: Snapshot`, IMDSv2 y la clave del replica set leída de Secrets Manager. `rs.initiate`, los usuarios y `mongo-app-uri` siguen siendo pasos a mano del 1.6.
 - `cfn-lint` de `infra/templates/` en CI (job `infra`) y en `task ci` (`task infra:lint`, en Docker).
+- `infra/templates/01-dns-cert.yml`, `40-back.yml` y `50-front.yml` con sus parámetros, **sin desplegar**:
+  - `01-dns-cert`: zona de Route 53 del subdominio (`ZoneName`, a completar) y certificado ACM de `api.<zona>` validado por DNS. Dos pasadas: zona (`CreateCertificate=false`), delegación a mano con los 4 NS del output, y después el certificado. Queda siempre creado.
+  - `40-back`: ALB interno (idle 300 s, sin stickiness, health `/internal/health`) y 1 o 2 EC2 con la imagen de ECR, logs `awslogs` e IMDSv2 con 2 saltos para que el contenedor use el rol. Pasa los nombres de los secretos, no los valores. Exporta el DNS del ALB interno.
+  - `50-front`: ALB público solo 443 (TLS 1.2/1.3, sin access logs), 1 o 2 EC2 con `nginx:1.30.5-alpine` y los mismos montajes que en local (configuración desde `s3://<OpsBucket>/nginx/`) y el registro alias `api.<zona>`. Output `ApiUrl` para `mobile/eas.json`.
 
 Tareas abiertas:
 
@@ -84,7 +88,7 @@ Las tres primeras bloquean S1. Va la recomendación de cada una.
 |----------|---------------|---------|
 | **Redis** (ElastiCache o EC2) | ElastiCache, nodo `cache.t4g.micro`. Con réplica en la otra AZ en "entrega", un solo nodo en "dev" | Es la propuesta de `pendientes.md`. Sin TLS en tránsito, para que `REDIS_URL` siga siendo `redis://` (límite ya documentado). Si el lab no permite ElastiCache, plan B: Redis en Docker en una EC2 |
 | **Cómo corre el back en EC2** | Contenedor Docker con el target `prod`, imagen en ECR. Nginx con la imagen oficial, igual que en local | El `Dockerfile` ya existe y los templates de Nginx dependen del entrypoint de la imagen oficial. Mismo artefacto en local y en AWS |
-| **Cómo llegan los secretos** | Destino: SDK al arrancar (`resolveSecrets`), que es lo que dice el informe en 5.3. Puente para no frenar S1: el script de arranque de la instancia lee los secretos y los pasa al contenedor como variables | El SDK necesita un cambio en el back (dependencia `@aws-sdk/client-secrets-manager`). El puente no toca código |
+| **Cómo llegan los secretos** | ✅ **Decidido (2026-10-21): SDK al arrancar** (`resolveSecrets`), lo que dice el informe en 5.3. `40-back.yml` le pasa al contenedor solo los nombres de los secretos (`JWT_SECRET_ID`, `MONGO_URI_SECRET_ID`) | Necesita el cambio en el back (dependencia `@aws-sdk/client-secrets-manager`); hasta entonces el back no arranca en AWS. Se descartó el puente por script de arranque |
 | **TLS interno** | Dejarlo como límite documentado | Ya está aceptado en `pendientes.md` |
 | **VPC endpoints de interfaz** | Encendidos solo en "entrega" | Son el segundo rubro más caro. El informe los da como opcionales ("se podrán usar"). El de S3 es gratis y va siempre |
 
@@ -178,7 +182,7 @@ Dos fines de semana olvidados se llevan una cuenta entera.
 | | Ensayo y demo (3 sesiones completas) | 5 |
 | | **Total, con tope en 30 de 40** | **unos 17** |
 
-Con lo que sobra en B se puede dejar la topología completa encendida unos **2 días seguidos**, no más. **A preguntar a los docentes:** si necesitan que el sistema quede accesible para corregir, y cuántos días.
+Con lo que sobra en B se puede dejar la topología completa encendida unos **2 días seguidos**, no más. ✅ **Docentes (2026-10-21):** no hace falta dejar el sistema encendido para la corrección; el crédito de B queda para las pruebas del sprint 7 y la demo.
 
 ## 4. Seguridad de la cuenta
 
@@ -268,7 +272,7 @@ Cada paso indica qué es, cómo se hace, qué hace falta antes, cómo se verific
 - **Verificación:** `aws sts get-caller-identity` responde con cada perfil.
 
 **0.5 · Cerrar las decisiones**
-- **Qué es:** confirmar con el equipo las de [Decisiones que están esperando](#decisiones-que-están-esperando) y el subdominio a usar (por ejemplo `dev.<dominio>` y `app.<dominio>`).
+- **Qué es:** confirmar con el equipo las de [Decisiones que están esperando](#decisiones-que-están-esperando) y el subdominio a usar. ✅ Decidido (2026-10-21): `dev.<dominio>` en la cuenta A (perfil `preview` de la app) y `app.<dominio>` en la B (perfil `production`); la API queda en `api.dev.<dominio>` y `api.app.<dominio>`. Falta confirmar el dominio.
 - **Verificación:** anotadas en `docs/pendientes.md` por quien esté editando ese archivo.
 - **Lo necesita:** back (secretos y contenedor), app (dominio).
 
@@ -511,11 +515,11 @@ Si no se llega a borrar antes de que venza la sesión, hay que abrir otra para h
 Cosas que aparecieron al armar este plan y que resuelven otras personas:
 
 - ✅ **Back · Redis y el health check** (resuelto el 2026-10-19). `/internal/health` respondía 503 si Redis no contestaba, y el ALB interno habría sacado a todas las instancias. Ahora el 503 depende solo de MongoDB y Redis caído es 200 con `status: 'degraded'` ([06-api.md](../arquitectura/06-api.md#salud)). En AWS, una caída de Redis no se ve en los destinos del ALB: hay que mirar el cuerpo del health o una alarma de ElastiCache (S6).
-- **Back · secretos.** Decidir entre SDK y variables (paso 0.5) y acordar los nombres de los secretos.
+- **Back · secretos.** Decidido SDK (2026-10-21). Falta implementarlo en `resolveSecrets()` y confirmar los nombres de variable propuestos en [pendientes](../pendientes.md).
 - **Back · `trust proxy`.** Si el back usa `req.ip`, configurarlo acorde a la cadena ALB, Nginx, ALB.
 - **Back · migraciones.** Se corren a mano antes de cada versión, con un usuario distinto al de la app.
 - **Nginx · logs.** Salida estándar del contenedor y qué hacer con el error log (paso 6.1).
 - **App · dominios.** Reemplazar los `*.invalid` de `mobile/eas.json` cuando exista el subdominio. HTTP sin cifrar solo funciona en el build de desarrollo.
 - **App · `android.package`** y el proyecto de Firebase: bloquean la clave de Google Maps y el push.
 - **Docs.** `docs/tareas/01-base-tecnica.md` lista permisos de S3 incompletos; valen los de `pendientes.md`. Y `pendientes.md` puede marcar como resueltas las decisiones de Redis, contenedor y secretos cuando se confirmen.
-- **Docentes.** Si el sistema tiene que quedar encendido para la corrección y cuántos días.
+- ✅ **Docentes.** No hace falta dejar el sistema encendido para la corrección (2026-10-21).

@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  junte - ALB interno y back service en EC2 (S1-INF-09; paso 1.8 del plan). 1 o 2 instancias
+  con la imagen de ECR. Los secretos los lee el back con el SDK: aca solo van sus nombres.
+  Stack de encender y apagar: el ALB cobra por hora.
+
+# Tags: project y env llegan con --tags al desplegar y CloudFormation los propaga.
+# Acá cada recurso que lo admite lleva Name (junte-<env>-<recurso>) y layer.
+# Necesita network, base, redis, mongo (con mongo-app-uri cargado) y egress encendido.
+
+Parameters:
+  Env:
+    Type: String
+    AllowedValues: [dev, entrega]
+  BackCount:
+    Type: Number
+    AllowedValues: [1, 2]
+    Default: 1
+    Description: 1 = una instancia (dev). 2 = una por zona (entrega).
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues: [t3.micro, t3.small, t3.medium]
+  ImageTag:
+    Type: String
+    Default: latest
+    AllowedPattern: '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'
+    Description: Tag de la imagen del back en ECR (junte-<env>-back).
+  MongoDbName:
+    Type: String
+    Default: junte
+    Description: Valor de MONGO_DB_NAME (el mismo que en back-service/.env.example).
+  LogLevel:
+    Type: String
+    Default: info
+    AllowedValues: [debug, info, warn, error]
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Conditions:
+  TwoBacks: !Equals [!Ref BackCount, 2]
+
+# Arranque de una instancia del back (solo el primer boot; después --restart always la levanta).
+# No lee secretos: el back los resuelve con el SDK a partir de JWT_SECRET_ID y MONGO_URI_SECRET_ID
+# (propuesta de contrato en docs/pendientes.md). Reintenta hasta que egress esté arriba.
+Mappings:
+  Bootstrap:
+    Script:
+      Body: |
+        #!/bin/bash
+        set -euo pipefail
+        until dnf install -y docker; do sleep 15; done
+        systemctl enable --now docker
+
+        TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')
+        INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+
+        REGISTRY=$(echo "$REPOSITORY_URI" | cut -d/ -f1)
+        until aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"; do sleep 15; done
+        until docker pull "$REPOSITORY_URI:$IMAGE_TAG"; do sleep 15; done
+
+        docker rm -f back 2>/dev/null || true
+        docker run -d --name back --restart always -p 3000:3000 \
+          --log-driver awslogs --log-opt awslogs-region="$REGION" \
+          --log-opt awslogs-group="$LOG_GROUP" --log-opt awslogs-stream="back-$INSTANCE_ID" \
+          -e NODE_ENV=production -e PORT=3000 -e LOG_LEVEL="$LOG_LEVEL" \
+          -e MONGO_DB_NAME="$MONGO_DB_NAME" -e REDIS_URL="$REDIS_URL" \
+          -e S3_BUCKET="$S3_BUCKET" -e AWS_REGION="$REGION" \
+          -e JWT_SECRET_ID="$JWT_SECRET_ID" -e MONGO_URI_SECRET_ID="$MONGO_URI_SECRET_ID" \
+          "$REPOSITORY_URI:$IMAGE_TAG"
+
+Resources:
+  # ---------------------------------------------------------------- ALB interno
+  # Sin IP pública: solo lo alcanza Nginx (sg-alb-interno). Idle de 300 s para los WebSocket;
+  # el back trae keepAliveTimeout de 305 s, mayor, como pide docs/arquitectura/02.
+
+  InternalLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Scheme: internal
+      Subnets:
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetA' }
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetB' }
+      SecurityGroups:
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-InternalAlbSecurityGroup' }
+      LoadBalancerAttributes:
+        - { Key: idle_timeout.timeout_seconds, Value: '300' }
+        - { Key: routing.http.drop_invalid_header_fields.enabled, Value: 'true' }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-alb-interno' }
+        - { Key: layer, Value: aplicacion }
+
+  # Health check exacto: /internal/health sin barra final (enrutado estricto). Desde el #15,
+  # Redis caído responde 200 y no saca a las instancias. Sin stickiness (ADR-0003).
+  BackTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: { 'Fn::ImportValue': !Sub 'junte-${Env}-VpcId' }
+      Protocol: HTTP
+      Port: 3000
+      TargetType: instance
+      HealthCheckPath: /internal/health
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher: { HttpCode: '200' }
+      TargetGroupAttributes:
+        - { Key: stickiness.enabled, Value: 'false' }
+        - { Key: deregistration_delay.timeout_seconds, Value: '30' }
+      Targets: !If
+        - TwoBacks
+        - [{ Id: !Ref BackA, Port: 3000 }, { Id: !Ref BackB, Port: 3000 }]
+        - [{ Id: !Ref BackA, Port: 3000 }]
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-tg-back' }
+        - { Key: layer, Value: aplicacion }
+
+  # HTTP sin TLS en este tramo interno (límite documentado en docs/arquitectura/02).
+  InternalListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref InternalLoadBalancer
+      Protocol: HTTP
+      Port: 3000
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref BackTargetGroup
+
+  # ---------------------------------------------------------------- Instancias del back
+  # IMDSv2 con 2 saltos: el contenedor (no solo la instancia) obtiene las credenciales del rol,
+  # que el SDK del back usa para S3 y Secrets Manager.
+
+  BackA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      SubnetId: { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetA' }
+      SecurityGroupIds:
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-BackSecurityGroup' }
+      IamInstanceProfile: { 'Fn::ImportValue': !Sub 'junte-${Env}-BackInstanceProfile' }
+      MetadataOptions: { HttpTokens: required, HttpPutResponseHopLimit: 2 }
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeSize: 10, VolumeType: gp3, Encrypted: true }
+      UserData:
+        Fn::Base64: !Sub
+          - "#!/bin/bash\nREGION='${AWS::Region}' REPOSITORY_URI='${RepositoryUri}' IMAGE_TAG='${ImageTag}' LOG_GROUP='${LogGroup}' LOG_LEVEL='${LogLevel}' MONGO_DB_NAME='${MongoDbName}' REDIS_URL='${RedisUrl}' S3_BUCKET='${PhotosBucket}' JWT_SECRET_ID='junte/${Env}/jwt-secret' MONGO_URI_SECRET_ID='junte/${Env}/mongo-app-uri' bash <<'BOOT'\n${Body}\nBOOT\n"
+          - RepositoryUri: { 'Fn::ImportValue': !Sub 'junte-${Env}-BackRepositoryUri' }
+            LogGroup: { 'Fn::ImportValue': !Sub 'junte-${Env}-BackLogGroup' }
+            RedisUrl: { 'Fn::ImportValue': !Sub 'junte-${Env}-RedisUrl' }
+            PhotosBucket: { 'Fn::ImportValue': !Sub 'junte-${Env}-PhotosBucket' }
+            Body: !FindInMap [Bootstrap, Script, Body]
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-back-a' }
+        - { Key: layer, Value: aplicacion }
+
+  BackB:
+    Type: AWS::EC2::Instance
+    Condition: TwoBacks
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      SubnetId: { 'Fn::ImportValue': !Sub 'junte-${Env}-AppSubnetB' }
+      SecurityGroupIds:
+        - { 'Fn::ImportValue': !Sub 'junte-${Env}-BackSecurityGroup' }
+      IamInstanceProfile: { 'Fn::ImportValue': !Sub 'junte-${Env}-BackInstanceProfile' }
+      MetadataOptions: { HttpTokens: required, HttpPutResponseHopLimit: 2 }
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeSize: 10, VolumeType: gp3, Encrypted: true }
+      UserData:
+        Fn::Base64: !Sub
+          - "#!/bin/bash\nREGION='${AWS::Region}' REPOSITORY_URI='${RepositoryUri}' IMAGE_TAG='${ImageTag}' LOG_GROUP='${LogGroup}' LOG_LEVEL='${LogLevel}' MONGO_DB_NAME='${MongoDbName}' REDIS_URL='${RedisUrl}' S3_BUCKET='${PhotosBucket}' JWT_SECRET_ID='junte/${Env}/jwt-secret' MONGO_URI_SECRET_ID='junte/${Env}/mongo-app-uri' bash <<'BOOT'\n${Body}\nBOOT\n"
+          - RepositoryUri: { 'Fn::ImportValue': !Sub 'junte-${Env}-BackRepositoryUri' }
+            LogGroup: { 'Fn::ImportValue': !Sub 'junte-${Env}-BackLogGroup' }
+            RedisUrl: { 'Fn::ImportValue': !Sub 'junte-${Env}-RedisUrl' }
+            PhotosBucket: { 'Fn::ImportValue': !Sub 'junte-${Env}-PhotosBucket' }
+            Body: !FindInMap [Bootstrap, Script, Body]
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-back-b' }
+        - { Key: layer, Value: aplicacion }
+
+# El export lo importa 50-front (NGINX_BACKEND): back se borra después de front.
+Outputs:
+  InternalAlbDns:
+    Description: DNS del ALB interno; NGINX_BACKEND = <este valor>:3000.
+    Value: !GetAtt InternalLoadBalancer.DNSName
+    Export: { Name: !Sub 'junte-${Env}-InternalAlbDns' }
+  BackAInstanceId:
+    Description: Para aws ssm start-session --target <id> (migraciones, diagnostico).
+    Value: !Ref BackA
+  BackBInstanceId:
+    Condition: TwoBacks
+    Value: !Ref BackB
