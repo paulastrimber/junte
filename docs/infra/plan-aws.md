@@ -498,14 +498,16 @@ Después de cada prueba que rompe algo, **volver a dejarlo como estaba** (rearra
 
 1. Start Lab, copiar las credenciales al perfil, confirmar cuál es la cuenta activa.
 2. Anotar el crédito usado.
-3. Desplegar en orden: `egress`, `redis` (y `mongo` si se había borrado), `back`, `front`.
-4. Comprobar `https://api.<subdominio>/api/v1/health` y avisar al equipo que está encendido.
+3. `task aws:up ENV=dev`: muestra la cuenta activa, comprueba que existan los stacks permanentes (`network`, `base`, `dns` con certificado, `mongo`) y la imagen del back en ECR, pide confirmación y despliega en orden `egress`, `redis`, `back`, sube la configuración de Nginx a S3 y despliega `front`. Al final consulta el health.
+4. Avisar al equipo que está encendido, con la URL que muestra.
+
+Si hay una versión nueva del back: `task back:release ENV=dev` (construye la imagen para `linux/amd64`, la sube a ECR con el commit como tag y `latest`, y actualiza las instancias de a una sacándolas del balanceador). Los stacks permanentes y la primera vez de cada stack: `task aws:deploy ENV=dev STACK=<stack> PARAMS="Clave=Valor ..."`, que muestra el change set y pide confirmación. `task aws:status ENV=dev` dice qué hay encendido.
 
 **Al terminar, siempre**
 
 1. Lanzar un backup si hay datos que conservar.
-2. Borrar en orden: `front`, `back`, `redis`, `egress`.
-3. Confirmar en la consola que no quedan NAT Gateways, balanceadores, clústeres de ElastiCache, endpoints de interfaz ni IP elásticas.
+2. `task aws:down ENV=dev`: borra en orden `front`, `back`, `redis` y `egress` (nunca los permanentes) y verifica que no queden NAT Gateways, balanceadores, Redis, IP elásticas ni endpoints de interfaz. Si queda algo, termina con error.
+3. Si hubo error, revisarlo en la consola antes de cerrar.
 4. Anotar el crédito usado.
 
 Si no se llega a borrar antes de que venza la sesión, hay que abrir otra para hacerlo. No dejarlo para el día siguiente.

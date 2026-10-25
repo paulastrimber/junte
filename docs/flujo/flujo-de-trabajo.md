@@ -94,7 +94,7 @@ En cada PR y push a `main`:
 4. Migraciones `up → down → up`.
 5. Tests de la app.
 6. `nginx -t` del front service.
-7. `cfn-lint` de los templates de CloudFormation (`infra/templates/`). No despliega ni usa credenciales de AWS.
+7. `cfn-lint` de los templates de CloudFormation (`infra/templates/`) y `shellcheck` de los scripts de despliegue (`infra/scripts/`). No despliega ni usa credenciales de AWS.
 
 Si CI está en rojo, no se revisa ni se mergea.
 
