@@ -2,7 +2,7 @@
 
 Plan de trabajo de la responsable de AWS: qué hay hecho, qué falta, en qué orden hacerlo, cuánto cuesta y cómo verificarlo.
 
-**Estado (2026-10-25):** en la cuenta A están desplegados `junte-dev-network` (pasos 1.3 y 1.4), `junte-dev-base` (pasos 1.1 y 1.2) y `junte-dev-mongo` (paso 1.6: replica set `rs0` de 1 nodo inicializado, usuarios creados y secreto `junte/dev/mongo-app-uri`). `junte-dev-egress` (paso 1.5) se probó y se enciende y apaga por sesión. Evidencia en [docs/evidencia/](../evidencia/). Faltan: dominio (pedido por GitHub Education) para `dns`, `redis`, la imagen del back y `back` y `front`. Los comandos de despliegue son `task aws:*` y `task back:release` (ver [Rutina de cada sesión](#rutina-de-cada-sesión)).
+**Estado (2026-10-25):** en la cuenta A están desplegados `junte-dev-network` (pasos 1.3 y 1.4), `junte-dev-base` (pasos 1.1 y 1.2) y `junte-dev-mongo` (paso 1.6: replica set `rs0` de 1 nodo, usuarios, secreto `junte/dev/mongo-app-uri`, 20 migraciones e índices). `egress`, `redis` y `back` se probaron (pasos 1.5, 1.7 y 1.8: el back lee los secretos con el SDK y su health da Mongo y Redis `up`) y se encienden y apagan por sesión. Evidencia en [docs/evidencia/](../evidencia/). Faltan el dominio (pedido por GitHub Education) para `dns` y `front` (paso 1.9). Los comandos de despliegue son `task aws:*` y `task back:release` (ver [Rutina de cada sesión](#rutina-de-cada-sesión)).
 
 Escrito el 2026-10-12 a partir del informe de arquitectura (`docs/junte.pdf`), `CLAUDE.md`, `docs/` e `infra/`.
 
