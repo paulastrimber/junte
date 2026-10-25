@@ -2,11 +2,14 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   junte - MongoDB replica set en EC2 (S1-INF-08; paso 1.6 del plan). 1 o 3 nodos, uno por
   zona, con Docker y la imagen de local y tests, IP privada fija y disco de datos aparte.
-  rs.initiate y los usuarios se crean una vez a mano por Session Manager.
+  El replica set, los usuarios y el backup los configura task aws:mongo-init (Session Manager).
 
 # Tags: project y env llegan con --tags al desplegar y CloudFormation los propaga.
 # Acá cada recurso que lo admite lleva Name (junte-<env>-<recurso>) y layer.
 # Necesita los stacks network y base, y egress encendido para bajar Docker y la imagen.
+# Después de crearlo: task aws:mongo-init ENV=<env> (rs.initiate con todos los hosts, usuarios, secreto
+# mongo-app-uri y backup periódico; scripts en infra/mongo/aws/). El backup no va en el UserData porque
+# este corre solo en el primer arranque: así también se instala y se actualiza en nodos existentes.
 
 Parameters:
   Env:
@@ -210,7 +213,7 @@ Resources:
         - { Key: Name, Value: !Sub 'junte-${Env}-mongo-c' }
         - { Key: layer, Value: datos }
 
-# Sin export: la URI del back se guarda entera como secreto (mongo-app-uri) en el paso 1.6.
+# Sin export: la URI del back se guarda entera como secreto (mongo-app-uri, lo crea task aws:mongo-init).
 Outputs:
   MongoHosts:
     Description: Hosts del replica set rs0, para rs.initiate y para armar mongo-app-uri.

@@ -139,13 +139,13 @@ tasks:
 
   # ── Infra (CloudFormation) ───────────────────────────────────────
   infra:lint:
-    desc: cfn-lint de infra/templates y shellcheck de infra/scripts (en Docker, mismas versiones que CI; sin credenciales de AWS)
+    desc: cfn-lint de infra/templates y shellcheck de los scripts de AWS (en Docker, mismas versiones que CI; sin credenciales de AWS)
     cmds:
       - >-
         docker run --rm -v "$PWD/infra:/infra:ro" -w /infra python:3.13.15-slim
         sh -c 'pip install -q --disable-pip-version-check --root-user-action=ignore cfn-lint==1.57.0
         && cfn-lint --regions us-east-1 -- templates/*.yml'
-      - docker run --rm -v "$PWD/infra/scripts:/scripts:ro" koalaman/shellcheck:v0.11.0 -s bash /scripts/aws.sh
+      - docker run --rm -v "$PWD/infra:/infra:ro" koalaman/shellcheck:v0.11.0 -s bash /infra/scripts/aws.sh /infra/mongo/aws/init-replica-set.sh /infra/mongo/aws/create-app-uri.sh /infra/mongo/aws/verify-replica-set.sh /infra/mongo/aws/install-backup.sh /infra/mongo/aws/migrate.sh
 
   # ── AWS (despliegue) ─────────────────────────────────────────────
   # ENV=dev (cuenta A, perfil junte-dev) o ENV=entrega (cuenta B, perfil junte-entrega).
@@ -172,9 +172,24 @@ tasks:
     cmds: ['bash infra/scripts/aws.sh deploy {{.ENV}} {{.STACK}} {{.PARAMS}}']
 
   back:release:
-    desc: Construye la imagen del back (linux/amd64), la sube a ECR y actualiza las instancias de a una
+    desc: Construye la imagen del back (linux/amd64), la sube a ECR, migra y actualiza las instancias de a una
     vars: { ENV: '{{.ENV | default "dev"}}' }
     cmds: ['bash infra/scripts/aws.sh release {{.ENV}}']
+
+  aws:mongo-init:
+    desc: 'MongoDB en AWS: replica set (1 o 3 nodos), usuarios, secreto mongo-app-uri y backup cada hora (se puede repetir)'
+    vars: { ENV: '{{.ENV | default "dev"}}' }
+    cmds: ['bash infra/scripts/aws.sh mongo-init {{.ENV}}']
+
+  aws:migrate:
+    desc: Migraciones y catálogos desde una instancia del back, con el usuario de migraciones (TAG=<imagen> opcional)
+    vars: { ENV: '{{.ENV | default "dev"}}' }
+    cmds: ['bash infra/scripts/aws.sh migrate {{.ENV}} {{.TAG}}']
+
+  aws:backup:
+    desc: Dispara ahora un backup de MongoDB a s3://<OpsBucket>/backups/ y muestra los últimos
+    vars: { ENV: '{{.ENV | default "dev"}}' }
+    cmds: ['bash infra/scripts/aws.sh backup {{.ENV}}']
 
   # ── App móvil ────────────────────────────────────────────────────
   mobile:start:

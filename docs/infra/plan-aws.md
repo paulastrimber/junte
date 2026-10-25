@@ -330,9 +330,9 @@ Objetivo del informe: topología multi-AZ, health checks de los dos ALB y acceso
 
 **1.6 · MongoDB** (S1-INF-08)
 - **Qué es:** la base. Tres nodos, uno por zona, que se replican; si cae el principal, otro toma su lugar. Las transacciones de cupos lo necesitan.
-- **Cómo:** CloudFormation, `31-mongo.yml`, parámetro `NodeCount` (1 o 3). EC2 Amazon Linux 2023 con Docker y la imagen `mongo:9.0.2-noble`, la misma de local y de los tests. IP privada fija por nodo, disco de datos aparte, sin IP pública. La inicialización se hace **una vez a mano** por Session Manager: `rs.initiate`, usuario administrador, usuario de la app con `readWrite` solo sobre su base, usuario de migraciones con permiso de índices y validadores, usuario de backup. Autenticación activada y clave interna entre nodos.
+- **Cómo:** CloudFormation, `31-mongo.yml`, parámetro `NodeCount` (1 o 3). EC2 Amazon Linux 2023 con Docker y la imagen `mongo:9.0.2-noble`, la misma de local y de los tests. IP privada fija por nodo, disco de datos aparte, sin IP pública. Después, **`task aws:mongo-init ENV=<env>`** (scripts en `infra/mongo/aws/`, por Session Manager): `rs.initiate` con todos los hosts (el primero con prioridad 2 para que gane la elección y se pueda usar la excepción de localhost; al final, todas en 1), usuario administrador (`root`), de la app (`readWrite` en `junte`), de migraciones (`readWrite` + `dbAdmin` en `junte`) y de backup (`backup`), el secreto `mongo-app-uri` con todos los hosts, el backup periódico (6.3) y las verificaciones. Se puede repetir: lo que ya existe se saltea. Autenticación activada y clave interna entre nodos (`keyFile`, del secreto `mongo-keyfile`).
 - **Antes:** pasos 1.2 a 1.5. La URI que usa el back se guarda entera como secreto, con los tres nodos y `replicaSet=rs0`.
-- **Después:** correr las migraciones (`npx migrate-mongo up`) y la carga de catálogos desde una instancia del back, con el usuario de migraciones.
+- **Después:** las migraciones y los catálogos, desde una instancia del back y con el usuario de migraciones: `task aws:up` los corre después de encender el back, `task back:release` antes de actualizar las instancias, y a mano `task aws:migrate ENV=<env>`.
 - **Verificación** (criterios de la tarea y del informe): `rs.status()` muestra 3 miembros; al detener el primario, otro pasa a primario en segundos y la API sigue respondiendo; conectarse sin usuario falla; todos los índices de `docs/arquitectura/07-modelo-de-datos.md` existen.
 - **Lo necesita:** back.
 
@@ -454,9 +454,10 @@ Sin recursos nuevos. Una sola cosa para tener presente:
 
 **6.3 · Backups de MongoDB** (S6-INF-03)
 - **Qué es:** una copia periódica de la base en S3.
-- **Cómo:** un temporizador de systemd en un nodo secundario corre `mongodump` con el usuario de backup, comprime y sube a `backups/` del bucket de operación. La regla de vencimiento de 14 días ya existe. Va en el arranque de `31-mongo.yml`.
-- **Ojo en el lab:** las instancias están detenidas fuera de las sesiones, así que un horario nocturno no corre nunca. Programarlo "al arrancar y cada hora", o lanzarlo a mano al cerrar cada sesión.
-- **Verificación:** hay un archivo nuevo en `backups/` con tamaño razonable.
+- **Cómo:** `task aws:mongo-init` instala en cada nodo `/opt/junte/backup-mongo.sh` y el timer de systemd `junte-mongo-backup` (`infra/mongo/aws/install-backup.sh`). Corre **15 minutos después de arrancar y cada hora**: las instancias del lab están detenidas fuera de las sesiones, un horario nocturno no correría nunca. Hace el dump un solo nodo: el único de un replica set de 1, o el primer secundario (por host) de 3, para no cargar al primario. `mongodump --archive --gzip` con el usuario de backup (la contraseña en un archivo de configuración `600`, no en la línea de comandos) directo a `s3://<OpsBucket>/backups/mongo-<env>-<fecha>.archive.gz`: primero como `.partial` y se renombra solo si terminó bien. La regla de vencimiento de 14 días ya existe. Para lanzarlo a mano (por ejemplo al cerrar la sesión): `task aws:backup ENV=<env>`.
+- **Por qué no en el `UserData` de `31-mongo.yml`:** corre solo en el primer arranque de cada instancia; cambiarlo detiene el nodo y no se vuelve a ejecutar. Instalado por `mongo-init`, llega también a los nodos existentes y se puede actualizar.
+- **Probado en local** (Docker, replica set de 3 nodos con `keyFile`): solo el primer secundario hace el dump; `mongodump` con la contraseña en archivo genera un `.archive.gz` que `mongorestore` restaura en una base vacía.
+- **Verificación:** hay un archivo nuevo en `backups/` con tamaño razonable (`task aws:backup` lo muestra). Pendiente en AWS: próxima sesión.
 
 **6.4 · Restauración probada** (S6-INF-04)
 - **Qué es:** demostrar que el backup sirve. Un backup que nunca se restauró no cuenta.
@@ -469,6 +470,14 @@ Sin recursos nuevos. Una sola cosa para tener presente:
 **7.1 · Desplegar "entrega" en la cuenta B**
 - **Qué es:** repetir los pasos 0.2 a 0.4 y 1.1 a 1.10 con los parámetros de `infra/parameters/entrega/`: 2 NAT, endpoints de interfaz, 3 nodos de MongoDB, 2 back, 2 Nginx, Redis con réplica.
 - **Antes:** el segundo subdominio delegado; el secreto de FCM cargado también en B; una clave de Google Maps para el perfil de entrega.
+- **Cómo** (credenciales de B en el perfil `junte-entrega`; cada `aws:deploy` muestra el change set y pide confirmación):
+  1. `task aws:deploy ENV=entrega STACK=network`, después `STACK=base`.
+  2. `task aws:deploy ENV=entrega STACK=dns PARAMS="ZoneName=app.<dominio>"`; **a mano**, los 4 NS del output en el registrador; cuando `dig NS app.<dominio>` los devuelva, `STACK=dns PARAMS="ZoneName=app.<dominio> CreateCertificate=true"`.
+  3. `STACK=egress` y `STACK=mongo` (3 nodos).
+  4. `task aws:mongo-init ENV=entrega`: replica set de 3 miembros, usuarios, `mongo-app-uri` con los 3 hosts y backup.
+  5. `task back:release ENV=entrega` desde `main` (B tiene su propio ECR).
+  6. `task aws:up ENV=entrega`: `redis`, `back`, migraciones, configuración de Nginx y `front`; muestra la URL de la API.
+  7. Al terminar cada sesión, `task aws:down ENV=entrega`.
 - **Verificación:** las mismas de los pasos 1.6 a 1.9.
 - **Lo necesita:** la app, para generar el APK con las URLs de producción (S7-MOB-01).
 
