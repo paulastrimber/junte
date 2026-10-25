@@ -2,7 +2,7 @@
 
 Plan de trabajo de la responsable de AWS: qué hay hecho, qué falta, en qué orden hacerlo, cuánto cuesta y cómo verificarlo.
 
-**Estado (2026-10-19):** en la cuenta A están desplegados `junte-dev-network` (pasos 1.3 y 1.4, `10-network.yml`) y `junte-dev-base` (pasos 1.1 y 1.2, `00-base.yml`; evidencia en [docs/evidencia/](../evidencia/s1-base-pasos-1.1-1.2.md)). Escritos y validados con `cfn-lint` (también en CI), sin desplegar todavía: `01-dns-cert.yml`, `20-egress.yml`, `30-redis.yml`, `31-mongo.yml`, `40-back.yml` y `50-front.yml` (pasos 1.5 a 1.9). Para desplegar `01-dns-cert` falta el dominio (`ZoneName`), y `40-back` necesita que el back lea los secretos con el SDK (ver [pendientes](../pendientes.md)).
+**Estado (2026-10-19):** en la cuenta A están desplegados `junte-dev-network` (pasos 1.3 y 1.4, `10-network.yml`) y `junte-dev-base` (pasos 1.1 y 1.2, `00-base.yml`; evidencia en [docs/evidencia/](../evidencia/s1-base-pasos-1.1-1.2.md)). Escritos y validados con `cfn-lint` (también en CI), sin desplegar todavía: `01-dns-cert.yml`, `20-egress.yml`, `30-redis.yml`, `31-mongo.yml`, `40-back.yml` y `50-front.yml` (pasos 1.5 a 1.9). Para desplegar `01-dns-cert` falta el dominio (`ZoneName`), y `40-back` usa la lectura de secretos por SDK del back (implementada el 2026-10-21, sin probar en AWS).
 
 Escrito el 2026-10-12 a partir del informe de arquitectura (`docs/junte.pdf`), `CLAUDE.md`, `docs/` e `infra/`.
 
@@ -515,7 +515,7 @@ Si no se llega a borrar antes de que venza la sesión, hay que abrir otra para h
 Cosas que aparecieron al armar este plan y que resuelven otras personas:
 
 - ✅ **Back · Redis y el health check** (resuelto el 2026-10-19). `/internal/health` respondía 503 si Redis no contestaba, y el ALB interno habría sacado a todas las instancias. Ahora el 503 depende solo de MongoDB y Redis caído es 200 con `status: 'degraded'` ([06-api.md](../arquitectura/06-api.md#salud)). En AWS, una caída de Redis no se ve en los destinos del ALB: hay que mirar el cuerpo del health o una alarma de ElastiCache (S6).
-- **Back · secretos.** Decidido SDK (2026-10-21). Falta implementarlo en `resolveSecrets()` y confirmar los nombres de variable propuestos en [pendientes](../pendientes.md).
+- ✅ **Back · secretos.** Decidido e implementado el SDK (2026-10-21): `JWT_SECRET_ID` y `MONGO_URI_SECRET_ID`, ver [pendientes](../pendientes.md). Falta probarlo en AWS (paso 1.8).
 - **Back · `trust proxy`.** Si el back usa `req.ip`, configurarlo acorde a la cadena ALB, Nginx, ALB.
 - **Back · migraciones.** Se corren a mano antes de cada versión, con un usuario distinto al de la app.
 - **Nginx · logs.** Salida estándar del contenedor y qué hacer con el error log (paso 6.1).

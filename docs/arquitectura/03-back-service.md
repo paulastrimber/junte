@@ -168,4 +168,4 @@ No se guarda en memoria nada que otra instancia necesite: ni sesiones, ni salas,
 
 ## Configuración
 
-`config/index.js` valida `process.env` con Zod al arrancar: si falta una variable, **el proceso no arranca**. En AWS los secretos se leen de Secrets Manager con el rol de la instancia; en desarrollo, de `.env` (que nunca se commitea). `.env.example` lista los nombres sin valores.
+`config/index.js` valida `process.env` con Zod al arrancar: si falta una variable, **el proceso no arranca**. En AWS los secretos se leen de Secrets Manager con el rol de la instancia: si el entorno trae `JWT_SECRET_ID` o `MONGO_URI_SECRET_ID` (el nombre del secreto, que pone `infra/templates/40-back.yml`), `config/secrets.js` los resuelve con el SDK antes de validar y completa `JWT_SECRET` y `MONGO_URI`; si un secreto no se puede leer, el proceso no arranca y el error nombra el secreto, nunca el valor. En desarrollo y tests esas variables no están y todo sale de `.env` (que nunca se commitea). `.env.example` lista los nombres sin valores.

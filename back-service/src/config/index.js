@@ -3,24 +3,20 @@
 // con código 1 y un mensaje que nombra las variables (sin sus valores).
 // En tests usar `loadConfig(env)` de ./env.js, que es puro y no termina el proceso.
 import { ConfigError, loadConfig } from './env.js'
+import { resolveSecrets } from './secrets.js'
 
 export { ConfigError, loadConfig }
 
-/**
- * Punto de extensión para producción: los secretos viven en AWS Secrets Manager.
- * TODO(S1-INF-07): definir cómo llegan los secretos a la instancia (SDK al arrancar vs. inyectados
- * como variables por el user-data/systemd) y, si es por SDK, agregar `@aws-sdk/client-secrets-manager`
- * y mezclar acá el secreto con `env`. Ver docs/pendientes.md (back-core).
- * @param {Record<string, string | undefined>} env
- * @returns {Promise<Record<string, string | undefined>>}
- */
-async function resolveSecrets (env) {
-  return env
+// El SDK se importa solo si hace falta: en local y en tests no hay *_SECRET_ID y no se carga.
+const createClient = async (options) => {
+  const { createSecretsManagerClient } = await import('../adapters/secretsManager.js')
+  return createSecretsManagerClient(options)
 }
 
 async function loadConfigOrExit (env) {
   try {
-    return loadConfig(await resolveSecrets(env))
+    // En AWS, JWT_SECRET y MONGO_URI salen de Secrets Manager (ver ./secrets.js).
+    return loadConfig(await resolveSecrets(env, { createClient }))
   } catch (err) {
     if (!(err instanceof ConfigError)) throw err
     // El logger todavía no existe (depende de LOG_LEVEL): stderr directo, sin valores.
