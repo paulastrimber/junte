@@ -14,7 +14,7 @@ Siete sprints de una semana, tal como el informe (sección 8). Cada sprint tiene
 
 | Sprint | Archivo | Entregable | Estado |
 |--------|---------|-----------|--------|
-| 1 | [01-base-tecnica.md](01-base-tecnica.md) | Estructura, entorno local, modelos + migraciones, topología AWS, `/health` por HTTPS | 🔄 (local ✅; AWS: red, base, MongoDB, Redis y back en dev ✅, falta el dominio para Nginx/ALB público/DNS y la topología completa en la cuenta B) |
+| 1 | [01-base-tecnica.md](01-base-tecnica.md) | Estructura, entorno local, modelos + migraciones, topología AWS, `/health` por HTTPS | 🔄 (local ✅; AWS en dev ✅ de punta a punta por HTTPS en `api.dev.junteapp.me`; falta la topología completa en la cuenta B: 3 nodos de MongoDB y 2 back) |
 | 2 | [02-auth-y-perfiles.md](02-auth-y-perfiles.md) | Registro, login, refresh, perfil y foto desde el teléfono | ✅ + 2b catálogos y onboarding (app sin probar en emulador/teléfono; el bucket S3 lo crea el equipo de AWS) |
 | 3 | [03-planes-y-feed.md](03-planes-y-feed.md) | CRUD de planes y feed geográfico recomendado, con filtros, costo y cupo ilimitado | ✅ (app probada en teléfono con Expo Go; falta la clave de Google Maps, los permisos de S3 sobre `plans/*` y subir la foto del plan desde la app) |
 | 4 | [04-inscripciones-asistencia.md](04-inscripciones-asistencia.md) | Inscripción transaccional, QR, check-in, reputación, `noShow` | ✅ (falta probar en teléfono la cámara y el QR, y los jobs con dos instancias reales) |

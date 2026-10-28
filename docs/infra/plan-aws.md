@@ -2,7 +2,7 @@
 
 Plan de trabajo de la responsable de AWS: qué hay hecho, qué falta, en qué orden hacerlo, cuánto cuesta y cómo verificarlo.
 
-**Estado (2026-10-25):** en la cuenta A están desplegados `junte-dev-network` (pasos 1.3 y 1.4), `junte-dev-base` (pasos 1.1 y 1.2) y `junte-dev-mongo` (paso 1.6: replica set `rs0` de 1 nodo, usuarios, secreto `junte/dev/mongo-app-uri`, 20 migraciones e índices). `egress`, `redis` y `back` se probaron (pasos 1.5, 1.7 y 1.8: el back lee los secretos con el SDK y su health da Mongo y Redis `up`) y se encienden y apagan por sesión. Evidencia en [docs/evidencia/](../evidencia/). Faltan el dominio (pedido por GitHub Education) para `dns` y `front` (paso 1.9). Los comandos de despliegue son `task aws:*` y `task back:release` (ver [Rutina de cada sesión](#rutina-de-cada-sesión)).
+**Estado (2026-10-28):** en la cuenta A está verificada la cadena completa del sprint 1: `https://api.dev.junteapp.me/api/v1/health` responde 200 por HTTPS con Mongo y Redis `up` (pasos 1.1 a 1.10). Quedan siempre creados `network`, `base`, `dns` (zona `dev.junteapp.me` y certificado) y `mongo` (replica set de 1 nodo); `egress`, `redis`, `back` y `front` se encienden y apagan por sesión con `task aws:up` / `task aws:down`. Evidencia en [docs/evidencia/](../evidencia/). Siguiente: la cuenta B (paso 7.1).
 
 Escrito el 2026-10-12 a partir del informe de arquitectura (`docs/junte.pdf`), `CLAUDE.md`, `docs/` e `infra/`.
 
@@ -12,7 +12,7 @@ Escrito el 2026-10-12 a partir del informe de arquitectura (`docs/junte.pdf`), `
 |------|-----------|--------------|
 | Cuenta | AWS Academy Learner Lab, **dos cuentas con 40 USD cada una**, las dos vacías | El crédito es un total, no mensual. Si se agota, la cuenta se desactiva y se pierde todo lo creado |
 | Región | `us-east-1` | La más barata y una de las dos que permite el lab |
-| Dominio | Ya hay uno, lo administra Paula | Se delega un subdominio a Route 53 una sola vez |
+| Dominio | **`junteapp.me`**, registrado en Namecheap a nombre de Paula (GitHub Student Developer Pack, 2026-10-28). Hasta entonces no había dominio | Se delega un subdominio por cuenta a Route 53, una sola vez: `dev.junteapp.me` en la A y `app.junteapp.me` en la B. La API queda en `api.<subdominio>` |
 | Acceso | Solo Paula entra a AWS | El resto del equipo recibe URLs, nombres de variables y evidencia |
 
 Uso propuesto de las dos cuentas:
@@ -272,7 +272,7 @@ Cada paso indica qué es, cómo se hace, qué hace falta antes, cómo se verific
 - **Verificación:** `aws sts get-caller-identity` responde con cada perfil.
 
 **0.5 · Cerrar las decisiones**
-- **Qué es:** confirmar con el equipo las de [Decisiones que están esperando](#decisiones-que-están-esperando) y el subdominio a usar. ✅ Decidido (2026-10-21): `dev.<dominio>` en la cuenta A (perfil `preview` de la app) y `app.<dominio>` en la B (perfil `production`); la API queda en `api.dev.<dominio>` y `api.app.<dominio>`. Falta confirmar el dominio.
+- **Qué es:** confirmar con el equipo las de [Decisiones que están esperando](#decisiones-que-están-esperando) y el subdominio a usar. ✅ Decidido (2026-10-21): `dev.<dominio>` en la cuenta A (perfil `preview` de la app) y `app.<dominio>` en la B (perfil `production`); la API queda en `api.dev.<dominio>` y `api.app.<dominio>`. Dominio: **`junteapp.me`** (2026-10-28), así que `https://api.dev.junteapp.me/api/v1` y `https://api.app.junteapp.me/api/v1`. `ZoneName` está en `infra/parameters/<env>/01-dns-cert.json`.
 - **Verificación:** anotadas en `docs/pendientes.md` por quien esté editando ese archivo.
 - **Lo necesita:** back (secretos y contenedor), app (dominio).
 
@@ -530,7 +530,7 @@ Cosas que aparecieron al armar este plan y que resuelven otras personas:
 - **Back · `trust proxy`.** Si el back usa `req.ip`, configurarlo acorde a la cadena ALB, Nginx, ALB.
 - **Back · migraciones.** Se corren a mano antes de cada versión, con un usuario distinto al de la app.
 - **Nginx · logs.** Salida estándar del contenedor y qué hacer con el error log (paso 6.1).
-- **App · dominios.** Reemplazar los `*.invalid` de `mobile/eas.json` cuando exista el subdominio. HTTP sin cifrar solo funciona en el build de desarrollo.
+- **App · dominios.** ✅ `preview` apunta a `https://api.dev.junteapp.me/api/v1` (2026-10-28). `production` sigue con `.invalid` hasta la cuenta B (`https://api.app.junteapp.me/api/v1`). HTTP sin cifrar solo funciona en el build de desarrollo.
 - **App · `android.package`** y el proyecto de Firebase: bloquean la clave de Google Maps y el push.
 - **Docs.** `docs/tareas/01-base-tecnica.md` lista permisos de S3 incompletos; valen los de `pendientes.md`. Y `pendientes.md` puede marcar como resueltas las decisiones de Redis, contenedor y secretos cuando se confirmen.
 - ✅ **Docentes.** No hace falta dejar el sistema encendido para la corrección (2026-10-21).
