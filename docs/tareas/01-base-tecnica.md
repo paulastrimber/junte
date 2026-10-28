@@ -6,6 +6,10 @@
 
 **Decidir antes:** [Redis](../pendientes.md#redis).
 
+**✅ Cerrado en dev (2026-10-28, decidido por Paula).** El objetivo se cumple: entorno local completo y la API respondiendo `/health` por HTTPS en `https://api.dev.junteapp.me` con los dos ALB sanos ([evidencia](../evidencia/s1-paso-1.9-dns-front.md)). Quedan abiertas, a propósito:
+- **S1-INF-08 y S1-INF-09** piden la topología completa (3 nodos de MongoDB, back en 2 AZ). En dev hay una instancia por capa para cuidar el crédito; se cierran en la cuenta B con **S7-QA-06** ([07](07-validacion-y-entrega.md)).
+- **S1-DOC-01 y S1-DOC-02**, a cargo del equipo: validar los pendientes y que alguien que no escribió el README haga el setup.
+
 ## Repositorio y entorno local
 
 - [x] ✅ **S1-INF-01 · Monorepo y convenciones.** Carpetas `mobile/`, `front-service/`, `back-service/`, `infra/`, `docs/`; `.gitignore`, `.editorconfig`, `.nvmrc`, plantilla de PR.
