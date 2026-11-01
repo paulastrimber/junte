@@ -209,11 +209,18 @@ if [ -n "$limited" ]; then
     || fail "con un X-Forwarded-For inventado el cliente externo evadió el límite ($(status spoof))"
 
   # Login y registro comparten la zona estricta; las variantes de la URL de login también.
-  # (La IP ya agotó la zona con la ráfaga: cualquier request de esa zona da 429.)
+  # (La IP ya agotó la zona con la ráfaga.) La zona repone de a poco (10 por minuto) y un request suelto
+  # puede pasar en cualquier momento; contra AWS pasó. Hasta 3 intentos seguidos: en la zona estricta al menos
+  # uno da 429; en la general (10 por segundo) no daría ninguno.
   for variant in auth/register auth/Login auth/LOGIN auth/login/ auth/Register/; do
-    request variant -X POST -H 'Content-Type: application/json' --data '{}' "$BASE_URL/api/v1/$variant"
-    [ "$(status variant)" = 429 ] && ok "/api/v1/$variant comparte el límite estricto (429)" \
-      || fail "/api/v1/$variant → $(status variant), se esperaba 429 (zona estricta)"
+    tries=()
+    for _ in 1 2 3; do
+      request variant -X POST -H 'Content-Type: application/json' --data '{}' "$BASE_URL/api/v1/$variant"
+      tries+=("$(status variant)")
+      if [ "$(status variant)" = 429 ]; then break; fi
+    done
+    if [ "$(status variant)" = 429 ]; then ok "/api/v1/$variant comparte el límite estricto (${tries[*]})"
+    else fail "/api/v1/$variant → ${tries[*]}, se esperaba 429 (zona estricta)"; fi
   done
 
   # Refresh, logout y logout-all usan la zona general: siguen respondiendo (el back, no Nginx)
