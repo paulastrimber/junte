@@ -34,13 +34,13 @@
 
 ## Infraestructura
 
-A cargo del equipo de AWS (decidido el 2026-10-14: el equipo de la app no toca `infra/`). El plan está en [plan-aws.md · Sprint 6](../infra/plan-aws.md#sprint-6--observabilidad-y-backups). Todo está en código; falta correrlo en una sesión de dev y guardar la evidencia.
+A cargo del equipo de AWS (decidido el 2026-10-14: el equipo de la app no toca `infra/`). El plan está en [plan-aws.md · Sprint 6](../infra/plan-aws.md#sprint-6--observabilidad-y-backups). Verificado en dev el 2026-11-01 ([evidencia](../evidencia/s6-backup-restore-3-nodos.md)); en la cuenta B se repite con S7-QA-09 y S7-QA-10.
 
-- [ ] 🔄 (Paula) **S6-INF-01 · CloudWatch**: agente en Nginx y back, grupos de logs con retención limitada, búsqueda por `requestId`.
+- [x] ✅ (Paula) **S6-INF-01 · CloudWatch**: agente en Nginx y back, grupos de logs con retención limitada, búsqueda por `requestId`.
   *Estado:* grupos con 14 días y driver `awslogs` en los dos contenedores desde S1; el error log de Nginx va con nivel `crit` en AWS (trae la query string). Verificación: `task aws:verify` (pasos 3 y 4).
-- [ ] 🔄 (Paula) **S6-INF-02 · Session Manager** operativo en todas las EC2 (sin puerto 22).
+- [x] ✅ (Paula) **S6-INF-02 · Session Manager** operativo en todas las EC2 (sin puerto 22).
   *Estado:* desde el paso 1.10. Verificación: `task aws:verify` (paso 2).
-- [ ] 🔄 (Paula) **S6-INF-03 · Backups de MongoDB** programados a S3.
-  *Estado:* timer cada hora instalado por `task aws:mongo-init`; falta ver un archivo en `backups/` en AWS (`task aws:backup`).
-- [ ] 🔄 (Paula) **S6-INF-04 · Restauración probada** en un entorno separado, con evidencia.
-  *Estado:* `task aws:restore` (EC2 temporal `32-restore.yml`, aislada del replica set) restaura un backup nuevo y compara documentos e índices por colección; probado en Docker local. Falta correrlo en AWS.
+- [x] ✅ (Paula) **S6-INF-03 · Backups de MongoDB** programados a S3.
+  *Estado:* timer cada hora instalado por `task aws:mongo-init`; verificado en AWS en los 3 nodos.
+- [x] ✅ (Paula) **S6-INF-04 · Restauración probada** en un entorno separado, con evidencia.
+  *Estado:* `task aws:restore` (EC2 temporal `32-restore.yml`, aislada del replica set) restaura un backup nuevo y compara documentos e índices por colección; probado en Docker local y en AWS: 16 colecciones iguales, 4 min en total.

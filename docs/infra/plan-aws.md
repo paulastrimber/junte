@@ -2,7 +2,7 @@
 
 Plan de trabajo de la responsable de AWS: qué hay hecho, qué falta, en qué orden hacerlo, cuánto cuesta y cómo verificarlo.
 
-**Estado (2026-10-28):** en la cuenta A está verificada la cadena completa del sprint 1: `https://api.dev.junteapp.me/api/v1/health` responde 200 por HTTPS con Mongo y Redis `up` (pasos 1.1 a 1.10). Quedan siempre creados `network`, `base`, `dns` (zona `dev.junteapp.me` y certificado) y `mongo` (replica set de 1 nodo); `egress`, `redis`, `back` y `front` se encienden y apagan por sesión con `task aws:up` / `task aws:down`. Evidencia en [docs/evidencia/](../evidencia/). Siguiente: la cuenta B (paso 7.1).
+**Estado (2026-10-28):** en la cuenta A está verificada la cadena completa del sprint 1: `https://api.dev.junteapp.me/api/v1/health` responde 200 por HTTPS con Mongo y Redis `up` (pasos 1.1 a 1.10). Quedan siempre creados `network`, `base`, `dns` (zona `dev.junteapp.me` y certificado) y `mongo` (replica set de 3 nodos desde el 2026-11-01); `egress`, `redis`, `back` y `front` se encienden y apagan por sesión con `task aws:up` / `task aws:down`. Evidencia en [docs/evidencia/](../evidencia/). Siguiente: la cuenta B (paso 7.1).
 
 Escrito el 2026-10-12 a partir del informe de arquitectura (`docs/junte.pdf`), `CLAUDE.md`, `docs/` e `infra/`.
 
@@ -149,13 +149,12 @@ Lo más caro son los endpoints de interfaz, los NAT y MongoDB. Encendida todo el
 |--------|-----------------|
 | 1 NAT en vez de 2 (desvío temporal que ADR-0005 permite si queda escrito) | 0,050 |
 | Sin endpoints de interfaz (solo el de S3, gratis) | 0,100 |
-| MongoDB replica set de 1 nodo (igual que en local; mantiene transacciones) | 0,042 |
 | 1 back y 1 Nginx (los dos ALB se mantienen) | 0,031 |
 | Redis de 1 nodo | 0,016 |
 
-Queda en **0,17 USD por hora: 0,70 USD por sesión de 4 horas**. Conserva la misma cadena (ALB público, Nginx, ALB interno, back, Redis, MongoDB), los mismos Security Groups y HTTPS, así que sirve para probar la app, las fotos, el chat y el push.
+Queda en **0,21 USD por hora: 0,85 USD por sesión de 4 horas**. MongoDB tiene 3 nodos también en dev (desde el 2026-11-01, para validar el replica set completo y la elección de primario): volver a 1 obligaría a sacar antes los miembros del replica set. Conserva la misma cadena (ALB público, Nginx, ALB interno, back, Redis, MongoDB), los mismos Security Groups y HTTPS, así que sirve para probar la app, las fotos, el chat y el push.
 
-No sirve como evidencia de la entrega: las pruebas de disponibilidad, elección de primario y NAT por zona (S7-QA-06 y 07) necesitan la completa. Son los mismos templates con otros parámetros, así que no hay nada que reescribir.
+Para la entrega faltan las pruebas de disponibilidad del back y de Nginx y la de NAT por zona (S7-QA-06 y 07), que necesitan la completa. La elección de primario de MongoDB ya se probó en dev. Son los mismos templates con otros parámetros, así que no hay nada que reescribir.
 
 ### Lo que sigue cobrando si me olvido de apagar
 
@@ -330,7 +329,7 @@ Objetivo del informe: topología multi-AZ, health checks de los dos ALB y acceso
 
 **1.6 · MongoDB** (S1-INF-08)
 - **Qué es:** la base. Tres nodos, uno por zona, que se replican; si cae el principal, otro toma su lugar. Las transacciones de cupos lo necesitan.
-- **Cómo:** CloudFormation, `31-mongo.yml`, parámetro `NodeCount` (1 o 3). EC2 Amazon Linux 2023 con Docker y la imagen `mongo:9.0.2-noble`, la misma de local y de los tests. IP privada fija por nodo, disco de datos aparte, sin IP pública. Después, **`task aws:mongo-init ENV=<env>`** (scripts en `infra/mongo/aws/`, por Session Manager): `rs.initiate` con todos los hosts (el primero con prioridad 2 para que gane la elección y se pueda usar la excepción de localhost; al final, todas en 1), usuario administrador (`root`), de la app (`readWrite` en `junte`), de migraciones (`readWrite` + `dbAdmin` en `junte`) y de backup (`backup`), el secreto `mongo-app-uri` con todos los hosts, el backup periódico (6.3) y las verificaciones. Se puede repetir: lo que ya existe se saltea. Autenticación activada y clave interna entre nodos (`keyFile`, del secreto `mongo-keyfile`).
+- **Cómo:** CloudFormation, `31-mongo.yml`, parámetro `NodeCount` (1 o 3; 3 en los dos entornos). La AMI queda fija en los parámetros (`ImageId`) y no en el "latest" de SSM: este se vuelve a resolver en cada deploy y, con una AMI nueva, reemplazaría los nodos. Pasar de 1 a 3 con datos: `aws:deploy STACK=mongo` y `aws:mongo-init`, que suma los miembros que faltan de a uno. EC2 Amazon Linux 2023 con Docker y la imagen `mongo:9.0.2-noble`, la misma de local y de los tests. IP privada fija por nodo, disco de datos aparte, sin IP pública. Después, **`task aws:mongo-init ENV=<env>`** (scripts en `infra/mongo/aws/`, por Session Manager): `rs.initiate` con todos los hosts (el primero con prioridad 2 para que gane la elección y se pueda usar la excepción de localhost; al final, todas en 1), usuario administrador (`root`), de la app (`readWrite` en `junte`), de migraciones (`readWrite` + `dbAdmin` en `junte`) y de backup (`backup`), el secreto `mongo-app-uri` con todos los hosts, el backup periódico (6.3) y las verificaciones. Se puede repetir: lo que ya existe se saltea. Autenticación activada y clave interna entre nodos (`keyFile`, del secreto `mongo-keyfile`).
 - **Antes:** pasos 1.2 a 1.5. La URI que usa el back se guarda entera como secreto, con los tres nodos y `replicaSet=rs0`.
 - **Después:** las migraciones y los catálogos, desde una instancia del back y con el usuario de migraciones: `task aws:up` los corre después de encender el back, `task back:release` antes de actualizar las instancias, y a mano `task aws:migrate ENV=<env>`.
 - **Verificación** (criterios de la tarea y del informe): `rs.status()` muestra 3 miembros; al detener el primario, otro pasa a primario en segundos y la API sigue respondiendo; conectarse sin usuario falla; todos los índices de `docs/arquitectura/07-modelo-de-datos.md` existen.
@@ -385,19 +384,19 @@ Objetivo del informe: topología multi-AZ, health checks de los dos ALB y acceso
 - **Qué es:** probar la subida real de una foto de perfil. En local no se puede: sin bucket, el back usa un storage en memoria.
 - **Cómo:** sin recursos nuevos. En una sesión con el entorno dev encendido, la app con perfil `preview` sube una foto.
 - **Verificación** (criterio del informe): la foto se ve en el perfil; el objeto queda en `users/<userId>/`; su URL sin firma da 403; pedir la foto de una clave inexistente da 404 y no 500 (prueba el permiso `ListBucket`).
-- **Lo necesitan:** back y app. Está anotado como "sin probar" en `pendientes.md`, sección D.
+- **Lo necesitan:** back y app. ✅ Verificado en dev el 2026-11-01 con un script contra la API (sin teléfono; [evidencia](../evidencia/s6-backup-restore-3-nodos.md)).
 
 **2.2 · Medir Argon2 en la instancia**
 - **Qué es:** el hash de contraseñas usa 19 MiB de memoria por login. Hay que ver que el `t3.small` lo aguante.
 - **Cómo:** a mano: varios logins seguidos mirando tiempos y memoria.
-- **Verificación:** el login responde en un tiempo razonable y la instancia no se queda sin memoria. Pasarle los números a back (`pendientes.md`, sección D).
+- **Verificación:** el login responde en un tiempo razonable y la instancia no se queda sin memoria. ✅ ~200 ms en el servidor, 155 MiB (2026-11-01; anotado en `pendientes.md`).
 
 ### Sprint 3 · Planes y feed
 
 **3.1 · Permisos sobre `plans/*`**
 - **Qué es:** el back también sube y borra fotos de planes, con claves `plans/<planId>/…`.
 - **Cómo:** en el lab no hay nada que cambiar: `LabRole` ya lo permite. En el rol de mínimo privilegio del template (el que queda apagado) se agrega `plans/*` junto a `users/*`, como en la [tabla del rol del back](#roles-iam-el-desvío-más-importante).
-- **Verificación:** con el entorno dev encendido, `POST /uploads/presign` con `planId` y `PUT /plans/:id/photo` funcionan. La app todavía no sube fotos de plan, así que se prueba con `curl`.
+- **Verificación:** con el entorno dev encendido, `POST /uploads/presign` con `planId` y `PUT /plans/:id/photo` funcionan. La app todavía no sube fotos de plan, así que se prueba con un script. ✅ Verificado en dev el 2026-11-01.
 - **Lo necesita:** back.
 
 **3.2 · Clave de Google Maps** (no es AWS, pero quedó anotado para infra)
@@ -428,7 +427,7 @@ Sin recursos nuevos. Una sola cosa para tener presente:
 **5.2 · WebSocket a través de los dos ALB** (S5-NG-01)
 - **Qué es:** comprobar que el chat en tiempo real atraviesa ALB público, Nginx y ALB interno sin cortarse.
 - **Cómo:** sin recursos nuevos. Confirmar que los dos ALB tienen idle timeout de 300 s y que ningún target group tiene stickiness.
-- **Verificación** (criterio de la tarea): una conexión ociosa durante 5 minutos sigue viva en AWS. En la versión completa, dos usuarios conectados a instancias distintas del back se ven los mensajes (prueba Redis).
+- **Verificación** (criterio de la tarea): una conexión ociosa durante 5 minutos sigue viva en AWS. ✅ 330 s en dev el 2026-11-01. En la versión completa, dos usuarios conectados a instancias distintas del back se ven los mensajes (prueba Redis).
 - **Lo necesitan:** back y app.
 
 **5.3 · Notas de voz en S3**
@@ -458,7 +457,7 @@ Sin recursos nuevos. Una sola cosa para tener presente:
 - **Cómo:** `task aws:mongo-init` instala en cada nodo `/opt/junte/backup-mongo.sh` y el timer de systemd `junte-mongo-backup` (`infra/mongo/aws/install-backup.sh`). Corre **15 minutos después de arrancar y cada hora**: las instancias del lab están detenidas fuera de las sesiones, un horario nocturno no correría nunca. Hace el dump un solo nodo: el único de un replica set de 1, o el primer secundario (por host) de 3, para no cargar al primario. `mongodump --archive --gzip` con el usuario de backup (la contraseña en un archivo de configuración `600`, no en la línea de comandos) directo a `s3://<OpsBucket>/backups/mongo-<env>-<fecha>.archive.gz`: primero como `.partial` y se renombra solo si terminó bien. La regla de vencimiento de 14 días ya existe. Para lanzarlo a mano (por ejemplo al cerrar la sesión): `task aws:backup ENV=<env>`.
 - **Por qué no en el `UserData` de `31-mongo.yml`:** corre solo en el primer arranque de cada instancia; cambiarlo detiene el nodo y no se vuelve a ejecutar. Instalado por `mongo-init`, llega también a los nodos existentes y se puede actualizar.
 - **Probado en local** (Docker, replica set de 3 nodos con `keyFile`): solo el primer secundario hace el dump; `mongodump` con la contraseña en archivo genera un `.archive.gz` que `mongorestore` restaura en una base vacía.
-- **Verificación:** hay un archivo nuevo en `backups/` con tamaño razonable (`task aws:backup` lo muestra). Pendiente en AWS: próxima sesión.
+- **Verificación:** hay un archivo nuevo en `backups/` con tamaño razonable (`task aws:backup` lo muestra). ✅ Verificado en dev el 2026-11-01, en los 3 nodos ([evidencia](../evidencia/s6-backup-restore-3-nodos.md)).
 
 **6.4 · Restauración probada** (S6-INF-04)
 - **Qué es:** demostrar que el backup sirve. Un backup que nunca se restauró no cuenta.
@@ -472,7 +471,8 @@ Sin recursos nuevos. Una sola cosa para tener presente:
 **7.1 · Desplegar "entrega" en la cuenta B**
 - **Qué es:** repetir los pasos 0.2 a 0.4 y 1.1 a 1.10 con los parámetros de `infra/parameters/entrega/`: 2 NAT, endpoints de interfaz, 3 nodos de MongoDB, 2 back, 2 Nginx, Redis con réplica.
 - **Antes:** el segundo subdominio delegado; el secreto de FCM cargado también en B; una clave de Google Maps para el perfil de entrega.
-- **Cómo** (credenciales de B en el perfil `junte-entrega`; cada `aws:deploy` muestra el change set y pide confirmación):
+- **Cómo, de una vez:** `task aws:bootstrap ENV=entrega`, con las credenciales de B en el perfil `junte-entrega`, Docker corriendo y desde `main`. Pide una sola confirmación y hace los pasos de abajo en orden, más el smoke test y `aws:verify` al final. En el paso de DNS se frena: muestra los 4 NS que hay que cargar en el proveedor como registro `NS` de `app` y espera hasta que el DNS público los devuelva (hasta 2 horas). Saltea lo que ya existe, así que si se corta se vuelve a correr. Ensayado sobre dev el 2026-11-01: cada stack quedó sin cambios y las verificaciones pasaron. Lo que no hace: el presupuesto (0.2), el secreto de FCM (5.1) y la clave de Google Maps.
+- **Cómo, paso por paso** (lo mismo a mano; cada `aws:deploy` muestra el change set y pide confirmación):
   1. `task aws:deploy ENV=entrega STACK=network`, después `STACK=base`.
   2. `task aws:deploy ENV=entrega STACK=dns PARAMS="ZoneName=app.<dominio>"`; **a mano**, los 4 NS del output en el registrador; cuando `dig NS app.<dominio>` los devuelva, `STACK=dns PARAMS="ZoneName=app.<dominio> CreateCertificate=true"`.
   3. `STACK=egress` y `STACK=mongo` (3 nodos).

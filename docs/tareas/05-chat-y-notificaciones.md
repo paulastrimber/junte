@@ -23,8 +23,8 @@
 
 ## Front service
 
-- [ ] **S5-NG-01 · WebSocket a través de Nginx y ambos ALB**: `Upgrade`/`Connection`, `proxy_read_timeout 300s`.
-  *Acepta:* una conexión ociosa 5 minutos sigue viva en AWS. *(Nginx ya tenía el upgrade y los 300 s; `smoke.sh` ahora verifica el upgrade y que el long-polling esté rechazado, corrido OK en local el 2026-10-14. Falta la prueba en AWS, a cargo del equipo de AWS.)*
+- [x] **S5-NG-01 · WebSocket a través de Nginx y ambos ALB**: `Upgrade`/`Connection`, `proxy_read_timeout 300s`.
+  *Acepta:* una conexión ociosa 5 minutos sigue viva en AWS. *(Nginx ya tenía el upgrade y los 300 s; `smoke.sh` ahora verifica el upgrade y que el long-polling esté rechazado, corrido OK en local el 2026-10-14. Probado en AWS el 2026-11-01: 330 s sin mensajes por los dos ALB sin cortarse ([evidencia](../evidencia/s6-backup-restore-3-nodos.md#8-websocket-ocioso-paso-52-s5-ng-01)).)*
 
 ## App
 

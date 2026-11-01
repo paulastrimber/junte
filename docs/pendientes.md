@@ -208,7 +208,7 @@ Lo que apareció al implementar auth y perfiles (S2) y queda para revisar con el
 - **Enrutado estricto** en toda la API (`case sensitive routing` + `strict routing`): `/internal/health/` y `/auth/LOGIN` dan 404. Es defensa en profundidad del límite de Nginx. **El equipo de AWS debe confirmar que el health check del ALB usa `/internal/health` sin barra final y con esa capitalización.**
 - **Zod con mensajes en español** (`z.config(z.locales.es())` en `shared/validation.js`) y los campos desconocidos se informan en `details` con el nombre del campo.
 - **`sanitizeFilter` de Mongoose** (mencionado en 09 como red adicional) **no se activó**: reescribe los operadores (`$gt`, `$in`) de nuestras propias queries salvo que se marquen como confiables. La barrera sigue siendo Zod `.strict()` + queries armadas en el repositorio. Decidir si se activa y se marcan las queries propias.
-- **Parámetros de Argon2id:** el mínimo de OWASP (19 MiB, 2 pasadas, 1 hilo). Subirlos no requiere migrar (cada hash guarda los suyos); medir en la instancia de AWS.
+- **Parámetros de Argon2id:** el mínimo de OWASP (19 MiB, 2 pasadas, 1 hilo). Subirlos no requiere migrar (cada hash guarda los suyos). ✅ Medido en AWS (2026-11-01, `t3.small`): ~200 ms por login en el servidor, el back usa 155 MiB y la instancia tiene 1,27 GB libres ([evidencia](evidencia/s6-backup-restore-3-nodos.md#6-fotos-y-argon2-pasos-21-22-y-31)).
 
 ### Límites conocidos
 - **Access token tras el logout:** sigue valiendo hasta 15 minutos (`authenticate` no mira la sesión). Alternativa: consultar la sesión en cada request (una lectura más).
