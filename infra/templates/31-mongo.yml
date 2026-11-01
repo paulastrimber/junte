@@ -47,10 +47,13 @@ Parameters:
     Type: String
     Default: 10.0.32.10
     AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}$'
+  # Fija, en infra/parameters/<env>/31-mongo.json, y no el parametro SSM "latest" como los stacks de sesion:
+  # ese se vuelve a resolver en cada deploy y, cuando AWS publica una AMI nueva, reemplaza los nodos (IP fija
+  # y disco de datos: el reemplazo choca). Cambiarla reemplaza todos los nodos a la vez: hacerlo a proposito.
+  # Para un entorno nuevo: aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
   ImageId:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
-    Description: Ultima Amazon Linux 2023 publicada por AWS (no hay que hardcodear el ID).
+    Type: AWS::EC2::Image::Id
+    Description: Amazon Linux 2023 (x86_64) de los nodos.
 
 Conditions:
   ThreeNodes: !Equals [!Ref NodeCount, 3]

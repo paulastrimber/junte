@@ -32,7 +32,7 @@ redact () { sed -E 's/[0-9]{12}/<cuenta>/g'; }
 info () { printf '\n==> %s\n' "$*"; }
 
 usage () {
-  sed -n '5,14p' "$0" | sed 's/^# \{0,1\}//' >&2
+  sed -n '5,15p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -391,7 +391,8 @@ wait_mongo_running () {
   # shellcheck disable=SC2016 # se evalúa en la instancia, no acá
   echo '[ "$(docker inspect -f "{{.State.Running}}" mongo 2>/dev/null)" = true ]' > "$check"
   for _ in $(seq 1 40); do
-    if ssm_run "$id" "$check" >/dev/null 2>&1; then rm -f "$check"; return 0; fi
+    # En un subshell: si el contenedor todavía no corre, ssm_run termina con die y eso cortaría todo el script.
+    if (ssm_run "$id" "$check") >/dev/null 2>&1; then rm -f "$check"; return 0; fi
     sleep 15
   done
   rm -f "$check"
@@ -458,14 +459,15 @@ cmd_migrate () {
 backup_now () {
   local bucket=$1 id check
   check=$(mktemp)
-  echo 'systemctl start junte-mongo-backup.service; journalctl -u junte-mongo-backup.service -n 2 --no-pager -o cat' > "$check"
+  echo 'systemctl start junte-mongo-backup.service || { echo "el backup no está instalado en este nodo: task aws:mongo-init" >&2; exit 1; }' > "$check"
+  echo 'journalctl -u junte-mongo-backup.service -n 2 --no-pager -o cat' >> "$check"
   for id in $(mongo_nodes); do
     info "$id"
     ssm_run "$id" "$check" || { rm -f "$check"; exit 1; }
   done
   rm -f "$check"
   info 'Últimos backups'
-  aws_ s3 ls "s3://$bucket/backups/" | tail -5
+  aws_ s3 ls "s3://$bucket/backups/" | tail -5 || echo '  (ninguno)'
 }
 
 cmd_backup () {
