@@ -145,7 +145,7 @@ tasks:
         docker run --rm -v "$PWD/infra:/infra:ro" -w /infra python:3.13.15-slim
         sh -c 'pip install -q --disable-pip-version-check --root-user-action=ignore cfn-lint==1.57.0
         && cfn-lint --regions us-east-1 -- templates/*.yml'
-      - docker run --rm -v "$PWD/infra:/infra:ro" koalaman/shellcheck:v0.11.0 -s bash /infra/scripts/aws.sh /infra/mongo/aws/init-replica-set.sh /infra/mongo/aws/create-app-uri.sh /infra/mongo/aws/verify-replica-set.sh /infra/mongo/aws/install-backup.sh /infra/mongo/aws/migrate.sh
+      - docker run --rm -v "$PWD/infra:/infra:ro" koalaman/shellcheck:v0.11.0 -s bash /infra/scripts/aws.sh /infra/mongo/aws/init-replica-set.sh /infra/mongo/aws/create-app-uri.sh /infra/mongo/aws/verify-replica-set.sh /infra/mongo/aws/install-backup.sh /infra/mongo/aws/migrate.sh /infra/mongo/aws/count-collections.sh /infra/mongo/aws/restore-backup.sh
 
   # ── AWS (despliegue) ─────────────────────────────────────────────
   # ENV=dev (cuenta A, perfil junte-dev) o ENV=entrega (cuenta B, perfil junte-entrega).
@@ -166,7 +166,7 @@ tasks:
     cmds: ['bash infra/scripts/aws.sh status {{.ENV}}']
 
   aws:deploy:
-    desc: 'Un solo stack con change set y confirmación (STACK=network|base|dns|mongo|egress|redis|back|front, PARAMS="Clave=Valor ...")'
+    desc: 'Un solo stack con change set y confirmación (STACK=network|base|dns|mongo|egress|redis|back|front|restore, PARAMS="Clave=Valor ...")'
     vars: { ENV: '{{.ENV | default "dev"}}' }
     requires: { vars: [STACK] }
     cmds: ['bash infra/scripts/aws.sh deploy {{.ENV}} {{.STACK}} {{.PARAMS}}']
@@ -190,6 +190,16 @@ tasks:
     desc: Dispara ahora un backup de MongoDB a s3://<OpsBucket>/backups/ y muestra los últimos
     vars: { ENV: '{{.ENV | default "dev"}}' }
     cmds: ['bash infra/scripts/aws.sh backup {{.ENV}}']
+
+  aws:restore:
+    desc: 'Prueba de restauración: backup nuevo, lo restaura en una EC2 temporal, compara conteos y la borra (necesita egress)'
+    vars: { ENV: '{{.ENV | default "dev"}}' }
+    cmds: ['bash infra/scripts/aws.sh restore {{.ENV}}']
+
+  aws:verify:
+    desc: 'Verificaciones sin romper nada: puertos desde Internet, Session Manager, requestId y datos sensibles en los logs (HOURS=24)'
+    vars: { ENV: '{{.ENV | default "dev"}}', HOURS: '{{.HOURS | default "24"}}' }
+    cmds: ['bash infra/scripts/aws.sh verify {{.ENV}} {{.HOURS}}']
 
   # ── App móvil ────────────────────────────────────────────────────
   mobile:start:

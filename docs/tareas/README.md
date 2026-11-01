@@ -19,7 +19,7 @@ Siete sprints de una semana, tal como el informe (sección 8). Cada sprint tiene
 | 3 | [03-planes-y-feed.md](03-planes-y-feed.md) | CRUD de planes y feed geográfico recomendado, con filtros, costo y cupo ilimitado | ✅ (app probada en teléfono con Expo Go; falta la clave de Google Maps, los permisos de S3 sobre `plans/*` y subir la foto del plan desde la app) |
 | 4 | [04-inscripciones-asistencia.md](04-inscripciones-asistencia.md) | Inscripción transaccional, QR, check-in, reputación, `noShow` | ✅ (falta probar en teléfono la cámara y el QR, y los jobs con dos instancias reales) |
 | 5 | [05-chat-y-notificaciones.md](05-chat-y-notificaciones.md) | Chat por plan con Socket.io + fallback, push FCM | 🔄 (mperez14ang: chat; falta FCM, avisos, `spotAlerts` y notas de voz) |
-| 6 | [06-admin-y-movil.md](06-admin-y-movil.md) | Panel `/admin`, offline, observabilidad, backups | 🔄 (back, panel y app ✅; falta probar con docker compose y en el teléfono; infraestructura ⛔ a cargo del equipo de AWS) |
+| 6 | [06-admin-y-movil.md](06-admin-y-movil.md) | Panel `/admin`, offline, observabilidad, backups | 🔄 (back, panel y app ✅; falta probar con docker compose y en el teléfono; infraestructura en código, falta correrla en AWS: `aws:verify`, `aws:backup`, `aws:restore`) |
 | 7 | [07-validacion-y-entrega.md](07-validacion-y-entrega.md) | E2E, seguridad, concurrencia, restauración, APK | ⬜ |
 
 ## Dependencias entre funcionalidades

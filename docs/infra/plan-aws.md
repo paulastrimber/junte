@@ -44,7 +44,7 @@ El informe y `docs/` están escritos pensando en una cuenta común. En Learner L
 | Qué | Dónde |
 |-----|-------|
 | Entorno local completo (Nginx, back, MongoDB de 1 nodo, Redis) | `infra/docker-compose.dev.yml`, `infra/back/`, `infra/mongo/` |
-| Configuración de Nginx lista para AWS, con tres variables por entorno (`NGINX_TRUSTED_CIDR`, `NGINX_RESOLVER`, `NGINX_BACKEND`) | `front-service/` |
+| Configuración de Nginx lista para AWS, con cuatro variables por entorno (`NGINX_TRUSTED_CIDR`, `NGINX_RESOLVER`, `NGINX_BACKEND`, `NGINX_ERROR_LOG_LEVEL`) | `front-service/` |
 | Imagen de producción del back (target `prod`, propuesta) | `back-service/Dockerfile` |
 | Variables que exige el back, validadas al arrancar | `back-service/.env.example`, `back-service/src/config/` |
 | Storage S3 con credenciales del rol de la instancia | `back-service/src/adapters/` |
@@ -445,12 +445,13 @@ Sin recursos nuevos. Una sola cosa para tener presente:
 - **Dos riesgos de datos sensibles:**
   - **No activar los access logs de los ALB.** Guardan la URL completa, y `GET /plans?near=` lleva coordenadas en la query.
   - El error log de Nginx incluye la línea completa del request, también con coordenadas (`pendientes.md`, sección C). O no se envía a CloudWatch, o se sube su nivel a `crit`. Lo decide quien mantiene Nginx.
-- **Verificación:** se toma el `requestId` de una respuesta y se lo encuentra en los logs de Nginx y del back. Buscar `password`, `Bearer`, `refreshToken`, `birthDate` y `latitude` no devuelve nada (criterio del informe y S7-QA-10).
+- **Error log:** resuelto con `NGINX_ERROR_LOG_LEVEL=crit` en AWS (`warn` en local), ver [04-front-service.md](../arquitectura/04-front-service.md).
+- **Verificación** (`task aws:verify ENV=<env>`, pasos 3 y 4): se toma el `requestId` de una respuesta y se lo encuentra en los logs de Nginx y del back. Buscar `password`, `Bearer`, `refreshToken`, `accessToken`, `birthDate`, `latitude`, `longitude`, `lat=`, `lng=` y `near=` no devuelve nada (criterio del informe y S7-QA-10). Muestra solo la cantidad de líneas, nunca su contenido.
 - **Lo necesitan:** back (S6-BE-05) y todo el equipo para diagnosticar.
 
 **6.2 · Session Manager en todas las EC2** (S6-INF-02)
 - **Cómo:** ya está desde el paso 1.10. Acá se deja la evidencia.
-- **Verificación:** las 7 instancias aparecen en `describe-instance-information`; ninguna tiene par de claves ni el puerto 22 abierto.
+- **Verificación** (`task aws:verify`, paso 2): todas las EC2 encendidas del entorno aparecen en Session Manager; ninguna tiene par de claves y ningún grupo de seguridad acepta el 22. El paso 1 prueba desde Internet 22, 80, 3000, 6379, 8080 y 27017 (cerrados) y 443 (abierto): la parte externa de S7-QA-04.
 
 **6.3 · Backups de MongoDB** (S6-INF-03)
 - **Qué es:** una copia periódica de la base en S3.
@@ -461,8 +462,9 @@ Sin recursos nuevos. Una sola cosa para tener presente:
 
 **6.4 · Restauración probada** (S6-INF-04)
 - **Qué es:** demostrar que el backup sirve. Un backup que nunca se restauró no cuenta.
-- **Cómo:** a mano. Levantar una EC2 temporal con MongoDB, separada del replica set; bajar el último backup, `mongorestore`, comparar la cantidad de documentos por colección y borrar la instancia.
-- **Verificación** (criterio del informe: "es posible restaurar MongoDB"): conteos iguales a los de origen. Guardar los comandos, la salida y el tiempo que llevó.
+- **Cómo:** `task aws:restore ENV=<env>`, con egress encendido. Dispara un backup nuevo, cuenta documentos e índices por colección de `junte` en el replica set, crea el stack temporal `restore` (`32-restore.yml`: una EC2 con grupo de seguridad propio sin entrada y un `mongod` vacío que escucha solo en `127.0.0.1`), restaura ese backup (`mongorestore --nsInclude 'junte.*'`), vuelve a contar, compara y borra el stack, también si algo falla. `aws:down` lo borra si quedó.
+- **Probado en local** (Docker): replica set con autenticación → `mongodump` → `mongod` vacío → conteos e índices iguales.
+- **Verificación** (criterio del informe: "es posible restaurar MongoDB"): conteos iguales a los de origen. Guardar la salida, que incluye el tiempo de la restauración y el total. Si hubo escrituras entre el backup y el conteo, repetir sin tráfico.
 - **Depende de:** 6.3. **Lo necesita:** S7-QA-09.
 
 ### Sprint 7 · Validación y entrega (cuenta B)

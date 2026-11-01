@@ -10,6 +10,8 @@
 #   aws.sh mongo-init <env>              replica set, usuarios, secreto mongo-app-uri y backup (1 o 3 nodos)
 #   aws.sh migrate <env> [tag]           migraciones y catálogos desde una instancia del back
 #   aws.sh backup  <env>                 dispara un backup de MongoDB a S3 ahora
+#   aws.sh restore <env>                 backup nuevo, lo restaura en una instancia temporal y compara los conteos
+#   aws.sh verify  <env> [horas]         puertos desde Internet, Session Manager, requestId y datos sensibles en los logs
 #
 # <env> es dev (cuenta A, perfil junte-dev) o entrega (cuenta B, perfil junte-entrega).
 # Pide confirmación antes de crear o borrar (YES=1 la omite). Nunca imprime el ID de la cuenta ni
@@ -22,7 +24,7 @@ TEMPLATES=$ROOT/infra/templates
 MONGO_SCRIPTS=$ROOT/infra/mongo/aws
 # Los de sesión cobran por hora: se encienden y se borran en cada sesión. Los permanentes no se borran nunca desde acá.
 SESSION_STACKS='egress redis back front'
-ALL_STACKS='network base dns mongo egress redis back front'
+ALL_STACKS='network base dns mongo egress redis back front restore'
 
 die () { printf '\nError: %s\n' "$*" >&2; exit 1; }
 # Tapa IDs de cuenta (12 dígitos) en lo que se muestra: aparecen en ARNs y en la URI de ECR.
@@ -30,7 +32,7 @@ redact () { sed -E 's/[0-9]{12}/<cuenta>/g'; }
 info () { printf '\n==> %s\n' "$*"; }
 
 usage () {
-  sed -n '5,12p' "$0" | sed 's/^# \{0,1\}//' >&2
+  sed -n '5,14p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -42,6 +44,7 @@ template_of () {
     egress) echo 20-egress ;;
     redis) echo 30-redis ;;
     mongo) echo 31-mongo ;;
+    restore) echo 32-restore ;;
     back) echo 40-back ;;
     front) echo 50-front ;;
     *) return 1 ;;
@@ -240,7 +243,7 @@ cmd_up () {
 cmd_down () {
   preflight
   local present='' name
-  for name in front back redis egress; do
+  for name in restore front back redis egress; do
     if [ "$(stack_status "$name")" != NONE ]; then present="$present $name"; fi
   done
   if [ -z "$present" ]; then
@@ -248,7 +251,7 @@ cmd_down () {
   else
     echo "Se van a borrar (en este orden):$present. Los permanentes (network, base, dns, mongo) no se tocan."
     confirm '¿Apagar la sesión?'
-    for name in front back redis egress; do delete_stack "$name"; done
+    for name in restore front back redis egress; do delete_stack "$name"; done
   fi
   info 'Lo que cobra por hora en la cuenta'
   if check_billable; then
@@ -451,13 +454,9 @@ cmd_migrate () {
   run_migrations "${1:-}"
 }
 
-cmd_backup () {
-  preflight
-  require_stack mongo 'paso 1.6'
-  local bucket id check
-  bucket=$(output_of base OpsBucket)
-  echo "Dispara el backup en cada nodo (lo hace uno solo) y lo sube a s3://$bucket/backups/."
-  confirm '¿Hacer el backup ahora?'
+# backup_now <bucket>: lanza el backup en cada nodo (lo hace uno solo) y muestra los últimos de S3.
+backup_now () {
+  local bucket=$1 id check
   check=$(mktemp)
   echo 'systemctl start junte-mongo-backup.service; journalctl -u junte-mongo-backup.service -n 2 --no-pager -o cat' > "$check"
   for id in $(mongo_nodes); do
@@ -467,6 +466,134 @@ cmd_backup () {
   rm -f "$check"
   info 'Últimos backups'
   aws_ s3 ls "s3://$bucket/backups/" | tail -5
+}
+
+cmd_backup () {
+  preflight
+  require_stack mongo 'paso 1.6'
+  local bucket
+  bucket=$(output_of base OpsBucket)
+  echo "Dispara el backup en cada nodo (lo hace uno solo) y lo sube a s3://$bucket/backups/."
+  confirm '¿Hacer el backup ahora?'
+  backup_now "$bucket"
+}
+
+# Paso 6.4 (S6-INF-04, S7-QA-09): backup nuevo, conteos del origen, restauración en una instancia aparte,
+# conteos de lo restaurado y comparación. La instancia se borra siempre, también si algo falla.
+cmd_restore () {
+  preflight
+  require_stack mongo 'paso 1.6'
+  require_stack base 'pasos 1.1 y 1.2'
+  [ "$(stack_status egress)" != NONE ] ||
+    die "egress está apagado: la instancia temporal baja Docker y la imagen por el NAT (task aws:up ENV=$ENV_NAME)"
+  local bucket hosts first key id source restored started
+  bucket=$(output_of base OpsBucket)
+  hosts=$(output_of mongo MongoHosts)
+  first=$(mongo_nodes | head -1)
+  echo "Hace un backup nuevo, lo restaura en $(stack_name restore) (una EC2 temporal, ~0,02 USD/h) y compara"
+  echo 'documentos e índices por colección de junte con el replica set. Después borra la instancia.'
+  confirm '¿Probar la restauración?'
+  started=$(date +%s)
+
+  info 'Backup nuevo'
+  backup_now "$bucket"
+  key=$(aws_ s3 ls "s3://$bucket/backups/" | awk '{print $4}' | grep '\.archive\.gz$' | sort | tail -1)
+  [ -n "$key" ] || die "no hay backups en s3://$bucket/backups/"
+  info "Conteos en el replica set (desde $first)"
+  source=$(ssm_run "$first" "$MONGO_SCRIPTS/count-collections.sh" TARGET=replica "ENV_NAME=$ENV_NAME" "REGION=$REGION" "HOSTS=$hosts")
+  printf '%s\n' "$source"
+
+  trap 'delete_stack restore' EXIT
+  deploy_stack restore
+  id=$(output_of restore RestoreInstanceId)
+  info "Restaurando backups/$key en $id"
+  wait_ssm_online "$id"
+  ssm_run "$id" "$MONGO_SCRIPTS/restore-backup.sh" "REGION=$REGION" "OPS_BUCKET=$bucket" "BACKUP_KEY=backups/$key"
+  info 'Conteos en lo restaurado'
+  restored=$(ssm_run "$id" "$MONGO_SCRIPTS/count-collections.sh" TARGET=restore)
+  printf '%s\n' "$restored"
+  delete_stack restore
+  trap - EXIT
+
+  info 'Comparación (colección documentos índices)'
+  if diff <(printf '%s\n' "$source" | grep .) <(printf '%s\n' "$restored" | grep .); then
+    echo "Iguales: la restauración de backups/$key funciona ($(( ($(date +%s) - started) / 60 )) min en total)."
+  else
+    die 'los conteos no coinciden (arriba, < origen y > restaurado): si hubo escrituras después del backup, repetir sin tráfico'
+  fi
+}
+
+# Verificaciones que no rompen nada (S6-INF-01, S6-INF-02, S7-QA-04 desde Internet, S7-QA-10). Con la sesión
+# encendida. Muestra cada resultado y termina con error si alguno falla. Nunca imprime el contenido de los logs.
+cmd_verify () {
+  local hours=${1:-24}
+  case "$hours" in '' | *[!0-9]*) die "horas inválidas: $hours" ;; esac
+  preflight
+  require_stack front 'task aws:up'
+  local url host failed=0 port
+  url=$(output_of front ApiUrl)
+  host=${url#https://}; host=${host%%/*}
+
+  info "1. Puertos desde Internet en $host (solo 443)"
+  for port in 22 80 3000 6379 8080 27017 443; do
+    if python3 -c 'import socket, sys; socket.create_connection((sys.argv[1], int(sys.argv[2])), 4).close()' "$host" "$port" 2>/dev/null; then
+      if [ "$port" = 443 ]; then echo "  $port: abierto (ok)"; else echo "  $port: ABIERTO (mal)"; failed=1; fi
+    else
+      if [ "$port" = 443 ]; then echo "  $port: CERRADO (mal)"; failed=1; else echo "  $port: cerrado (ok)"; fi
+    fi
+  done
+
+  info '2. Session Manager, sin pares de claves ni puerto 22'
+  local tags running online missing keys port22
+  tags=("Name=tag:project,Values=junte" "Name=tag:env,Values=$ENV_NAME")
+  running=$(aws_ ec2 describe-instances --filters "${tags[@]}" Name=instance-state-name,Values=running \
+    --query 'Reservations[].Instances[].InstanceId' --output text | tr '\t' '\n' | grep . | sort || true)
+  online=$(aws_ ssm describe-instance-information --filters Key=PingStatus,Values=Online \
+    --query 'InstanceInformationList[].InstanceId' --output text | tr '\t' '\n' | grep . | sort || true)
+  missing=$(comm -23 <(printf '%s\n' "$running") <(printf '%s\n' "$online") | grep . || true)
+  echo "  EC2 encendidas: $(printf '%s\n' "$running" | grep -c . || true) · fuera de Session Manager: ${missing:-ninguna}"
+  if [ -n "$missing" ]; then failed=1; fi
+  keys=$(aws_ ec2 describe-instances --filters "${tags[@]}" Name=instance-state-name,Values=running \
+    --query 'length(Reservations[].Instances[?KeyName != null][])' --output text)
+  # shellcheck disable=SC2016 # los `…` son literales de JMESPath, no de bash
+  port22=$(aws_ ec2 describe-security-groups --filters "${tags[@]}" \
+    --query 'length(SecurityGroups[?IpPermissions[?IpProtocol==`"-1"` || (FromPort<=`22` && ToPort>=`22`)]])' --output text)
+  echo "  con par de claves: $keys · grupos de seguridad que aceptan el 22: $port22"
+  if [ "$keys$port22" != 00 ]; then failed=1; fi
+
+  info '3. requestId en los logs de Nginx y del back'
+  local headers request_id since group found _
+  since=$(( ($(date +%s) - 300) * 1000 ))
+  headers=$(curl -sS -o /dev/null -D - --max-time 10 "$url/users/me") || die "no responde $url"
+  request_id=$(printf '%s\n' "$headers" | tr -d '\r' | awk -F': ' 'tolower($1) == "x-request-id" { print $2 }')
+  [ -n "$request_id" ] || die 'la respuesta no trae X-Request-Id'
+  echo "  GET /users/me sin token → requestId $request_id (esperando a que llegue a CloudWatch)"
+  for group in "/junte/$ENV_NAME/nginx" "/junte/$ENV_NAME/back"; do
+    found=0
+    for _ in $(seq 1 12); do
+      found=$(aws_ logs filter-log-events --log-group-name "$group" --start-time "$since" \
+        --filter-pattern "\"$request_id\"" --max-items 100 --query 'length(events)' --output json 2>/dev/null || echo 0)
+      if [ "$found" != 0 ]; then break; fi
+      sleep 10
+    done
+    if [ "$found" != 0 ]; then echo "  $group: $found línea(s) (ok)"; else echo "  $group: NO APARECE"; failed=1; fi
+  done
+
+  info "4. Datos sensibles en los logs de las últimas $hours h (cantidad de líneas; no se muestra el contenido)"
+  # json y no text: con text, --query se aplica a cada página y saldría un número por página.
+  local term count clean=1
+  since=$(( ($(date +%s) - hours * 3600) * 1000 ))
+  for group in "/junte/$ENV_NAME/nginx" "/junte/$ENV_NAME/back"; do
+    for term in password Bearer refreshToken accessToken birthDate latitude longitude 'lat=' 'lng=' 'near='; do
+      count=$(aws_ logs filter-log-events --log-group-name "$group" --start-time "$since" \
+        --filter-pattern "\"$term\"" --max-items 100 --query 'length(events)' --output json)
+      if [ "$count" != 0 ]; then echo "  $group · $term: $count (revisar en la consola)"; clean=0; failed=1; fi
+    done
+  done
+  if [ "$clean" = 1 ]; then echo '  ninguno (ok)'; fi
+
+  if [ "$failed" != 0 ]; then die 'hay verificaciones que fallaron (arriba)'; fi
+  printf '\nTodo bien. Para la evidencia: copiar esta salida a docs/evidencia/.\n'
 }
 
 [ $# -ge 2 ] || usage
@@ -487,6 +614,8 @@ case "$COMMAND" in
   mongo-init) cmd_mongo_init ;;
   migrate) cmd_migrate "$@" ;;
   backup) cmd_backup ;;
+  restore) cmd_restore ;;
+  verify) cmd_verify "$@" ;;
   deploy)
     [ $# -ge 1 ] || die "falta el stack (opciones: $ALL_STACKS)"
     preflight

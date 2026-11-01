@@ -158,6 +158,7 @@ task aws:up ENV=dev     # enciende la sesión en AWS (egress, redis, back, front
 task aws:status ENV=dev # qué stacks hay, qué cobra por hora y si la API responde
 task back:release ENV=dev # imagen del back (linux/amd64) a ECR, migraciones y actualización de las instancias de a una
 task aws:mongo-init ENV=dev # replica set (1 o 3 nodos), usuarios, secreto mongo-app-uri y backup cada hora; aws:migrate, aws:backup
+task aws:restore ENV=dev # prueba de restauración en una EC2 temporal; aws:verify: puertos, Session Manager y logs
 task --list       # todo lo demás
 ```
 
