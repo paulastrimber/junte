@@ -154,6 +154,7 @@ task db:seed      # datos de desarrollo (usa SEED_PASSWORD de back-service/.env;
 task db:admin -- promote <email>   # da el rol admin (sin API; `create` toma ADMIN_PASSWORD del entorno)
 task ci           # lint + tests + migraciones + nginx -t (antes de cada PR)
 task front:smoke  # smoke test de Nginx contra el entorno local
+task aws:bootstrap ENV=entrega # el entorno completo desde una cuenta vacía (una confirmación; frena para delegar el DNS)
 task aws:up ENV=dev     # enciende la sesión en AWS (egress, redis, back, front); aws:down la apaga
 task aws:status ENV=dev # qué stacks hay, qué cobra por hora y si la API responde
 task back:release ENV=dev # imagen del back (linux/amd64) a ECR, migraciones y actualización de las instancias de a una

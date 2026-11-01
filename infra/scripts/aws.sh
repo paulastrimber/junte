@@ -2,6 +2,7 @@
 # Comandos de despliegue de junte en AWS (docs/infra/plan-aws.md, "Rutina de cada sesión").
 # Los llaman las tareas aws:* y back:release del Taskfile:
 #
+#   aws.sh bootstrap <env>               el entorno completo desde una cuenta vacía (para entrega; se puede repetir)
 #   aws.sh up      <env>                 enciende la sesión: egress, redis, back y front
 #   aws.sh down    <env>                 la apaga (al revés) y verifica que no quede nada cobrando
 #   aws.sh status  <env>                 qué stacks existen, qué cobra por hora y si la API responde
@@ -208,6 +209,87 @@ sync_nginx_config () {
   info "Subiendo front-service/ a s3://$bucket/nginx/"
   aws_ s3 sync "$ROOT/front-service/" "s3://$bucket/nginx/" --delete --only-show-errors \
     --exclude 'tests/*' --exclude '*.gitkeep' --exclude '.DS_Store'
+}
+
+# wait_delegation <zona> <NS separados por coma>: muestra los NS a cargar y espera hasta que el DNS público
+# devuelva esos mismos (hasta 2 horas). Es el único paso a mano del entorno.
+wait_delegation () {
+  local zone=$1 expected current _
+  expected=$(printf '%s\n' "$2" | tr ',' '\n' | tr -d ' ' | sed 's/\.$//' | tr '[:upper:]' '[:lower:]' | grep . | sort)
+  current=$(dig +short NS "$zone" @1.1.1.1 2>/dev/null | sed 's/\.$//' | tr '[:upper:]' '[:lower:]' | sort || true)
+  if [ "$current" = "$expected" ]; then echo "  $zone ya está delegado a Route 53."; return 0; fi
+  printf '\n  A mano, una sola vez: en el proveedor de %s, crear el registro NS "%s" con estos 4 valores:\n' "${zone#*.}" "${zone%%.*}"
+  printf '%s\n' "$expected" | sed 's/^/    /'
+  echo '  Esperando a que la delegación se vea en el DNS público (se revisa cada 30 s, hasta 2 horas)...'
+  for _ in $(seq 1 240); do
+    sleep 30
+    current=$(dig +short NS "$zone" @1.1.1.1 2>/dev/null | sed 's/\.$//' | tr '[:upper:]' '[:lower:]' | sort || true)
+    if [ "$current" = "$expected" ]; then echo "  Delegado: $zone responde con los NS de Route 53."; return 0; fi
+  done
+  die "en 2 horas $zone no quedó delegado: revisá los NS en el proveedor y volvé a correr (lo hecho se saltea)"
+}
+
+# Paso 7.1 del plan: el entorno completo desde una cuenta vacía, en orden, con una sola confirmación. Cada
+# paso saltea lo que ya existe, así que si se corta se vuelve a correr. Lo único a mano: los NS en el proveedor.
+cmd_bootstrap () {
+  preflight
+  local zone branch failed=0
+  zone=$(parameter_overrides "$ROOT/infra/parameters/$ENV_NAME/01-dns-cert.json" | sed -n 's/^ZoneName=//p')
+  [ -n "$zone" ] || die "falta ZoneName en infra/parameters/$ENV_NAME/01-dns-cert.json"
+  command -v dig >/dev/null || die 'falta dig (para esperar la delegación del subdominio)'
+  { command -v docker >/dev/null && docker info >/dev/null 2>&1; } || die 'Docker tiene que estar corriendo (se construye la imagen del back)'
+  branch=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)
+  if [ "$branch" != main ]; then echo "Ojo: estás en la rama $branch y no en main; la imagen del back sale de este commit."; fi
+
+  echo "Entorno $ENV_NAME en api.$zone, en este orden (lo que ya existe se saltea):"
+  echo '  1. network y base (red, buckets, secretos, ECR, grupos de logs)'
+  echo "  2. dns: zona $zone, delegación (a mano: los NS en el proveedor) y certificado"
+  echo '  3. imagen del back en ECR'
+  echo '  4. egress y mongo'
+  echo '  5. mongo-init: replica set, usuarios, mongo-app-uri y backup'
+  echo '  6. redis, back, migraciones, configuración de Nginx y front (como task aws:up)'
+  echo '  7. smoke test y task aws:verify'
+  echo "Lo de sesión cobra por hora hasta task aws:down ENV=$ENV_NAME. El secreto de FCM se carga aparte."
+  confirm '¿Levantar el entorno completo?'
+  export YES=1 # una sola confirmación: los pasos siguientes no vuelven a preguntar
+  local started; started=$(date +%s)
+
+  info 'Paso 1/7 · Red y base'
+  deploy_stack network
+  deploy_stack base
+
+  info "Paso 2/7 · Zona $zone y certificado"
+  if [ -n "$(output_of dns ApiCertificateArn)" ]; then
+    echo '  El certificado ya existe.'
+  else
+    deploy_stack dns CreateCertificate=false
+    wait_delegation "$zone" "$(output_of dns NameServers)"
+    deploy_stack dns CreateCertificate=true
+  fi
+
+  info 'Paso 3/7 · Imagen del back'
+  if aws_ ecr describe-images --repository-name "junte-$ENV_NAME-back" --image-ids imageTag=latest >/dev/null 2>&1; then
+    echo "  Ya hay una imagen latest en ECR (para actualizarla: task back:release ENV=$ENV_NAME)."
+  else
+    cmd_release
+  fi
+
+  info 'Paso 4/7 · Salida a Internet y MongoDB'
+  deploy_stack egress
+  deploy_stack mongo
+
+  info 'Paso 5/7 · Replica set'
+  cmd_mongo_init
+
+  info 'Paso 6/7 · Redis, back y front'
+  cmd_up
+
+  info 'Paso 7/7 · Verificaciones'
+  SMOKE_SKIP_LOCAL=1 bash "$ROOT/front-service/tests/smoke.sh" "https://api.$zone" || failed=1
+  (cmd_verify) || failed=1
+  if [ "$failed" != 0 ]; then die 'el entorno quedó levantado pero hay verificaciones que fallaron (arriba)'; fi
+  printf '\nEntorno %s completo en %s min: https://api.%s/api/v1. Al terminar: task aws:down ENV=%s\n' \
+    "$ENV_NAME" $(( ($(date +%s) - started) / 60 )) "$zone" "$ENV_NAME"
 }
 
 cmd_up () {
@@ -609,6 +691,7 @@ esac
 PROFILE=junte-$ENV_NAME
 
 case "$COMMAND" in
+  bootstrap) cmd_bootstrap ;;
   up) cmd_up ;;
   down) cmd_down ;;
   status) cmd_status ;;

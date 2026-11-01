@@ -150,6 +150,11 @@ tasks:
   # ── AWS (despliegue) ─────────────────────────────────────────────
   # ENV=dev (cuenta A, perfil junte-dev) o ENV=entrega (cuenta B, perfil junte-entrega).
   # Piden confirmación antes de crear o borrar (YES=1 la omite). Ver docs/infra/plan-aws.md.
+  aws:bootstrap:
+    desc: 'El entorno completo desde una cuenta vacía, con una sola confirmación (para ENV=entrega; se puede repetir si se corta)'
+    vars: { ENV: '{{.ENV | default "entrega"}}' }
+    cmds: ['bash infra/scripts/aws.sh bootstrap {{.ENV}}']
+
   aws:up:
     desc: 'Enciende la sesión en AWS: egress, redis, back y front (cobran por hora)'
     vars: { ENV: '{{.ENV | default "dev"}}' }
