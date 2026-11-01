@@ -6,6 +6,10 @@
 
 **Decidir antes:** [Redis](../pendientes.md#redis).
 
+**✅ Cerrado en dev (2026-10-28, decidido por Paula).** El objetivo se cumple: entorno local completo y la API respondiendo `/health` por HTTPS en `https://api.dev.junteapp.me` con los dos ALB sanos ([evidencia](../evidencia/s1-paso-1.9-dns-front.md)). Quedan abiertas, a propósito:
+- **S1-INF-08 y S1-INF-09** piden la topología completa (3 nodos de MongoDB, back en 2 AZ). En dev hay una instancia por capa para cuidar el crédito; se cierran en la cuenta B con **S7-QA-06** ([07](07-validacion-y-entrega.md)).
+- **S1-DOC-01 y S1-DOC-02**, a cargo del equipo: validar los pendientes y que alguien que no escribió el README haga el setup.
+
 ## Repositorio y entorno local
 
 - [x] ✅ **S1-INF-01 · Monorepo y convenciones.** Carpetas `mobile/`, `front-service/`, `back-service/`, `infra/`, `docs/`; `.gitignore`, `.editorconfig`, `.nvmrc`, plantilla de PR.
@@ -51,7 +55,7 @@
 
 ⛔ **Traspaso al equipo de AWS.** Fuera del alcance del equipo de la app: lo implementan y cierran las personas que se encargan de AWS (decidido 2026-10-11).
 
-**Estado (2026-10-25, Paula):** templates de los 8 stacks en `infra/templates/`, comandos `task aws:*` y `task back:release`. En la cuenta A (dev, versión reducida) están desplegados y verificados la red, la base, MongoDB, Redis y el back detrás del ALB interno ([evidencia](../evidencia/)). Falta el dominio para el paso 1.9 (pedido por GitHub Education). La topología completa (3 nodos de MongoDB, 2 NAT, 2 back, 2 Nginx) se monta en la cuenta B en el sprint 7. Detalle en [plan-aws.md](../infra/plan-aws.md).
+**Estado (2026-10-28, Paula):** templates de los 8 stacks en `infra/templates/`, comandos `task aws:*` y `task back:release`. En la cuenta A (dev, versión reducida) está la cadena completa verificada, con dominio: `https://api.dev.junteapp.me/api/v1/health` responde 200 por HTTPS con Mongo y Redis `up` ([evidencia](../evidencia/)). La topología completa (3 nodos de MongoDB, 2 NAT, 2 back, 2 Nginx) se monta en la cuenta B en el sprint 7. Detalle en [plan-aws.md](../infra/plan-aws.md).
 
 **Qué necesitan saber del lado de la app y el back:**
 
@@ -73,10 +77,10 @@
   *Acepta:* `rs.status()` con 3 miembros; apagar el primario elige otro.
   *Estado:* en dev, replica set de **1 nodo** con autenticación, `keyFile`, 4 usuarios de mínimo privilegio, transacciones, 20 migraciones y los 14 índices obligatorios ([evidencia](../evidencia/s1-pasos-1.5-1.6-egress-mongo.md)). El replica set de 3 nodos y la elección de primario se probaron en Docker local; **falta en AWS (cuenta B, `task aws:mongo-init`)**.
 - [ ] 🔄 (Paula) **S1-INF-09 · ALB interno** (:3000, health `/internal/health`, **idle 300 s**) + back en 2 AZ.
-  *Estado:* `40-back.yml` desplegado en dev con **1 instancia**: destino `healthy`, el back lee los secretos con el SDK y su health da Mongo y Redis `up` ([evidencia](../evidencia/s1-pasos-1.7-1.8-redis-back.md)). **Falta en AWS:** 2 instancias en 2 AZ (cuenta B) y probar el ALB interno desde Nginx (necesita S1-INF-10).
-- [ ] ⛔ **S1-INF-10 · Nginx en 2 AZ + ALB público** (443, ACM, :8080, **idle 300 s**), DNS.
+  *Estado:* `40-back.yml` desplegado en dev con **1 instancia**: destino `healthy`, el back lee los secretos con el SDK y su health da Mongo y Redis `up` ([evidencia](../evidencia/s1-pasos-1.7-1.8-redis-back.md)). Desde Nginx el ALB interno responde 200 y el back no es alcanzable salteándolo ([evidencia](../evidencia/s1-paso-1.9-dns-front.md)). **Falta en AWS:** 2 instancias en 2 AZ (cuenta B).
+- [x] ✅ **S1-INF-10 · Nginx en 2 AZ + ALB público** (443, ACM, :8080, **idle 300 s**), DNS.
   *Acepta:* `https://<dominio>/health` → 200; las instancias no tienen IP pública; desde Internet no responden 8080/3000/22.
-  *Estado:* bloqueada por el dominio (pedido por GitHub Education). `01-dns-cert.yml` y `50-front.yml` escritos y validados con `cfn-lint` (#20).
+  *Estado:* criterio cumplido en dev (2026-10-28): `https://api.dev.junteapp.me/health` → 200, `/api/v1/health` → 200 con Mongo y Redis `up`; ninguna instancia con IP pública; desde Internet solo responde el 443 (ni 80, 8080, 3000, 6379, 27017 ni 22); certificado ACM validado por DNS, TLS 1.2/1.3; `smoke.sh` 33/33 ([evidencia](../evidencia/s1-paso-1.9-dns-front.md)). Dominio `junteapp.me`, `dev.junteapp.me` delegado a Route 53. En dev hay 1 instancia de Nginx; las 2 AZ, en la cuenta B.
 
 ## Documentación
 
