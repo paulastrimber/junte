@@ -7,6 +7,7 @@ import { createArgon2Hasher } from './adapters/passwordHasher.js'
 import { connectRedis, disconnectRedis, pingRedis } from './adapters/redis.js'
 import { createRedisLock } from './adapters/redisLock.js'
 import { createRedisSocketAdapter } from './adapters/socketAdapter.js'
+import { createFcmPush, createMemoryPush } from './adapters/push/index.js'
 import { createMemoryStorage, createS3Storage } from './adapters/storage/index.js'
 import { createScheduler } from './jobs/scheduler.js'
 import { createAuthenticate } from './middlewares/authenticate.js'
@@ -22,6 +23,7 @@ import {
   CheckIn, createAttendanceService, createCheckInController, createCheckInRepository, createCheckInRoutes, createCheckInService
 } from './modules/checkins/index.js'
 import { DeviceToken, createDeviceController, createDeviceRoutes, createDeviceService, createDeviceTokenRepository } from './modules/devices/index.js'
+import { createNotifier } from './modules/notifications/index.js'
 import { buildScorers, createFeedController, createFeedRoutes, createFeedService } from './modules/feed/index.js'
 import {
   Message, createMessageController, createMessageRepository, createMessageRoutes, createMessageSerializer, createMessageService
@@ -56,9 +58,10 @@ import {
  * @param {import('./adapters/clock.js').Clock} deps.clock
  * @param {import('./adapters/passwordHasher.js').PasswordHasher} deps.passwordHasher
  * @param {import('./adapters/storage/index.js').Storage} deps.storage
+ * @param {import('./adapters/push/index.js').Push} [deps.push]  Avisos push (FCM); por defecto, en memoria (no envía nada).
  * @param {number} [deps.maxActiveSessions]
  */
-export function buildModules ({ config, logger, clock, passwordHasher, storage, maxActiveSessions }) {
+export function buildModules ({ config, logger, clock, passwordHasher, storage, push = createMemoryPush(), maxActiveSessions }) {
   const userRepo = createUserRepository(User)
   const sessionRepo = createSessionRepository(Session)
   const tokens = createTokenService({ secret: config.jwt.secret, clock })
@@ -94,6 +97,8 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     logger,
     spotAlerts: { isRequested: spotAlertRepo.exists }
   })
+  // Avisos push: siempre después del commit y sin bloquear la respuesta (regla 10).
+  const notifier = createNotifier({ push, deviceTokenRepo, planRepo, participationRepo, spotAlertRepo, userRepo, isFull, clock, logger })
   const spotAlertService = createSpotAlertService({ plans: planService, planRepo, participationRepo, spotAlertRepo, isFull, clock, logger })
   const participationService = createParticipationService({
     plans: planService,
@@ -105,7 +110,8 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     clock,
     logger,
     chatAccess: chatBroadcaster,
-    spotAlerts: spotAlertRepo
+    spotAlerts: spotAlertRepo,
+    notifier
   })
   const checkInService = createCheckInService({
     plans: planService, isLive, matchesQrChallenge, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger
@@ -179,6 +185,8 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const jobs = [
     { name: 'close-attendance', run: attendanceService.closeDueAttendance },
     { name: 'complete-plans', run: attendanceService.completeDuePlans },
+    // Recordatorio push a los inscriptos, una hora antes (una sola vez por plan: `reminderSentAt`).
+    { name: 'send-reminders', run: notifier.sendDueReminders },
     // Pedidos de aviso de planes que ya empezaron o se cancelaron (se conservan hasta entonces).
     { name: 'purge-spot-alerts', run: spotAlertService.purgeExpired }
   ]
@@ -195,6 +203,8 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     feedService,
     participationService,
     spotAlertService,
+    notifier,
+    push,
     checkInService,
     attendanceService,
     messageService,
@@ -224,8 +234,13 @@ export function createContainer (config) {
     : createMemoryStorage({ clock })
   if (!config.storage) logger.warn('S3_BUCKET/AWS_REGION not set: using in-memory storage (photos are not persisted)')
 
+  // Sin FCM_SERVICE_ACCOUNT (todavía no hay proyecto de Firebase en todos los entornos) los avisos no salen: se usa el
+  // push en memoria y se loguea cada envío que se habría hecho (sin tokens). Ver docs/pendientes.md.
+  const push = config.push ? createFcmPush({ serviceAccount: config.push.fcm, logger }) : createMemoryPush()
+  if (!config.push) logger.warn('FCM_SERVICE_ACCOUNT not set: push notifications are disabled (in-memory push)')
+
   /** Routers de los módulos, montados bajo /internal por createApp. */
-  const modules = buildModules({ config, logger, clock, passwordHasher: createArgon2Hasher(), storage })
+  const modules = buildModules({ config, logger, clock, passwordHasher: createArgon2Hasher(), storage, push })
   const { routes, jobs } = modules
 
   let redis = null

@@ -28,6 +28,7 @@ import { AVAILABILITY, EDITABLE_STATUSES, PRICE_RANGES } from './plan.rules.js'
  * @property {string} [qrPreviousNonceHash]  Desafío anterior, válido hasta `qrPreviousExpiresAt`.
  * @property {Date} [qrPreviousExpiresAt]
  * @property {Date} [attendanceClosedAt]
+ * @property {Date} [reminderSentAt]
  * @property {Date} createdAt
  * @property {number} [distanceMeters]  Solo en los resultados de `findNearby`.
  */
@@ -76,6 +77,7 @@ function toEntity (doc) {
     qrPreviousNonceHash: doc.qrPreviousNonceHash,
     qrPreviousExpiresAt: doc.qrPreviousExpiresAt,
     attendanceClosedAt: doc.attendanceClosedAt,
+    reminderSentAt: doc.reminderSentAt,
     createdAt: doc.createdAt,
     ...(doc.distanceMeters !== undefined ? { distanceMeters: doc.distanceMeters } : {})
   }
@@ -202,8 +204,12 @@ export function createPlanRepository (PlanModel) {
       // Pipeline: los valores van con `$literal` (un texto que empieza con "$" no se interpreta como campo) y la
       // ventana de check-in se recalcula en la misma operación.
       const literals = Object.fromEntries(Object.entries($set).map(([field, value]) => [field, { $literal: value }]))
+      // Si cambia el horario, el recordatorio se vuelve a mandar antes del comienzo nuevo.
+      const reminder = $set.startsAt instanceof Date
+        ? { reminderSentAt: { $cond: [{ $eq: ['$startsAt', { $literal: $set.startsAt }] }, '$reminderSentAt', '$$REMOVE'] } }
+        : {}
       const doc = await PlanModel
-        .findOneAndUpdate(filter, [{ $set: { ...literals, updatedAt: '$$NOW' } }, CHECK_IN_WINDOW_STAGE], { returnDocument: 'after', updatePipeline: true })
+        .findOneAndUpdate(filter, [{ $set: { ...reminder, ...literals, updatedAt: '$$NOW' } }, CHECK_IN_WINDOW_STAGE], { returnDocument: 'after', updatePipeline: true })
         .lean()
       return doc ? toEntity(doc) : null
     },
@@ -324,6 +330,33 @@ export function createPlanRepository (PlanModel) {
         .find({ status: { $in: LIVE_STATUSES }, attendanceClosedAt: null, checkInClosesAt: { $lt: now } })
         .select({ _id: 1 }).sort({ checkInClosesAt: 1 }).limit(limit).lean()
       return docs.map((doc) => String(doc._id))
+    },
+
+    /**
+     * Planes vivos que empiezan dentro de `(now, until]` y todavía no tienen recordatorio (S5-BE-08).
+     * Usa el índice { status, startsAt }.
+     * @returns {Promise<string[]>}
+     */
+    async findIdsDueForReminder ({ now, until, limit }) {
+      const docs = await PlanModel
+        .find({ status: { $in: LIVE_STATUSES }, startsAt: { $gt: now, $lte: until }, reminderSentAt: null })
+        .select({ _id: 1 }).sort({ startsAt: 1 }).limit(limit).lean()
+      return docs.map((doc) => String(doc._id))
+    },
+
+    /**
+     * Reserva el recordatorio del plan: lo marca enviado solo si seguía pendiente y el plan sigue vivo y dentro de la
+     * ventana. Solo una ejecución lo logra aunque dos instancias lleguen juntas (el envío va después).
+     * @returns {Promise<PlanEntity | null>} null si no correspondía (ya enviado, cancelado, fechas cambiadas…).
+     */
+    async markReminderSent (id, { now, until }) {
+      if (!mongoose.isValidObjectId(id)) return null
+      const doc = await PlanModel.findOneAndUpdate(
+        { _id: id, status: { $in: LIVE_STATUSES }, startsAt: { $gt: now, $lte: until }, reminderSentAt: null },
+        { $set: { reminderSentAt: now } },
+        { returnDocument: 'after' }
+      ).lean()
+      return doc ? toEntity(doc) : null
     },
 
     /** @returns {Promise<string[]>} planes vivos que ya terminaron (`endsAt` pasó). */

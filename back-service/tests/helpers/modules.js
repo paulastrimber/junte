@@ -2,6 +2,7 @@
 // hasher rápido y storage en memoria. Es el mismo cableado que usa el container de producción.
 import { createLogger } from '../../src/adapters/logger.js'
 import { createFixedClock } from '../../src/adapters/clock.js'
+import { createMemoryPush } from '../../src/adapters/push/index.js'
 import { createMemoryStorage } from '../../src/adapters/storage/index.js'
 import { createApp } from '../../src/app.js'
 import { DEFAULT_FEED_WEIGHTS } from '../../src/config/env.js'
@@ -18,12 +19,15 @@ export function buildTestModules ({ start = '2026-10-11T15:00:00Z', maxActiveSes
   const clock = createFixedClock(start)
   const passwordHasher = createFastHasher()
   const storage = createMemoryStorage({ clock })
+  // Push en memoria: `push.sent` guarda lo que se habría enviado y `push.invalidTokens` simula tokens rechazados por FCM.
+  const push = createMemoryPush()
   const modules = buildModules({
     config: { jwt: { secret: TEST_JWT_SECRET }, feed: { weights: feedWeights } },
     logger,
     clock,
     passwordHasher,
     storage,
+    push,
     maxActiveSessions
   })
   const app = createApp({
@@ -31,7 +35,7 @@ export function buildTestModules ({ start = '2026-10-11T15:00:00Z', maxActiveSes
     health: { pingDb: async () => true, pingRedis: async () => true },
     routes: [...modules.routes, ...extraRoutes(modules)]
   })
-  return { ...modules, clock, logger, passwordHasher, storage, app }
+  return { ...modules, clock, logger, passwordHasher, storage, push, app }
 }
 
 /** Registra un usuario por HTTP y devuelve la respuesta del registro. */

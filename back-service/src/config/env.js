@@ -49,6 +49,28 @@ const feedWeightsField = z.string().transform((text, ctx) => {
   return parsed.data
 })
 
+// Cuenta de servicio de Firebase (S5-BE-07): el JSON que se descarga de la consola de Firebase, en una sola línea.
+// Es un secreto: los mensajes nunca incluyen el valor. Solo se usan project_id, client_email y private_key.
+const fcmServiceAccountField = z.string().transform((text, ctx) => {
+  const fail = () => {
+    ctx.addIssue({ code: 'custom', message: 'debe ser el JSON de la cuenta de servicio de Firebase (con project_id, client_email y private_key)' })
+    return z.NEVER
+  }
+  let json
+  try {
+    json = JSON.parse(text)
+  } catch {
+    return fail()
+  }
+  const parsed = z.object({
+    project_id: z.string().regex(/^[a-z0-9-]{4,64}$/),
+    client_email: z.email(),
+    private_key: z.string().includes('PRIVATE KEY')
+  }).safeParse(json)
+  if (!parsed.success) return fail()
+  return { projectId: parsed.data.project_id, clientEmail: parsed.data.client_email, privateKey: parsed.data.private_key }
+})
+
 const required = (hint) => ({
   error: (issue) => (issue.input === undefined ? 'es obligatoria' : hint)
 })
@@ -75,6 +97,9 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(LOG_LEVELS, { error: `debe ser uno de: ${LOG_LEVELS.join(', ')}` }).default('info'),
   // Pesos del score del feed (S3-BE-06). Opcional: sin ella se usan los del informe.
   FEED_WEIGHTS: feedWeightsField.optional(),
+  // Push (S5-BE-07). Opcional: sin ella los avisos no salen del back (se loguean); en AWS sale de Secrets Manager
+  // (FCM_SERVICE_ACCOUNT_SECRET_ID, ver ./secrets.js).
+  FCM_SERVICE_ACCOUNT: fcmServiceAccountField.optional(),
   // Fotos en S3 (S2-BE-09). Opcionales fuera de producción: sin ellas se usa el storage en memoria.
   // Las credenciales NO son variables de la app: salen de la cadena por defecto del SDK / rol IAM.
   S3_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/, { error: 'no es un nombre de bucket válido' }).optional(),
@@ -144,7 +169,8 @@ export function loadConfig (env) {
     redis: { url: vars.REDIS_URL },
     jwt: { secret: vars.JWT_SECRET },
     storage: vars.S3_BUCKET && vars.AWS_REGION ? { bucket: vars.S3_BUCKET, region: vars.AWS_REGION } : null,
-    feed: { weights: { ...(vars.FEED_WEIGHTS ?? DEFAULT_FEED_WEIGHTS) } }
+    feed: { weights: { ...(vars.FEED_WEIGHTS ?? DEFAULT_FEED_WEIGHTS) } },
+    push: vars.FCM_SERVICE_ACCOUNT ? { fcm: vars.FCM_SERVICE_ACCOUNT } : null
   })
 }
 
@@ -166,4 +192,6 @@ function deepFreeze (object) {
  * @property {{ secret: string }} jwt
  * @property {{ bucket: string, region: string } | null} storage  null → storage en memoria (solo desarrollo/test).
  * @property {{ weights: { interests: number, distance: number, schedule: number } }} feed  Pesos del score del feed (suman 1).
+ * @property {{ fcm: { projectId: string, clientEmail: string, privateKey: string } } | null} push  null → los avisos push no
+ *   salen (implementación en memoria que solo los loguea).
  */
