@@ -21,6 +21,7 @@ import {
 import {
   CheckIn, createAttendanceService, createCheckInController, createCheckInRepository, createCheckInRoutes, createCheckInService
 } from './modules/checkins/index.js'
+import { DeviceToken, createDeviceController, createDeviceRoutes, createDeviceService, createDeviceTokenRepository } from './modules/devices/index.js'
 import { buildScorers, createFeedController, createFeedRoutes, createFeedService } from './modules/feed/index.js'
 import {
   Message, createMessageController, createMessageRepository, createMessageRoutes, createMessageSerializer, createMessageService
@@ -71,6 +72,7 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const messageRepo = createMessageRepository(Message)
   const reportRepo = createReportRepository(Report)
   const spotAlertRepo = createSpotAlertRepository(SpotAlert)
+  const deviceTokenRepo = createDeviceTokenRepository(DeviceToken)
 
   const userService = createUserService({
     userRepo, storage, catalogs: catalogService, clock, logger, countNoShows: participationRepo.countNoShows
@@ -144,6 +146,8 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const planController = createPlanController({ planService, planSerializer, feedService })
   const feedController = createFeedController({ feedService, planSerializer, pickFilters })
   const spotAlertController = createSpotAlertController({ spotAlertService })
+  const deviceService = createDeviceService({ deviceTokenRepo, clock, logger })
+  const deviceController = createDeviceController({ deviceService })
   const participationController = createParticipationController({ participationService, serializeParticipant: userSerializer.serializePublic })
   const checkInController = createCheckInController({ checkInService })
   const messageController = createMessageController({ messageService, messageSerializer })
@@ -164,6 +168,8 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     { path: '/plans', router: createSpotAlertRoutes({ spotAlertController, planIdParams, authenticate }) },
     { path: '/plans', router: createMessageRoutes({ messageController, planIdParams, authenticate }) },
     { path: '/feed', router: createFeedRoutes({ feedController, authenticate }) },
+    // Tokens de push (FCM) del teléfono.
+    { path: '/devices', router: createDeviceRoutes({ deviceController, authenticate }) },
     { path: '/reports', router: createReportRoutes({ reportController, authenticate }) },
     // Panel de administración: todo exige rol admin (router y servicio).
     { path: '/admin', router: createAdminRoutes({ adminController, authenticate }) }
