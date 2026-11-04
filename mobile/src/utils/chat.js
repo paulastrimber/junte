@@ -139,3 +139,13 @@ export function messageGroupPosition (messages, index) {
     isLast: !isSameGroup(message, messages[index - 1])
   }
 }
+
+/**
+ * Duración de una nota de voz: "0:07", "1:00".
+ * @param {number} ms
+ * @returns {string}
+ */
+export function formatDuration (ms) {
+  const total = Math.max(0, Math.round((Number(ms) || 0) / 1000))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}

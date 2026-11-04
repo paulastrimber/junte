@@ -13,8 +13,10 @@ const planPath = (id) => `/plans/${encodeURIComponent(id)}`
  * @property {string} id
  * @property {string} planId
  * @property {{ id: string, name: string | null, photoUrl: string | null, reputation: number } | null} sender
- * @property {string} type  'text' (las notas de voz, 'voice', llegarán más adelante)
- * @property {string} text
+ * @property {string} type  'text' o 'voice' (nota de voz)
+ * @property {string | null} text  null en las notas de voz
+ * @property {string | null} [audioUrl]  Solo notas de voz: URL firmada de corta duración
+ * @property {number} [durationMs]  Solo notas de voz
  * @property {string | null} clientId
  * @property {string} createdAt  ISO 8601
  */
@@ -28,10 +30,15 @@ export async function listMessages (id, { limit, cursor } = {}, { client = getAp
  * Envía un mensaje (respaldo del socket). Idempotente por `clientId`: repetir el mismo devuelve el mensaje ya
  * guardado (200) en lugar de duplicarlo (201 la primera vez).
  * @param {string} id
- * @param {{ text: string, clientId?: string }} body
+ * @param {{ text: string, clientId?: string } | { type: 'voice', audioKey: string, durationMs: number, clientId?: string }} body
  * @returns {Promise<Message>}
  */
-export async function sendMessage (id, { text, clientId }, { client = getApiClient() } = {}) {
-  const { data } = await client.post(`${planPath(id)}/messages`, { text, ...(clientId ? { clientId } : {}) })
+export async function sendMessage (id, { clientId, ...content }, { client = getApiClient() } = {}) {
+  const { data } = await client.post(`${planPath(id)}/messages`, { ...messageContent(content), ...(clientId ? { clientId } : {}) })
   return data
+}
+
+/** Solo los campos que acepta el back: texto, o nota de voz (`type`, `audioKey`, `durationMs`). */
+export function messageContent ({ type, text, audioKey, durationMs }) {
+  return type === 'voice' ? { type, audioKey, durationMs } : { text }
 }

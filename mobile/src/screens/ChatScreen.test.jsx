@@ -9,6 +9,7 @@ import { socketService } from '../services/socket.js'
 import ChatScreen, { TEXTS } from './ChatScreen.jsx'
 
 jest.mock('../services/api/messages.js', () => ({ listMessages: jest.fn(), sendMessage: jest.fn() }))
+jest.mock('../services/voiceNotes.js', () => ({ uploadVoiceNote: jest.fn(), VOICE_MAX_DURATION_MS: 60000 }))
 jest.mock('../services/socket.js', () => ({
   SOCKET_STATUS: { IDLE: 'idle', CONNECTING: 'connecting', CONNECTED: 'connected', RECONNECTING: 'reconnecting', UNAVAILABLE: 'unavailable' },
   socketService: { subscribe: jest.fn(), sendChatMessage: jest.fn(), getStatus: jest.fn(), onStatusChange: jest.fn() }
@@ -138,7 +139,7 @@ describe('ChatScreen: estados', () => {
     expect(TEXTS.errorTitle).toBe('No pudimos cargar el chat')
     expect(TEXTS.unsupported).toBe('Actualizá la app para ver este mensaje')
 
-    listMessages.mockResolvedValue({ items: [message(1, { type: 'voice', text: '' })], nextCursor: null })
+    listMessages.mockResolvedValue({ items: [message(1, { type: 'sticker', text: '' })], nextCursor: null })
     await renderChat()
 
     expect(await screen.findByText('Actualizá la app para ver este mensaje')).toBeOnTheScreen()
@@ -155,7 +156,7 @@ describe('ChatScreen: estados', () => {
   })
 
   it('un mensaje de un tipo que la app no conoce no rompe la lista', async () => {
-    listMessages.mockResolvedValue({ items: [message(2, { type: 'voice', text: '' }), message(1)], nextCursor: null })
+    listMessages.mockResolvedValue({ items: [message(2, { type: 'sticker', text: '' }), message(1)], nextCursor: null })
 
     await renderChat()
 
@@ -245,13 +246,14 @@ describe('ChatScreen: historial', () => {
 })
 
 describe('ChatScreen: enviar', () => {
-  it('el botón está deshabilitado con el campo vacío o solo con espacios', async () => {
+  it('con el campo vacío o solo con espacios ofrece grabar una nota de voz en lugar de enviar', async () => {
     await renderChat()
     await screen.findByText(TEXTS.emptyTitle)
-    expect(sendButton()).toBeDisabled()
+    expect(screen.getByRole('button', { name: TEXTS.record })).toBeOnTheScreen()
+    expect(screen.queryByRole('button', { name: TEXTS.send })).toBeNull()
 
     await fireEvent.changeText(input(), '   ')
-    expect(sendButton()).toBeDisabled()
+    expect(screen.queryByRole('button', { name: TEXTS.send })).toBeNull()
 
     await fireEvent.changeText(input(), 'Hola')
     expect(sendButton()).toBeEnabled()
@@ -316,5 +318,47 @@ describe('ChatScreen: enviar', () => {
     await fireEvent.changeText(input(), 'a'.repeat(1850))
 
     expect(screen.getByText('1850/2000')).toBeOnTheScreen()
+  })
+})
+
+describe('ChatScreen: notas de voz', () => {
+  const audio = require('expo-audio')
+  const { uploadVoiceNote } = require('../services/voiceNotes.js')
+
+  it('muestra las notas de voz con su duración y un botón para reproducirlas', async () => {
+    listMessages.mockResolvedValue({ items: [message(1, { type: 'voice', text: null, audioUrl: 'https://s3/a.m4a', durationMs: 7000 })], nextCursor: null })
+
+    await renderChat()
+
+    expect(await screen.findByText('0:07')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Beto: Nota de voz 0:07. 10:01')).toBeOnTheScreen()
+    await fireEvent.press(screen.getByRole('button', { name: 'Reproducir nota de voz' }))
+    expect(audio.__players.at(-1).play).toHaveBeenCalled()
+  })
+
+  it('sin permiso del micrófono lo explica y no graba', async () => {
+    audio.requestRecordingPermissionsAsync.mockResolvedValueOnce({ granted: false, canAskAgain: false })
+    await renderChat()
+    await screen.findByText(TEXTS.emptyTitle)
+
+    await fireEvent.press(screen.getByRole('button', { name: TEXTS.record }))
+
+    expect(await screen.findByText(TEXTS.micDenied)).toBeOnTheScreen()
+    expect(audio.__recorders.at(-1).record).not.toHaveBeenCalled()
+  })
+
+  it('graba, sube el audio y lo manda como nota de voz por el socket', async () => {
+    audio.requestRecordingPermissionsAsync.mockResolvedValueOnce({ granted: true })
+    uploadVoiceNote.mockResolvedValue({ audioKey: 'messages/p1/u1/a.m4a', durationMs: 3000 })
+    socketService.sendChatMessage.mockImplementation(async ({ clientId }) => message(9, { sender: ME, type: 'voice', text: null, audioUrl: 'https://s3/a.m4a', durationMs: 3000, clientId }))
+    await renderChat()
+    await screen.findByText(TEXTS.emptyTitle)
+
+    await fireEvent.press(screen.getByRole('button', { name: TEXTS.record }))
+    expect(await screen.findByRole('button', { name: TEXTS.sendVoice })).toBeOnTheScreen()
+    await fireEvent.press(screen.getByRole('button', { name: TEXTS.sendVoice }))
+
+    expect(uploadVoiceNote).toHaveBeenCalledWith(expect.objectContaining({ planId: 'p1', uri: 'file:///tmp/nota.m4a' }))
+    expect(socketService.sendChatMessage).toHaveBeenCalledWith(expect.objectContaining({ planId: 'p1', type: 'voice', audioKey: 'messages/p1/u1/a.m4a' }))
   })
 })

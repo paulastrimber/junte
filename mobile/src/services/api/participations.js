@@ -14,6 +14,16 @@ export async function leavePlan (id, { client = getApiClient() } = {}) {
   await client.delete(`${planPath(id)}/join`)
 }
 
+/** Pide que le avisen cuando se libere un lugar en un plan lleno. Idempotente. */
+export async function requestSpotAlert (id, { client = getApiClient() } = {}) {
+  await client.put(`${planPath(id)}/spot-alert`)
+}
+
+/** Cancela el aviso de lugar libre. Idempotente. */
+export async function cancelSpotAlert (id, { client = getApiClient() } = {}) {
+  await client.delete(`${planPath(id)}/spot-alert`)
+}
+
 /**
  * Anotados de un plan (solo para participantes y el creador).
  * @param {string} id

@@ -4,6 +4,7 @@ import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import { listMessages, sendMessage } from '../services/api/messages.js'
 import { OUTBOX_STATUS, OUTBOX_TYPE, connectivity, isTransportFailure, outbox, readCache, readThrough } from '../services/offline/index.js'
 import { SOCKET_STATUS, socketService } from '../services/socket.js'
+import { uploadVoiceNote } from '../services/voiceNotes.js'
 import { MESSAGE_STATUS, createClientId, mergeMessages, mergeRecoveredPage, sortMessages } from '../utils/chat.js'
 import { CHAT_ERROR_MESSAGES, toViewError } from '../utils/errorMessages.js'
 import { useIsForeground } from './useOffline.js'
@@ -241,6 +242,37 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
     showAccessLost(error)
   }), [planId, markUnsent, showAccessLost])
 
+  // Por el socket; si falla la conexión o no llega el ack, por REST con el mismo `clientId` (el servidor deduplica).
+  const sendContent = useCallback(async ({ clientId, ...content }) => {
+    try {
+      return await socketService.sendChatMessage({ planId, clientId, ...content })
+    } catch (failure) {
+      if (!TRANSPORT_FAILURES.has(failure?.code)) throw failure
+      return sendMessage(planId, { clientId, ...content })
+    }
+  }, [planId])
+
+  /**
+   * Nota de voz (S5-MOB-05): sube el audio (si todavía no se subió) y manda el mensaje. No pasa por la cola de
+   * pendientes: sin conexión queda "No se envió" y se reintenta a mano (el archivo sigue en el teléfono).
+   */
+  const deliverVoice = useCallback(async ({ clientId, localUri, durationMs, audioKey }) => {
+    try {
+      if (!connectivity.isOnline()) throw new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR })
+      let key = audioKey
+      if (!key) {
+        key = (await uploadVoiceNote({ planId, uri: localUri, durationMs })).audioKey
+        markUnsent(clientId, { audioKey: key })
+      }
+      const saved = await sendContent({ clientId, type: 'voice', audioKey: key, durationMs: Math.max(1, Math.round(durationMs)) })
+      setState((current) => ({ ...current, messages: mergeMessages(current.messages, [saved]) }))
+    } catch (failure) {
+      const error = chatError(failure)
+      markUnsent(clientId, { status: MESSAGE_STATUS.FAILED, queued: false, error })
+      showAccessLost(error)
+    }
+  }, [planId, sendContent, markUnsent, showAccessLost])
+
   const deliver = useCallback(async ({ clientId, text }) => {
     const enqueue = async () => {
       markUnsent(clientId, { status: MESSAGE_STATUS.PENDING, queued: true, error: null })
@@ -249,13 +281,7 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
     // Sin conexión ni se intenta: va directo a la cola.
     if (!connectivity.isOnline()) return enqueue()
     try {
-      let saved
-      try {
-        saved = await socketService.sendChatMessage({ planId, text, clientId })
-      } catch (failure) {
-        if (!TRANSPORT_FAILURES.has(failure?.code)) throw failure
-        saved = await sendMessage(planId, { text, clientId })
-      }
+      const saved = await sendContent({ clientId, text })
       setState((current) => ({ ...current, messages: mergeMessages(current.messages, [saved]) }))
     } catch (failure) {
       const error = chatError(failure)
@@ -263,7 +289,7 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
       markUnsent(clientId, { status: MESSAGE_STATUS.FAILED, queued: false, error })
       showAccessLost(error)
     }
-  }, [planId, planTitle, markUnsent, showAccessLost])
+  }, [planId, planTitle, sendContent, markUnsent, showAccessLost])
 
   const send = useCallback((text) => {
     const trimmed = text.trim()
@@ -285,6 +311,29 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
     deliver({ clientId, text: trimmed })
   }, [planId, deliver])
 
+  /** Manda una nota de voz grabada (`uri` del archivo .m4a local). Se ve enseguida como pendiente. */
+  const sendVoice = useCallback(({ uri, durationMs }) => {
+    if (!uri) return
+    const clientId = createClientId()
+    const pending = {
+      id: `local-${clientId}`,
+      planId,
+      sender: authorView(userRef.current),
+      type: 'voice',
+      text: null,
+      localUri: uri,
+      audioUrl: null,
+      durationMs,
+      clientId,
+      createdAt: new Date().toISOString(),
+      status: MESSAGE_STATUS.PENDING,
+      queued: false,
+      error: null
+    }
+    setState((current) => ({ ...current, messages: sortMessages([pending, ...current.messages]) }))
+    deliverVoice({ clientId, localUri: uri, durationMs })
+  }, [planId, deliverVoice])
+
   /** Reintenta un envío fallido con el mismo `clientId`: si en realidad el servidor lo había guardado, no se duplica. */
   const retrySend = useCallback(async (clientId) => {
     const failed = stateRef.current.messages.find((message) => message.clientId === clientId && message.status === MESSAGE_STATUS.FAILED)
@@ -293,8 +342,9 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
     const queued = (await outbox.list()).find((item) => item.type === OUTBOX_TYPE.MESSAGE && item.payload.clientId === clientId)
     if (queued) await outbox.remove(queued.id)
     markUnsent(clientId, { status: MESSAGE_STATUS.PENDING, error: null })
+    if (failed.type === 'voice') return deliverVoice(failed)
     deliver({ clientId, text: failed.text })
-  }, [markUnsent, deliver])
+  }, [markUnsent, deliver, deliverVoice])
 
   return {
     status: state.status,
@@ -306,6 +356,7 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
     savedAt: state.savedAt,
     isPolling,
     send,
+    sendVoice,
     retrySend,
     loadOlder,
     reload: load

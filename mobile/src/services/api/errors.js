@@ -19,7 +19,9 @@ export const CLIENT_ERROR_CODES = Object.freeze({
   /** La imagen elegida no es JPEG, PNG o WebP (o está vacía). Se detecta antes de pedir la URL firmada. */
   IMAGE_NOT_SUPPORTED: 'IMAGE_NOT_SUPPORTED',
   /** La imagen elegida pesa más del máximo permitido. */
-  IMAGE_TOO_LARGE: 'IMAGE_TOO_LARGE'
+  IMAGE_TOO_LARGE: 'IMAGE_TOO_LARGE',
+  /** La nota de voz grabada pesa más del máximo o dura más de 60 segundos. */
+  AUDIO_TOO_LARGE: 'AUDIO_TOO_LARGE'
 })
 
 /**
@@ -43,6 +45,7 @@ const DEFAULT_MESSAGES = Object.freeze({
   UPLOAD_FAILED: 'No pudimos subir la foto. Probá de nuevo.',
   IMAGE_NOT_SUPPORTED: 'Elegí una imagen JPEG, PNG o WebP.',
   IMAGE_TOO_LARGE: 'La imagen pesa más de 5 MB. Elegí una más liviana.',
+  AUDIO_TOO_LARGE: 'La nota de voz es demasiado larga: puede durar hasta 60 segundos.',
   VALIDATION_ERROR: 'Hay datos inválidos en la solicitud.',
   UNAUTHENTICATED: 'Tenés que iniciar sesión.',
   FORBIDDEN: 'No tenés permiso para esta acción.',

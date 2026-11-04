@@ -12,12 +12,14 @@ import { LoadingState } from '../components/LoadingState.jsx'
 import { Notice } from '../components/Notice.jsx'
 import { OfflineNotice } from '../components/OfflineNotice.jsx'
 import { Text } from '../components/Text.jsx'
+import { VoiceNotePlayer } from '../components/VoiceNotePlayer.jsx'
 import { CHAT_STATUS, POLL_INTERVAL_MS, useChat } from '../hooks/useChat.js'
 import { useAuth } from '../hooks/useAuth.js'
 import { useIsOnline } from '../hooks/useOffline.js'
 import { useScreenFocus } from '../hooks/useScreenFocus.js'
+import { RECORDER_STATUS, useVoiceRecorder } from '../hooks/useVoiceRecorder.js'
 import { ROUTES } from '../navigation/routes.js'
-import { MAX_MESSAGE_LENGTH, MESSAGE_STATUS, formatMessageTime, messageGroupPosition } from '../utils/chat.js'
+import { MAX_MESSAGE_LENGTH, MESSAGE_STATUS, formatDuration, formatMessageTime, messageGroupPosition } from '../utils/chat.js'
 import { borders, createThemedStyles, radius, sizes, spacing, typography, useTheme } from '../theme/index.js'
 
 export const TEXTS = Object.freeze({
@@ -45,7 +47,15 @@ export const TEXTS = Object.freeze({
   reportMessage: 'Reportar mensaje',
   reportLabel: (name) => `el mensaje de ${name ?? 'esta persona'}`,
   cancel: 'Cancelar',
-  longPressHint: 'Mantené presionado para reportarlo'
+  longPressHint: 'Mantené presionado para reportarlo',
+  // Notas de voz (S5-MOB-05)
+  voiceNote: 'Nota de voz',
+  record: 'Grabar una nota de voz',
+  recording: (time) => `Grabando ${time} (hasta 1:00)`,
+  sendVoice: 'Enviar nota de voz',
+  discardVoice: 'Descartar nota de voz',
+  micDenied: 'Para mandar notas de voz, permití el acceso al micrófono en la configuración del teléfono.',
+  micError: 'No pudimos empezar a grabar. Probá de nuevo.'
 })
 
 // El contador aparece cerca del límite, no en cada mensaje.
@@ -70,11 +80,13 @@ const MessageRow = memo(function MessageRow ({ message, isOwn, isFirst, isLast, 
   const bodyColor = isOwn ? 'onPrimary' : 'text'
   const metaColor = isOwn ? 'onPrimary' : 'textMuted'
   const name = message.sender?.name ?? ''
-  // Tipos que esta versión no sabe mostrar (p. ej. notas de voz) no rompen la lista.
+  // Tipos que esta versión no sabe mostrar no rompen la lista.
   const isText = !message.type || message.type === 'text'
+  const isVoice = message.type === 'voice'
   const status = isPending ? (message.queued ? TEXTS.queued : TEXTS.sending) : formatMessageTime(message.createdAt)
   // Se anuncia completo aunque el nombre no se vea (no es el primero del grupo): "Ana: hola. 14:32".
-  const label = `${isOwn ? TEXTS.me : name}: ${isText ? message.text : TEXTS.unsupported}. ${isFailed ? TEXTS.notSent : status}`
+  const content = isText ? message.text : isVoice ? `${TEXTS.voiceNote} ${formatDuration(message.durationMs)}` : TEXTS.unsupported
+  const label = `${isOwn ? TEXTS.me : name}: ${content}. ${isFailed ? TEXTS.notSent : status}`
 
   return (
     <View style={[styles.row, isOwn && styles.rowOwn, isFirst ? styles.groupStart : styles.groupNext]}>
@@ -101,9 +113,9 @@ const MessageRow = memo(function MessageRow ({ message, isOwn, isFirst, isLast, 
           ]}
         >
           {isOwn || !isFirst ? null : <Text variant='label' color='primary'>{name}</Text>}
-          {isText
-            ? <Text color={bodyColor} selectable>{message.text}</Text>
-            : <Text color={metaColor} variant='caption'>{TEXTS.unsupported}</Text>}
+          {isText ? <Text color={bodyColor} selectable>{message.text}</Text> : null}
+          {isVoice ? <VoiceNotePlayer source={message.audioUrl ?? message.localUri ?? null} durationMs={message.durationMs} color={bodyColor} /> : null}
+          {!isText && !isVoice ? <Text color={metaColor} variant='caption'>{TEXTS.unsupported}</Text> : null}
           <Text variant='caption' color={metaColor} style={styles.time}>{status}</Text>
         </Pressable>
         {isFailed
@@ -128,10 +140,33 @@ const MessageRow = memo(function MessageRow ({ message, isOwn, isFirst, isLast, 
   )
 })
 
-/** Caja de texto + botón de enviar. El texto es estado local: lo único que sale es lo que se manda. */
-function Composer ({ onSend }) {
+/** Mientras se graba una nota de voz: el tiempo, descartar y enviar. */
+function RecordingBar ({ elapsedMs, onCancel, onSend }) {
+  const styles = useStyles()
+  return (
+    <View style={styles.composerRow}>
+      <Pressable accessibilityRole='button' accessibilityLabel={TEXTS.discardVoice} onPress={onCancel} style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
+        <Icon name='trash-outline' color='danger' />
+      </Pressable>
+      <View style={styles.recording} accessibilityLiveRegion='polite'>
+        <Icon name='radio-button-on' color='danger' size={sizes.iconSm} />
+        <Text>{TEXTS.recording(formatDuration(elapsedMs))}</Text>
+      </View>
+      <Pressable accessibilityRole='button' accessibilityLabel={TEXTS.sendVoice} onPress={onSend} style={({ pressed }) => [styles.sendButton, pressed && styles.pressed]}>
+        <Icon name='send' color='onPrimary' />
+      </Pressable>
+    </View>
+  )
+}
+
+/**
+ * Caja de texto + botón de enviar; con el campo vacío, el botón graba una nota de voz. El texto es estado local: lo
+ * único que sale es lo que se manda.
+ */
+function Composer ({ onSend, onSendVoice }) {
   const styles = useStyles()
   const { colors } = useTheme()
+  const recorder = useVoiceRecorder({ onLimit: onSendVoice })
   const [text, setText] = useState('')
   // Cambia después de cada envío: el campo se vuelve a crear. En iOS, con una autocorrección pendiente, vaciar el
   // campo no alcanza: el teclado vuelve a escribir el texto corregido después (y se reenviaría sin querer). La
@@ -147,8 +182,25 @@ function Composer ({ onSend }) {
     setInputKey((key) => key + 1)
   }
 
+  const { start: handleRecord, cancel: handleDiscard } = recorder
+
+  async function sendRecording () {
+    const note = await recorder.stop().catch(() => null)
+    if (note) onSendVoice(note)
+  }
+
+  if (recorder.isRecording) {
+    return (
+      <View style={styles.composer}>
+        <RecordingBar elapsedMs={recorder.elapsedMs} onCancel={handleDiscard} onSend={sendRecording} />
+      </View>
+    )
+  }
+
   return (
     <View style={styles.composer}>
+      {recorder.status === RECORDER_STATUS.DENIED ? <Notice tone='warning' icon='mic-off-outline' message={TEXTS.micDenied} /> : null}
+      {recorder.status === RECORDER_STATUS.ERROR ? <Notice tone='danger' message={TEXTS.micError} /> : null}
       {text.length >= COUNTER_FROM
         ? <Text variant='caption' color={text.length >= MAX_MESSAGE_LENGTH ? 'danger' : 'textMuted'} style={styles.counter}>{`${text.length}/${MAX_MESSAGE_LENGTH}`}</Text>
         : null}
@@ -166,16 +218,30 @@ function Composer ({ onSend }) {
           maxLength={MAX_MESSAGE_LENGTH}
           multiline
         />
-        <Pressable
-          accessibilityRole='button'
-          accessibilityLabel={TEXTS.send}
-          accessibilityState={{ disabled: !canSend }}
-          disabled={!canSend}
-          onPress={submit}
-          style={({ pressed }) => [styles.sendButton, pressed && styles.pressed, !canSend && styles.disabled]}
-        >
-          <Icon name='send' color='onPrimary' />
-        </Pressable>
+        {canSend || !onSendVoice
+          ? (
+            <Pressable
+              accessibilityRole='button'
+              accessibilityLabel={TEXTS.send}
+              accessibilityState={{ disabled: !canSend }}
+              disabled={!canSend}
+              onPress={submit}
+              style={({ pressed }) => [styles.sendButton, pressed && styles.pressed, !canSend && styles.disabled]}
+            >
+              <Icon name='send' color='onPrimary' />
+            </Pressable>
+            )
+          : (
+            <Pressable
+              accessibilityRole='button'
+              accessibilityLabel={TEXTS.record}
+              disabled={recorder.status === RECORDER_STATUS.STARTING}
+              onPress={handleRecord}
+              style={({ pressed }) => [styles.sendButton, pressed && styles.pressed]}
+            >
+              <Icon name='mic' color='onPrimary' />
+            </Pressable>
+            )}
       </View>
     </View>
   )
@@ -190,7 +256,7 @@ export default function ChatScreen ({ navigation, route }) {
   // Pantalla activa: solo entonces se hace polling.
   const isFocused = useScreenFocus(navigation)
   const chat = useChat(planId, { user, isActive: isFocused, planTitle: title ?? null })
-  const { loadOlder, retrySend, send, reload } = chat
+  const { loadOlder, retrySend, send, sendVoice, reload } = chat
   const userId = user?.id
 
   // El teclado no tapa el campo: se mide a qué altura de la ventana empieza la pantalla (debajo del encabezado).
@@ -202,7 +268,7 @@ export default function ChatScreen ({ navigation, route }) {
 
   // Pulsación larga sobre un mensaje de otra persona: reportarlo.
   const openMessageActions = useCallback((message) => {
-    Alert.alert(TEXTS.messageActions, message.text, [
+    Alert.alert(TEXTS.messageActions, message.type === 'voice' ? TEXTS.voiceNote : message.text, [
       { text: TEXTS.reportMessage, style: 'destructive', onPress: () => navigation.navigate(ROUTES.REPORT, { targetType: 'message', targetId: message.id, label: TEXTS.reportLabel(message.sender?.name) }) },
       { text: TEXTS.cancel, style: 'cancel' }
     ])
@@ -264,7 +330,7 @@ export default function ChatScreen ({ navigation, route }) {
               ListFooterComponent={olderFooter()}
             />
             )}
-        <Composer onSend={send} />
+        <Composer onSend={send} onSendVoice={sendVoice} />
       </>
     )
   }
@@ -324,6 +390,8 @@ const useStyles = createThemedStyles(({ colors }) => ({
     color: colors.text
   },
   sendButton: { width: sizes.input, height: sizes.input, borderRadius: radius.md, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
+  iconButton: { width: sizes.input, height: sizes.input, alignItems: 'center', justifyContent: 'center' },
+  recording: { flex: 1, minHeight: sizes.input, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   pressed: { opacity: 0.75 },
   disabled: { opacity: 0.45 }
 }))

@@ -5,6 +5,7 @@ import { Icon } from '../components/Icon.jsx'
 import { AUTH_STATUS } from '../contexts/AuthContext.jsx'
 import { useAuth } from '../hooks/useAuth.js'
 import { useOfflineSync } from '../hooks/useOffline.js'
+import { usePlanLinks } from '../hooks/usePlanLinks.js'
 import ChatScreen, { TEXTS as CHAT_TEXTS } from '../screens/ChatScreen.jsx'
 import HomeScreen, { TEXTS as HOME_TEXTS } from '../screens/HomeScreen.jsx'
 import LoadingScreen from '../screens/LoadingScreen.jsx'
@@ -120,6 +121,8 @@ function AppTabs () {
   const { colors } = useTheme()
   // La cola de pendientes se manda solo con la sesión iniciada (necesita el token).
   useOfflineSync()
+  // Avisos push (registro del teléfono) y planes abiertos desde un aviso o un enlace para invitar.
+  usePlanLinks()
   const screenOptions = ({ route }) => ({
     ...tabScreenOptions(colors),
     tabBarIcon: ({ focused }) => (

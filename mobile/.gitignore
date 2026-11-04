@@ -26,3 +26,8 @@ expo-env.d.ts
 # Variables locales
 .env
 .env*.local
+
+# Firebase (avisos push, S5-MOB-04): config del proyecto. No va en Git; en EAS se carga como variable de tipo archivo
+# GOOGLE_SERVICES_JSON (ver docs/arquitectura/05-mobile.md).
+google-services.json
+GoogleService-Info.plist

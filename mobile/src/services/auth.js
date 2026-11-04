@@ -23,11 +23,18 @@ const NO_PROFILE_CACHE = Object.freeze({ save: async () => {}, load: async () =>
 export function createAuthService ({ tokenStorage, api, deviceLabel, profileCache = NO_PROFILE_CACHE }) {
   const expiredListeners = new Set()
   const endedListeners = new Set()
+  const beforeLogoutHooks = new Set()
   let refreshInFlight = null
 
   /** La sesión local terminó (logout, logout-all o sesión vencida): quien guarda estado de la sesión (el socket) lo suelta. */
   function notifyEnded () {
     endedListeners.forEach((listener) => listener())
+  }
+
+  /** Lo que hay que hacer antes de borrar la sesión local, con el access token todavía a mano (dar de baja el token de
+   * push). Nunca frena el cierre de sesión. */
+  async function runBeforeLogout () {
+    await Promise.all([...beforeLogoutHooks].map((hook) => Promise.resolve().then(hook).catch(() => {})))
   }
 
   async function storeSession ({ user, accessToken, refreshToken }) {
@@ -113,6 +120,8 @@ export function createAuthService ({ tokenStorage, api, deviceLabel, profileCach
       } catch {
         // Sin conexión o sesión ya cerrada: igual se cierra acá. El servidor la deja vencer.
       }
+      // El access token sigue valiendo unos minutos después del logout: alcanza para dar de baja el token de push.
+      await runBeforeLogout()
       await tokenStorage.clear()
       notifyEnded()
     },
@@ -120,6 +129,7 @@ export function createAuthService ({ tokenStorage, api, deviceLabel, profileCach
     /** Cierra todas las sesiones. Si el servidor no responde NO se cierra nada: el usuario tiene que saberlo. */
     async logoutAll () {
       await api.logoutAll()
+      await runBeforeLogout()
       await tokenStorage.clear()
       notifyEnded()
     },
@@ -131,6 +141,12 @@ export function createAuthService ({ tokenStorage, api, deviceLabel, profileCach
     onSessionExpired (listener) {
       expiredListeners.add(listener)
       return () => expiredListeners.delete(listener)
+    },
+
+    /** @param {() => Promise<void> | void} hook Corre antes de borrar la sesión local (logout y logout-all). @returns {() => void} */
+    onBeforeLogout (hook) {
+      beforeLogoutHooks.add(hook)
+      return () => beforeLogoutHooks.delete(hook)
     },
 
     /** @param {() => void} listener Se llama cada vez que la sesión local termina. @returns {() => void} cancelar suscripción */
