@@ -30,11 +30,14 @@ import {
 } from './modules/participations/index.js'
 import {
   Plan, createMyPlansRoutes, createPlanController, createPlanRepository, createPlanRoutes, createPlanSerializer, createPlanService,
-  isLive, matchesQrChallenge, pickFilters, planIdParams
+  isFull, isLive, matchesQrChallenge, pickFilters, planIdParams
 } from './modules/plans/index.js'
 import {
   Report, createReportController, createReportRepository, createReportRoutes, createReportService
 } from './modules/reports/index.js'
+import {
+  SpotAlert, createSpotAlertController, createSpotAlertRepository, createSpotAlertRoutes, createSpotAlertService
+} from './modules/spot-alerts/index.js'
 import { createUploadController, createUploadRoutes, createUploadService } from './modules/uploads/index.js'
 import { createChatBroadcaster } from './sockets/chat.broadcaster.js'
 import { createSocketServer } from './sockets/index.js'
@@ -67,6 +70,7 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const checkInRepo = createCheckInRepository(CheckIn)
   const messageRepo = createMessageRepository(Message)
   const reportRepo = createReportRepository(Report)
+  const spotAlertRepo = createSpotAlertRepository(SpotAlert)
 
   const userService = createUserService({
     userRepo, storage, catalogs: catalogService, clock, logger, countNoShows: participationRepo.countNoShows
@@ -77,10 +81,29 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const chatBroadcaster = createChatBroadcaster({ serializeMessage: messageSerializer.serialize, logger })
 
   const planService = createPlanService({
-    planRepo, userRepo, participationRepo, checkInRepo, catalogs: catalogService, isProfileComplete, storage, clock, logger
+    planRepo,
+    userRepo,
+    participationRepo,
+    checkInRepo,
+    catalogs: catalogService,
+    isProfileComplete,
+    storage,
+    clock,
+    logger,
+    spotAlerts: { isRequested: spotAlertRepo.exists }
   })
+  const spotAlertService = createSpotAlertService({ plans: planService, planRepo, participationRepo, spotAlertRepo, isFull, clock, logger })
   const participationService = createParticipationService({
-    plans: planService, planRepo, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger, chatAccess: chatBroadcaster
+    plans: planService,
+    planRepo,
+    participationRepo,
+    checkInRepo,
+    userRepo,
+    withTransaction,
+    clock,
+    logger,
+    chatAccess: chatBroadcaster,
+    spotAlerts: spotAlertRepo
   })
   const checkInService = createCheckInService({
     plans: planService, isLive, matchesQrChallenge, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger
@@ -120,6 +143,7 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const catalogController = createCatalogController({ catalogService })
   const planController = createPlanController({ planService, planSerializer, feedService })
   const feedController = createFeedController({ feedService, planSerializer, pickFilters })
+  const spotAlertController = createSpotAlertController({ spotAlertService })
   const participationController = createParticipationController({ participationService, serializeParticipant: userSerializer.serializePublic })
   const checkInController = createCheckInController({ checkInService })
   const messageController = createMessageController({ messageService, messageSerializer })
@@ -137,6 +161,7 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     // Inscripciones y check-in cuelgan de /plans/:id.
     { path: '/plans', router: createParticipationRoutes({ participationController, planIdParams, authenticate }) },
     { path: '/plans', router: createCheckInRoutes({ checkInController, planIdParams, authenticate }) },
+    { path: '/plans', router: createSpotAlertRoutes({ spotAlertController, planIdParams, authenticate }) },
     { path: '/plans', router: createMessageRoutes({ messageController, planIdParams, authenticate }) },
     { path: '/feed', router: createFeedRoutes({ feedController, authenticate }) },
     { path: '/reports', router: createReportRoutes({ reportController, authenticate }) },
@@ -147,7 +172,9 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   // Jobs periódicos: el scheduler los corre con lock (uno por ciclo entre todas las instancias).
   const jobs = [
     { name: 'close-attendance', run: attendanceService.closeDueAttendance },
-    { name: 'complete-plans', run: attendanceService.completeDuePlans }
+    { name: 'complete-plans', run: attendanceService.completeDuePlans },
+    // Pedidos de aviso de planes que ya empezaron o se cancelaron (se conservan hasta entonces).
+    { name: 'purge-spot-alerts', run: spotAlertService.purgeExpired }
   ]
 
   return {
@@ -161,6 +188,7 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     planService,
     feedService,
     participationService,
+    spotAlertService,
     checkInService,
     attendanceService,
     messageService,

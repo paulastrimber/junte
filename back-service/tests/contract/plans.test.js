@@ -42,6 +42,7 @@ describe('POST /plans', () => {
       checkInClosesAt: hoursFromNow(49).toISOString(),
       checkInRadiusMeters: 150,
       myParticipation: null,
+      spotAlertRequested: false,
       createdAt: expect.stringMatching(ISO_UTC)
     })
   })
