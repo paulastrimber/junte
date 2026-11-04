@@ -22,7 +22,7 @@
       },
       "env": {
         "APP_ENV": "preview",
-        "EXPO_PUBLIC_API_URL": "https://preview.junte.invalid/api/v1"
+        "EXPO_PUBLIC_API_URL": "https://api.dev.junteapp.me/api/v1"
       }
     },
     "production": {
