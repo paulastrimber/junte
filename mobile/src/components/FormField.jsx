@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { TextInput, View } from 'react-native'
+import { Platform, Pressable, TextInput, View } from 'react-native'
 
 import { borders, createThemedStyles, radius, sizes, spacing, typography, useTheme } from '../theme/index.js'
 import { Icon } from './Icon.jsx'
@@ -7,6 +7,15 @@ import { Text } from './Text.jsx'
 
 /** Se suma a la ayuda de los campos obligatorios: el lector no lee el asterisco. */
 export const REQUIRED_HINT = 'Obligatorio'
+
+export const PASSWORD_TOGGLE = Object.freeze({ show: 'Mostrar contraseña', hide: 'Ocultar contraseña' })
+
+// Con la contraseña a la vista, el teclado no tiene que sugerirla ni aprenderla.
+const REVEALED_INPUT_PROPS = Object.freeze({
+  autoCorrect: false,
+  spellCheck: false,
+  ...(Platform.OS === 'android' ? { keyboardType: 'visible-password' } : null)
+})
 
 /**
  * Campo de texto con etiqueta y error. Presentacional: no conoce validaciones ni la API.
@@ -16,11 +25,13 @@ export const REQUIRED_HINT = 'Obligatorio'
  * @param {string} [props.icon]  Nombre de Ionicons; va dentro del campo, a la izquierda.
  * @param {string} [props.hint]  Ayuda bajo el campo ("Lo ven quienes se anotan"). Si hay error, se muestra el error.
  * @param {boolean} [props.required]  Muestra un asterisco junto a la etiqueta y dice "Obligatorio" al lector.
+ * @param {boolean} [props.secureTextEntry]  Oculta el texto y suma un botón con un ojo para mostrarlo.
  */
-export function FormField ({ label, error, icon, hint, required = false, onFocus, onBlur, multiline, style, ...inputProps }) {
+export function FormField ({ label, error, icon, hint, required = false, secureTextEntry, onFocus, onBlur, multiline, style, ...inputProps }) {
   const styles = useStyles()
   const { colors } = useTheme()
   const [isFocused, setIsFocused] = useState(false)
+  const [isRevealed, setIsRevealed] = useState(false)
   return (
     <View style={styles.field}>
       {required ? <RequiredLabel label={label} /> : <Text variant='label'>{label}</Text>}
@@ -36,8 +47,23 @@ export function FormField ({ label, error, icon, hint, required = false, onFocus
           multiline={multiline}
           onFocus={(event) => { setIsFocused(true); onFocus?.(event) }}
           onBlur={(event) => { setIsFocused(false); onBlur?.(event) }}
+          secureTextEntry={secureTextEntry && !isRevealed}
           {...inputProps}
+          {...(isRevealed ? REVEALED_INPUT_PROPS : null)}
         />
+        {secureTextEntry
+          ? (
+            <Pressable
+              accessibilityRole='button'
+              accessibilityLabel={isRevealed ? PASSWORD_TOGGLE.hide : PASSWORD_TOGGLE.show}
+              hitSlop={spacing.xs}
+              onPress={() => setIsRevealed((current) => !current)}
+              style={styles.toggle}
+            >
+              <Icon name={isRevealed ? 'eye-off-outline' : 'eye-outline'} color='textMuted' />
+            </Pressable>
+            )
+          : null}
       </View>
       {error
         ? (
@@ -89,6 +115,8 @@ const useStyles = createThemedStyles(({ colors }) => ({
   // Sin `lineHeight`: en iOS desalinea el texto de un TextInput de una línea.
   input: { flex: 1, paddingVertical: spacing.md, fontFamily: typography.body.fontFamily, fontSize: typography.body.fontSize, color: colors.text },
   multiline: { minHeight: sizes.textArea, textAlignVertical: 'top' },
+  // Pegado al borde derecho del campo: el área táctil se come el padding y el gap, y el ojo queda alineado.
+  toggle: { width: sizes.touch, minHeight: sizes.touchSmall, alignItems: 'center', justifyContent: 'center', marginLeft: -spacing.sm, marginRight: -spacing.md },
   errorRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   errorText: { flex: 1 }
 }))

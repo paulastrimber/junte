@@ -2,6 +2,7 @@ import { act, fireEvent, screen } from '@testing-library/react-native'
 
 import { createFakeAuthService, renderWithAuth } from '../../tests/helpers/auth.jsx'
 import { deferred } from '../../tests/helpers/deferred.js'
+import { PASSWORD_TOGGLE } from '../components/FormField.jsx'
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import LoginScreen, { TEXTS } from './LoginScreen.jsx'
 
@@ -43,6 +44,21 @@ describe('LoginScreen', () => {
     await renderLogin()
 
     expect(screen.getByLabelText(TEXTS.password).props.secureTextEntry).toBe(true)
+  })
+
+  it('el ojo muestra y vuelve a ocultar la contraseña sin borrar lo escrito', async () => {
+    await renderLogin()
+    await fill('ana@um.edu.uy', 'secreto-123')
+
+    await fireEvent.press(screen.getByRole('button', { name: PASSWORD_TOGGLE.show }))
+
+    expect(screen.getByLabelText(TEXTS.password).props.secureTextEntry).toBe(false)
+    expect(screen.getByLabelText(TEXTS.password).props.value).toBe('secreto-123')
+
+    await fireEvent.press(screen.getByRole('button', { name: PASSWORD_TOGGLE.hide }))
+
+    expect(screen.getByLabelText(TEXTS.password).props.secureTextEntry).toBe(true)
+    expect(screen.getByLabelText(TEXTS.password).props.value).toBe('secreto-123')
   })
 
   it('valida en el teléfono: campos vacíos muestran errores y no llaman al servicio', async () => {
