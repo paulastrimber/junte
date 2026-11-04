@@ -124,9 +124,9 @@ export function createSocketServer ({ httpServer, authService, messageService, m
       return {}
     })
 
-    on(socket, 'chat:send', chatSendPayload, async ({ planId, text, clientId }) => {
+    on(socket, 'chat:send', chatSendPayload, async ({ planId, type, text, audioKey, durationMs, clientId }) => {
       // El servicio guarda y emite `chat:message` a la sala (también cuando el mensaje entra por REST).
-      const { created, ...item } = await messageService.send({ planId, userId, text, clientId })
+      const { created, ...item } = await messageService.send({ planId, userId, type, text, audioKey, durationMs, clientId })
       return { message: await messageSerializer.serialize(item) }
     })
   })

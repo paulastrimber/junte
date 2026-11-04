@@ -15,8 +15,8 @@ export function createMessageController ({ messageService, messageSerializer }) 
     },
 
     async send (req, res) {
-      const { text, clientId } = req.body
-      const { created, ...item } = await messageService.send({ planId: req.params.id, userId: req.user.id, text, clientId })
+      const { type, text, audioKey, durationMs, clientId } = req.body
+      const { created, ...item } = await messageService.send({ planId: req.params.id, userId: req.user.id, type, text, audioKey, durationMs, clientId })
       // 200 si es el reintento de un mensaje que ya existía (mismo `clientId`): no se creó otro.
       res.status(created ? 201 : 200).json(await messageSerializer.serialize(item))
     }

@@ -81,7 +81,7 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     userRepo, storage, catalogs: catalogService, clock, logger, countNoShows: participationRepo.countNoShows
   })
   const userSerializer = createUserSerializer({ storage, clock })
-  const messageSerializer = createMessageSerializer({ serializeSender: userSerializer.serializePublic })
+  const messageSerializer = createMessageSerializer({ serializeSender: userSerializer.serializePublic, storage })
   // Tiempo real del chat: se conecta al servidor Socket.io cuando arranca (attachSockets); antes no emite nada.
   const chatBroadcaster = createChatBroadcaster({ serializeMessage: messageSerializer.serialize, logger })
 
@@ -122,10 +122,11 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const feedService = createFeedService({
     planRepo, userRepo, participationRepo, attachCreators: planService.attachCreators, scorers: buildScorers(config.feed.weights), clock
   })
-  const uploadService = createUploadService({ storage, plans: planService })
   const messageService = createMessageService({
-    plans: planService, participationRepo, messageRepo, userRepo, broadcaster: chatBroadcaster, clock, logger
+    plans: planService, participationRepo, messageRepo, userRepo, broadcaster: chatBroadcaster, clock, logger, storage
   })
+  // Fotos (perfil y plan) y notas de voz del chat (solo para quien es parte del chat).
+  const uploadService = createUploadService({ storage, plans: planService, messages: messageService })
   const reportService = createReportService({ reportRepo, userRepo, plans: planService, messages: messageService, clock, logger })
   const catalogAdmin = createCatalogAdminService({ catalogRepo, catalogService })
   const adminService = createAdminService({

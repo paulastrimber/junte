@@ -69,8 +69,17 @@ describe('messages: idempotencia por clientId', () => {
     expect(await raw('messages').countDocuments()).toBe(2)
   })
 
-  it('rechaza un type que no es texto (las notas de voz todavía no existen)', async () => {
+  it('notas de voz: con audio y duración y sin texto; un texto sin audio (S5)', async () => {
+    const audioKey = `messages/${new mongoose.Types.ObjectId()}/${SENDER_ID}/abc.m4a`
+    const voice = (overrides) => { const { text, ...rest } = message({ type: 'voice', audioKey, durationMs: 3000, ...overrides }); return rest }
+    await raw('messages').insertOne(voice())
+
     await expect(raw('messages').insertOne(message({ type: 'voice' }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('messages').insertOne({ ...voice(), text: 'hola' })).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('messages').insertOne(voice({ durationMs: 60001 }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('messages').insertOne(voice({ audioKey: 'otra/clave.mp3' }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('messages').insertOne(message({ audioKey }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('messages').insertOne(message({ type: 'image' }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
   })
 
   it('rechaza un clientId con caracteres no permitidos o de más de 64', async () => {

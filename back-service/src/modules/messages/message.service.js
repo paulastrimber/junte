@@ -3,6 +3,7 @@
 // No importa Express ni Mongoose: todo llega por parámetro (DI).
 import { errors } from '../../shared/errors.js'
 import { cursorInstantField, decodeCursor, encodeCursor } from '../../shared/pagination.js'
+import { verifyUploadedAudio, voiceObjectPrefix } from '../../shared/uploads.js'
 import { objectIdField, z } from '../../shared/validation.js'
 
 // Clave de orden del chat: `createdAt` (ms) + `_id`, del más nuevo al más viejo.
@@ -24,8 +25,9 @@ const messageNotFound = () => errors.notFound('No encontramos ese mensaje')
  * @param {{ publishMessage: (item: MessageWithSender) => void }} deps.broadcaster  Tiempo real (Socket.io); nunca lanza.
  * @param {import('../../adapters/clock.js').Clock} deps.clock
  * @param {{ info: (obj: object, msg: string) => void }} deps.logger
+ * @param {import('../../adapters/storage/index.js').Storage} [deps.storage]  Para verificar las notas de voz subidas a S3.
  */
-export function createMessageService ({ plans, participationRepo, messageRepo, userRepo, broadcaster, clock, logger }) {
+export function createMessageService ({ plans, participationRepo, messageRepo, userRepo, broadcaster, clock, logger, storage }) {
   /** Suma a cada mensaje su remitente (una sola consulta para toda la página). */
   async function attachSenders (messages) {
     const senders = await userRepo.findByIds(messages.map((message) => message.senderId))
@@ -88,16 +90,20 @@ export function createMessageService ({ plans, participationRepo, messageRepo, u
     },
 
     /**
-     * Envía un mensaje y lo emite a la sala del plan. Idempotente por `clientId`: un reintento del mismo remitente
-     * devuelve el mensaje ya creado (`created: false`) y no se vuelve a emitir.
-     * @param {{ planId: string, userId: string, text: string, clientId?: string }} params  `text` ya recortado (validator).
+     * Envía un mensaje (texto o nota de voz) y lo emite a la sala del plan. Idempotente por `clientId`: un reintento del
+     * mismo remitente devuelve el mensaje ya creado (`created: false`) y no se vuelve a emitir.
+     * Nota de voz: el audio tiene que estar subido (uploads/presign) bajo `messages/<planId>/<userId>/`, con el tipo y el
+     * tamaño reales permitidos.
+     * @param {{ planId: string, userId: string, type?: 'text' | 'voice', text?: string, audioKey?: string, durationMs?: number, clientId?: string }} params
+     *   Ya validado (`text` recortado; texto o audio según `type`).
      * @returns {Promise<MessageWithSender & { created: boolean }>}
      * @throws {import('../../shared/errors.js').AppError} NOT_FOUND | FORBIDDEN | VALIDATION_ERROR
      */
-    async send ({ planId, userId, text, clientId }) {
+    async send ({ planId, userId, type = 'text', text, audioKey, durationMs, clientId }) {
       await requireMember({ planId, userId })
-
-      const { message, created } = await messageRepo.create({ planId, senderId: userId, text, clientId, at: clock.now() })
+      if (type === 'voice') await verifyUploadedAudio({ storage, objectKey: audioKey, prefix: voiceObjectPrefix(planId, userId) })
+      const content = type === 'voice' ? { type, audioKey, durationMs } : { type, text }
+      const { message, created } = await messageRepo.create({ planId, senderId: userId, ...content, clientId, at: clock.now() })
       // El mismo `clientId` en otro plan no es un reintento: es un error del cliente.
       if (message.planId !== planId) {
         throw errors.validation([{ path: 'clientId', message: 'Ese identificador ya se usó para otro mensaje' }])
@@ -106,7 +112,7 @@ export function createMessageService ({ plans, participationRepo, messageRepo, u
 
       // Después de guardar (regla 10). Nunca el texto en el log (regla 13).
       if (created) {
-        logger.info({ event: 'message.sent', planId, userId, messageId: message.id }, 'message sent')
+        logger.info({ event: 'message.sent', planId, userId, messageId: message.id, type: message.type }, 'message sent')
         broadcaster.publishMessage(item)
       }
       return { ...item, created }
