@@ -86,6 +86,8 @@ export default ({ config }) => ({
   ...config,
   name: 'junte',
   slug: 'junte',
+  // Cuenta de Expo dueña del proyecto en EAS (cuenta de equipo, para compartir builds).
+  owner: 'man1111s-team',
   version: '0.1.0',
   orientation: 'portrait',
   // Enlaces para invitar a un plan: junte://plans/<id> abre el detalle (S5-MOB-05).
@@ -138,6 +140,8 @@ export default ({ config }) => ({
   ],
   extra: {
     ...config.extra,
+    // Proyecto de EAS (cuenta man1111s-team). No es secreto.
+    eas: { projectId: 'fce23ad9-8c35-4b99-8399-5e390e72218b' },
     appEnv: process.env.APP_ENV ?? 'development',
     apiUrl: readApiUrl()
   }

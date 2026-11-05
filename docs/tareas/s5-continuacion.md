@@ -62,25 +62,13 @@ Si pasa, tachar S5-NG-01 en [05-chat-y-notificaciones.md](05-chat-y-notificacion
 
 ## B. Equipo de la app
 
-### B1. Subir `google-services.json` a EAS
+### B1. `google-services.json` en EAS: hecho (2026-11-04)
 
-Desde `mobile/`. Primero, una sola vez:
-
-```bash
-npx eas-cli login     # interactivo, con la cuenta de Expo del equipo
-npx eas-cli init      # vincula el proyecto de EAS
-```
-
-Al 2026-11-04 el proyecto todavía no está vinculado: `app.config.js` no tiene `extra.eas.projectId`. Como la config es dinámica, `eas init` muestra el `projectId` y pide agregarlo a mano en `extra` de `app.config.js`. Ese cambio se commitea; no es un secreto. Después:
-
-```bash
-for env in development preview production; do
-  npx eas-cli env:create --name GOOGLE_SERVICES_JSON --type file \
-    --value ./google-services.json --environment $env --visibility secret
-done
-```
-
-`app.config.js` toma la ruta de `GOOGLE_SERVICES_JSON` en EAS y, en local, de `mobile/google-services.json` (ignorado por Git). Si no está, se baja de la consola de Firebase → Configuración del proyecto → app `com.junte.app`.
+- Proyecto de EAS: `@man1111s-team/junte` (ID `fce23ad9-8c35-4b99-8399-5e390e72218b`). Ya está en `owner` y `extra.eas.projectId` de `app.config.js`.
+- `GOOGLE_SERVICES_JSON` está cargada como variable de tipo archivo (visibilidad secret) en los entornos `development`, `preview` y `production`.
+- Para compilar hace falta una cuenta de Expo con acceso a `man1111s-team` (pedirle a @mperez14ang que invite) y `npx eas-cli login`.
+- Si se regenera `google-services.json`: `npx eas-cli env:update --name GOOGLE_SERVICES_JSON --environment <env>` desde `mobile/`.
+- En local, `app.config.js` lee `mobile/google-services.json` (ignorado por Git). Si no está, se baja de la consola de Firebase → Configuración del proyecto → app `com.junte.app`.
 
 ### B2. Build y prueba en un teléfono real (S5-MOB-04)
 
