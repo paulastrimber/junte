@@ -101,6 +101,7 @@ services:
       NGINX_TRUSTED_CIDR: 172.30.0.128/25   # = ip_range de la red default (ver abajo)
       NGINX_RESOLVER: 127.0.0.11            # DNS embebido de docker (en AWS: 169.254.169.253)
       NGINX_BACKEND: back:3000              # en AWS: <DNS del ALB interno>:3000
+      NGINX_ERROR_LOG_LEVEL: warn           # en AWS: crit (el error log trae la query string)
       NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/env.d
       NGINX_ENVSUBST_FILTER: ^NGINX_
     volumes:

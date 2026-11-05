@@ -9,14 +9,14 @@
 - [ ] **S7-QA-01 · E2E con Maestro** en el APK: registro → perfil → feed → crear plan → inscribirse → check-in → chat → reportar.
 - [ ] **S7-QA-02 · Concurrencia en AWS**: script que dispara N inscripciones simultáneas al ALB público; cupo nunca superado.
 - [ ] **S7-QA-03 · Seguridad**: checklist de [09-seguridad.md](../arquitectura/09-seguridad.md#checklist-de-verificación-sprint-7) completo.
-- [ ] **S7-QA-04 · Aislamiento de red**: desde Internet no responden 8080, 3000, 6379, 27017, 22; cada salto solo alcanza al siguiente (pruebas desde Session Manager).
+- [ ] **S7-QA-04 · Aislamiento de red**: desde Internet no responden 8080, 3000, 6379, 27017, 22; cada salto solo alcanza al siguiente (pruebas desde Session Manager). *La parte desde Internet la cubre `task aws:verify` (paso 1).*
 - [ ] **S7-QA-05 · Rate limit por IP real**: dos clientes con IPs distintas; uno limitado no afecta al otro; 429 con `requestId`.
 - [ ] **S7-QA-06 · Disponibilidad**: detener una instancia de Nginx, una de Express y el primario de MongoDB (de a una) → el servicio sigue respondiendo.
   *Cierra también* S1-INF-08 (`rs.status()` con 3 miembros y elección de primario) y S1-INF-09 (back en 2 AZ), que en dev quedaron con una instancia por capa. En la cuenta B: `task aws:mongo-init ENV=entrega` y `task aws:up ENV=entrega` ([plan, paso 7.1](../infra/plan-aws.md)).
 - [ ] **S7-QA-07 · NAT por zona**: con la ruta de una zona deshabilitada, el back de la otra sigue enviando push.
 - [ ] **S7-QA-08 · WebSocket ocioso** 5 minutos sigue conectado.
-- [ ] **S7-QA-09 · Restauración de MongoDB** desde backup, con tiempos medidos.
-- [ ] **S7-QA-10 · Logs**: búsqueda en CloudWatch de `password`, `Bearer`, `refreshToken`, `latitude` → sin resultados.
+- [ ] **S7-QA-09 · Restauración de MongoDB** desde backup, con tiempos medidos. *`task aws:restore ENV=entrega`.*
+- [ ] **S7-QA-10 · Logs**: búsqueda en CloudWatch de `password`, `Bearer`, `refreshToken`, `latitude` → sin resultados. *`task aws:verify ENV=entrega` (paso 4).*
 
 ## Entrega
 

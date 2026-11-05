@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  junte - instancia temporal para probar la restauracion de MongoDB (S6-INF-04, S7-QA-09; paso 6.4
+  del plan). Un mongod standalone vacio, aparte del replica set, donde se restaura el ultimo backup.
+  Lo crea y lo borra task aws:restore: no queda encendido.
+
+# Tags: project y env llegan con --tags al desplegar y CloudFormation los propaga.
+# Necesita los stacks network y base, y egress encendido para bajar Docker y la imagen.
+# Aislada del replica set: grupo de seguridad propio sin entrada (solo HTTPS de salida para dnf,
+# la imagen, S3 y Session Manager) y mongod escuchando solo en 127.0.0.1, sin keyFile ni replSet.
+# Usa el rol de datos, que ya lee backups/ del bucket de operación.
+
+Parameters:
+  Env:
+    Type: String
+    AllowedValues: [dev, entrega]
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues: [t3.micro, t3.small, t3.medium]
+  MongoImage:
+    Type: String
+    Default: mongo:9.0.2-noble
+    Description: La misma que los nodos (31-mongo.yml).
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  RestoreSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Restauracion de prueba de MongoDB. Sin entrada; solo HTTPS de salida.
+      VpcId: { 'Fn::ImportValue': !Sub 'junte-${Env}-VpcId' }
+      SecurityGroupEgress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: 'HTTPS saliente (imagen, backups en S3, Session Manager)' }
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-sg-restore' }
+        - { Key: layer, Value: datos }
+
+  # Arranque: Docker y la imagen (reintenta hasta que egress esté arriba) y un mongod vacío en el disco raíz.
+  RestoreNode:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      SubnetId: { 'Fn::ImportValue': !Sub 'junte-${Env}-DataSubnetA' }
+      SecurityGroupIds: [!Ref RestoreSecurityGroup]
+      IamInstanceProfile: { 'Fn::ImportValue': !Sub 'junte-${Env}-DataInstanceProfile' }
+      MetadataOptions: { HttpTokens: required, HttpPutResponseHopLimit: 1 }
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeSize: 20, VolumeType: gp3, Encrypted: true, DeleteOnTermination: true }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          until dnf install -y docker; do sleep 15; done
+          systemctl enable --now docker
+          until docker pull '${MongoImage}'; do sleep 15; done
+          docker run -d --name mongo --network host '${MongoImage}' --bind_ip 127.0.0.1
+      Tags:
+        - { Key: Name, Value: !Sub 'junte-${Env}-mongo-restore' }
+        - { Key: layer, Value: datos }
+
+Outputs:
+  RestoreInstanceId:
+    Description: La usa task aws:restore por Session Manager.
+    Value: !Ref RestoreNode

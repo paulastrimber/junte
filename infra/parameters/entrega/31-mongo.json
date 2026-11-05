@@ -1,5 +1,6 @@
 [
   { "ParameterKey": "Env", "ParameterValue": "entrega" },
   { "ParameterKey": "NodeCount", "ParameterValue": "3" },
-  { "ParameterKey": "InstanceType", "ParameterValue": "t3.small" }
+  { "ParameterKey": "InstanceType", "ParameterValue": "t3.small" },
+  { "ParameterKey": "ImageId", "ParameterValue": "ami-0c230065b91270bc6" }
 ]

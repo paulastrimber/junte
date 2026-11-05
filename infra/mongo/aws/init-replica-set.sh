@@ -1,6 +1,7 @@
 #!/bin/bash
-# Inicia el replica set rs0 y crea los usuarios (paso 1.6 del plan). Corre por Session Manager en el
-# nodo del primer host de HOSTS (lo manda `task aws:mongo-init`). Se puede repetir: lo que ya existe se saltea.
+# Inicia el replica set rs0, crea los usuarios y suma los miembros que falten (paso 1.6 del plan). Corre por
+# Session Manager en el nodo del primer host de HOSTS (lo manda `task aws:mongo-init`). Se puede repetir: lo
+# que ya existe se saltea; con HOSTS de 3 sobre un replica set de 1, agrega los otros dos.
 # Entorno: ENV_NAME (dev|entrega), REGION, HOSTS (ip:puerto separados por coma, el primero es este nodo).
 # Los secretos se leen acá adentro y pasan a mongosh por el entorno: nunca aparecen en la salida.
 set -euo pipefail
@@ -80,7 +81,22 @@ for (const [user, dbName, roles] of users) {
   }
 }
 
-// 3. Con todos los miembros sanos, prioridades iguales: en una caída cualquiera puede ser primario.
+// 3. Miembros que faltan (pasar de 1 a 3 nodos con datos). De a uno: un reconfig suma un solo miembro con
+// voto, y cada uno tiene que terminar la sincronización inicial antes del siguiente.
+const stateOf = (host) => (conn.adminCommand({ replSetGetStatus: 1 }).members.find((m) => m.name === host) || {}).stateStr
+for (const host of hosts) {
+  const current = conn.adminCommand({ replSetGetConfig: 1 }).config
+  if (current.members.some((m) => m.host === host)) continue
+  current.members.push({ _id: Math.max(...current.members.map((m) => m._id)) + 1, host, priority: 1 })
+  current.version += 1
+  conn.adminCommand({ replSetReconfig: current })
+  print('miembro ' + host + ': agregado, sincronizando')
+  for (let i = 0; i < 600 && stateOf(host) !== 'SECONDARY'; i++) sleep(1000)
+  if (stateOf(host) !== 'SECONDARY') throw new Error(host + ' no llegó a SECONDARY en 10 minutos (volver a correr)')
+  print('miembro ' + host + ': SECONDARY')
+}
+
+// 4. Con todos los miembros sanos, prioridades iguales: en una caída cualquiera puede ser primario.
 const healthy = () => conn.adminCommand({ replSetGetStatus: 1 }).members.filter((m) => m.health === 1 && ['PRIMARY', 'SECONDARY'].includes(m.stateStr)).length
 for (let i = 0; i < 120 && healthy() < hosts.length; i++) sleep(1000)
 print('miembros sanos: ' + healthy() + '/' + hosts.length)

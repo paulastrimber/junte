@@ -1,5 +1,6 @@
 [
   { "ParameterKey": "Env", "ParameterValue": "dev" },
-  { "ParameterKey": "NodeCount", "ParameterValue": "1" },
-  { "ParameterKey": "InstanceType", "ParameterValue": "t3.small" }
+  { "ParameterKey": "NodeCount", "ParameterValue": "3" },
+  { "ParameterKey": "InstanceType", "ParameterValue": "t3.small" },
+  { "ParameterKey": "ImageId", "ParameterValue": "ami-04b938437b69a2c9c" }
 ]

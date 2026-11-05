@@ -1,0 +1,4 @@
+[
+  { "ParameterKey": "Env", "ParameterValue": "dev" },
+  { "ParameterKey": "InstanceType", "ParameterValue": "t3.small" }
+]

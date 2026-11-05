@@ -34,7 +34,7 @@ Conditions:
   TwoFronts: !Equals [!Ref FrontCount, 2]
 
 # Arranque de una instancia de Nginx: replica el servicio nginx del compose local (mismos
-# montajes, envsubst de templates/ con las tres variables NGINX_*). Espera a que la
+# montajes, envsubst de templates/ con las cuatro variables NGINX_*). Espera a que la
 # configuración esté en S3 (llega por el endpoint de S3) y a que egress esté arriba.
 Mappings:
   Bootstrap:
@@ -60,7 +60,7 @@ Mappings:
           --log-driver awslogs --log-opt awslogs-region="$REGION" \
           --log-opt awslogs-group="$LOG_GROUP" --log-opt awslogs-stream="nginx-$INSTANCE_ID" \
           -e NGINX_TRUSTED_CIDR="$TRUSTED_CIDR" -e NGINX_RESOLVER=169.254.169.253 \
-          -e NGINX_BACKEND="$BACKEND" \
+          -e NGINX_BACKEND="$BACKEND" -e NGINX_ERROR_LOG_LEVEL=crit \
           -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/env.d -e NGINX_ENVSUBST_FILTER='^NGINX_' \
           --tmpfs /etc/nginx/env.d \
           -v "$CONF/nginx.conf:/etc/nginx/nginx.conf:ro" \

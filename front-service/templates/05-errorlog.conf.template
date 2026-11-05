@@ -1,0 +1,6 @@
+# Nivel del error log de las peticiones HTTP (pisa el de nginx.conf, que queda para el arranque).
+# El error log incluye la línea completa del request, con su query string: un `connect() failed`
+# de GET /plans?near=… dejaría coordenadas en los logs (docs/pendientes.md, sección C).
+#   - AWS:   NGINX_ERROR_LOG_LEVEL=crit  (va a CloudWatch; se pierden los avisos de upstream)
+#   - Local: NGINX_ERROR_LOG_LEVEL=warn
+error_log /var/log/nginx/error.log ${NGINX_ERROR_LOG_LEVEL};
