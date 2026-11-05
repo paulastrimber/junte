@@ -6,6 +6,8 @@
 
 **Decidido:** [notas de voz y contactos](../pendientes.md#notas-de-voz-y-contactos) (2026-10-14: propuesta aprobada, se implementa después del chat de texto) y el [aviso de cupo liberado](../pendientes.md#aviso-de-cupo-liberado) (2026-10-12). Notas del chat en [pendientes · H](../pendientes.md#h-notas-del-sprint-5-chat).
 
+**Continuación:** lo que queda fuera del código (secreto de FCM en AWS, despliegue, `google-services.json` en EAS, prueba en teléfono y del WebSocket ocioso) está en [s5-continuacion.md](s5-continuacion.md).
+
 ## Back service
 
 - [x] **S5-BE-01 · Servicio de mensajes** compartido por REST y Socket.io: permiso (participante activo o creador), texto 1–2000, `senderId` del token, `status: 'visible'`.
