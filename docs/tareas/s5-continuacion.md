@@ -66,7 +66,22 @@ Si pasa, tachar S5-NG-01 en [05-chat-y-notificaciones.md](05-chat-y-notificacion
 
 - Proyecto de EAS: `@man1111s-team/junte` (ID `fce23ad9-8c35-4b99-8399-5e390e72218b`). Ya está en `owner` y `extra.eas.projectId` de `app.config.js`.
 - `GOOGLE_SERVICES_JSON` está cargada como variable de tipo archivo (visibilidad secret) en los entornos `development`, `preview` y `production`.
-- Para compilar hace falta una cuenta de Expo con acceso a `man1111s-team` (pedirle a @mperez14ang que invite) y `npx eas-cli login`.
+- **Falta `GOOGLE_MAPS_ANDROID_API_KEY`** en este proyecto de EAS. Sin ella, el mapa de "crear plan" se ve vacío en el APK. Quien tenga la clave (restringida a `com.junte.app` + SHA-1 en Google Cloud) la carga desde `mobile/`, en cada entorno:
+  `npx eas-cli env:create --name GOOGLE_MAPS_ANDROID_API_KEY --value <clave> --environment <env> --visibility sensitive`.
+  Después del primer build, sumar la huella SHA-1 del keystore de EAS (`npx eas-cli credentials -p android`) a la restricción de la clave.
+- Para compilar en este proyecto hace falta una cuenta de Expo con acceso a `man1111s-team` (pedirle a @mperez14ang que invite) y `npx eas-cli login`.
+
+#### Compilar con otra cuenta de Expo (sin estar en el team)
+
+No hay que editar `app.config.js`:
+
+1. En `mobile/.env` (o en la terminal): `EAS_OWNER=<tu cuenta de Expo>`.
+2. `npx eas-cli login` y `npx eas-cli init` desde `mobile/`. Como la config es dinámica, `init` muestra el `projectId` sin escribirlo: copialo a `EAS_PROJECT_ID=` en `mobile/.env`.
+3. Subir `google-services.json` (y la clave de Maps) a tu proyecto con los mismos `env:create`.
+
+Tu APK va a quedar firmado con otra clave: los push andan igual, pero para el mapa hay que sumar tu SHA-1 a la restricción de la clave de Maps.
+
+**Sin EAS:** con `mobile/google-services.json` y `mobile/.env` en su lugar, `npx expo run:android` compila e instala en el teléfono conectado.
 - Si se regenera `google-services.json`: `npx eas-cli env:update --name GOOGLE_SERVICES_JSON --environment <env>` desde `mobile/`.
 - En local, `app.config.js` lee `mobile/google-services.json` (ignorado por Git). Si no está, se baja de la consola de Firebase → Configuración del proyecto → app `com.junte.app`.
 

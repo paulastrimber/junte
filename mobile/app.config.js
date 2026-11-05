@@ -26,6 +26,15 @@ loadProjectEnv(fileURLToPath(new URL('.', import.meta.url)), { mode: process.env
 // publicada, y la clave de Google Maps se restringe a este paquete + la huella SHA-1 del certificado de firma.
 const APP_ID = 'com.junte.app'
 
+// Proyecto de EAS. Por defecto el del equipo (@man1111s-team/junte; el projectId no es secreto). Para compilar en otra
+// cuenta de Expo sin editar este archivo: EAS_OWNER=<cuenta> en mobile/.env o en la terminal, `npx eas-cli init` y
+// EAS_PROJECT_ID=<id que muestra>. Con EAS_OWNER propio no se usa el projectId del equipo (EAS lo rechazaría).
+const DEFAULT_EAS_OWNER = 'man1111s-team'
+const DEFAULT_EAS_PROJECT_ID = 'fce23ad9-8c35-4b99-8399-5e390e72218b'
+const EAS_OWNER = process.env.EAS_OWNER?.trim() || DEFAULT_EAS_OWNER
+const EAS_PROJECT_ID = process.env.EAS_PROJECT_ID?.trim() ||
+  (EAS_OWNER === DEFAULT_EAS_OWNER ? DEFAULT_EAS_PROJECT_ID : undefined)
+
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:'])
 // Dominio reservado (RFC 2606) usado como marcador en eas.json hasta que exista el DNS real.
 const PLACEHOLDER_TLD = '.invalid'
@@ -86,8 +95,7 @@ export default ({ config }) => ({
   ...config,
   name: 'junte',
   slug: 'junte',
-  // Cuenta de Expo dueña del proyecto en EAS (cuenta de equipo, para compartir builds).
-  owner: 'man1111s-team',
+  owner: EAS_OWNER,
   version: '0.1.0',
   orientation: 'portrait',
   // Enlaces para invitar a un plan: junte://plans/<id> abre el detalle (S5-MOB-05).
@@ -140,8 +148,7 @@ export default ({ config }) => ({
   ],
   extra: {
     ...config.extra,
-    // Proyecto de EAS (cuenta man1111s-team). No es secreto.
-    eas: { projectId: 'fce23ad9-8c35-4b99-8399-5e390e72218b' },
+    ...(EAS_PROJECT_ID && { eas: { ...config.extra?.eas, projectId: EAS_PROJECT_ID } }),
     appEnv: process.env.APP_ENV ?? 'development',
     apiUrl: readApiUrl()
   }
