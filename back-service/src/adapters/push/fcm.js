@@ -1,7 +1,8 @@
 // Firebase Cloud Messaging, API HTTP v1 (https://firebase.google.com/docs/cloud-messaging/send/v1-api).
 // Sin firebase-admin: la cuenta de servicio firma un JWT (RS256, con `jose`) que se canjea por un access token de
 // OAuth 2.0 (se cachea hasta poco antes de vencer), y cada token se envía con un POST a messages:send.
-// Errores por token: UNREGISTERED (404) o INVALID_ARGUMENT (400) → el token se informa como inválido para borrarlo.
+// Errores por token: UNREGISTERED, o INVALID_ARGUMENT cuyo detalle/mensaje se refiere al registration token → el token
+// se informa como inválido para borrarlo. Un 404 solo, o un INVALID_ARGUMENT por el payload, no borran nada.
 // Nunca se loguea un token ni la clave privada.
 import { SignJWT, importPKCS8 } from 'jose'
 
@@ -12,7 +13,6 @@ const ASSERTION_TTL_SECONDS = 3600
 const REFRESH_MARGIN_MS = 60_000
 const REQUEST_TIMEOUT_MS = 5000
 const DEFAULT_CONCURRENCY = 10
-const INVALID_TOKEN_CODES = new Set(['UNREGISTERED', 'INVALID_ARGUMENT'])
 
 /**
  * @param {object} params
@@ -71,8 +71,8 @@ export function createFcmPush ({ serviceAccount, logger, fetch = globalThis.fetc
       return 'failed'
     }
     if (res.ok) return 'sent'
-    const errorCode = await readErrorCode(res)
-    if (res.status === 404 || INVALID_TOKEN_CODES.has(errorCode)) return 'invalid'
+    const { errorCode, isTokenError } = await readError(res)
+    if (isTokenError) return 'invalid'
     // Si el access token venció antes de lo previsto, el próximo envío pide otro.
     if (res.status === 401) cached = null
     logger.warn({ status: res.status, errorCode }, 'fcm send failed')
@@ -105,13 +105,22 @@ export function createFcmPush ({ serviceAccount, logger, fetch = globalThis.fetc
   }
 }
 
-/** `error.status` (p. ej. INVALID_ARGUMENT) o el `errorCode` de FCM en `details` (p. ej. UNREGISTERED). */
-async function readErrorCode (res) {
+/**
+ * Lee el error de FCM. `errorCode`: el de `details` (p. ej. UNREGISTERED) o `error.status`. `isTokenError`: el token
+ * ya no sirve (UNREGISTERED, o INVALID_ARGUMENT que señala `message.token` o el registration token).
+ */
+async function readError (res) {
   try {
-    const body = await res.json()
-    const fcmCode = body?.error?.details?.find((detail) => typeof detail?.errorCode === 'string')?.errorCode
-    return fcmCode ?? body?.error?.status ?? null
+    const error = (await res.json())?.error
+    const details = Array.isArray(error?.details) ? error.details : []
+    const fcmCode = details.find((detail) => typeof detail?.errorCode === 'string')?.errorCode
+    const errorCode = fcmCode ?? error?.status ?? null
+    if (fcmCode === 'UNREGISTERED' || error?.status === 'UNREGISTERED') return { errorCode, isTokenError: true }
+    const isInvalidArgument = errorCode === 'INVALID_ARGUMENT' || error?.status === 'INVALID_ARGUMENT'
+    const mentionsToken = details.some((detail) => Array.isArray(detail?.fieldViolations) && detail.fieldViolations.some((v) => v?.field === 'message.token')) ||
+      /registration token/i.test(String(error?.message ?? ''))
+    return { errorCode, isTokenError: isInvalidArgument && mentionsToken }
   } catch {
-    return null
+    return { errorCode: null, isTokenError: false }
   }
 }

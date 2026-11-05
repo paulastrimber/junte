@@ -5,7 +5,7 @@ import { createFcmPush, createMemoryPush } from './index.js'
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } })
 const serviceAccount = { projectId: 'junte-dev', clientEmail: 'push@junte-dev.iam.gserviceaccount.com', privateKey }
-const message = { tokens: ['tok-ok', 'tok-gone', 'tok-bad', 'tok-500'], notification: { title: 'Hola', body: 'Chau' }, data: { type: 'x', planId: 'p' } }
+const message = { tokens: ['tok-ok', 'tok-gone', 'tok-bad', 'tok-bad-msg', 'tok-payload', 'tok-project', 'tok-500'], notification: { title: 'Hola', body: 'Chau' }, data: { type: 'x', planId: 'p' } }
 
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
@@ -17,7 +17,13 @@ function fakeFcm () {
     const { message: { token } } = JSON.parse(init.body)
     if (token === 'tok-ok') return json(200, { name: 'projects/junte-dev/messages/1' })
     if (token === 'tok-gone') return json(404, { error: { status: 'NOT_FOUND', details: [{ '@type': 'type.googleapis.com/google.firebase.fcm.v1.FcmError', errorCode: 'UNREGISTERED' }] } })
-    if (token === 'tok-bad') return json(400, { error: { status: 'INVALID_ARGUMENT' } })
+    // Token mal formado: el detalle señala el campo message.token.
+    if (token === 'tok-bad') return json(400, { error: { code: 400, message: 'Request contains an invalid argument.', status: 'INVALID_ARGUMENT', details: [{ '@type': 'type.googleapis.com/google.rpc.BadRequest', fieldViolations: [{ field: 'message.token', description: 'Invalid registration token' }] }] } })
+    if (token === 'tok-bad-msg') return json(400, { error: { code: 400, message: 'The registration token is not a valid FCM registration token', status: 'INVALID_ARGUMENT' } })
+    // Payload inválido: no es culpa del token, no se borra.
+    if (token === 'tok-payload') return json(400, { error: { code: 400, message: 'Invalid value at message.data', status: 'INVALID_ARGUMENT', details: [{ '@type': 'type.googleapis.com/google.rpc.BadRequest', fieldViolations: [{ field: 'message.data', description: 'Invalid value' }] }] } })
+    // 404 sin UNREGISTERED (p. ej. proyecto inexistente): tampoco se borra.
+    if (token === 'tok-project') return json(404, { error: { code: 404, message: 'Requested entity was not found.', status: 'NOT_FOUND' } })
     return json(500, { error: { status: 'INTERNAL' } })
   })
   return { fetch, calls }
@@ -31,7 +37,7 @@ describe('createFcmPush', () => {
 
     const result = await push.send(message)
 
-    expect(result).toEqual({ sent: 1, failed: 1, invalidTokens: ['tok-gone', 'tok-bad'] })
+    expect(result).toEqual({ sent: 1, failed: 3, invalidTokens: ['tok-gone', 'tok-bad', 'tok-bad-msg'] })
     const [oauth, ...sends] = calls
     const assertion = decodeJwt(new URLSearchParams(oauth.init.body).get('assertion'))
     expect(assertion).toMatchObject({ iss: serviceAccount.clientEmail, aud: 'https://oauth2.googleapis.com/token', scope: 'https://www.googleapis.com/auth/firebase.messaging' })
@@ -59,7 +65,7 @@ describe('createFcmPush', () => {
     const fetch = vi.fn(async () => json(401, { error: 'invalid_grant' }))
     const push = createFcmPush({ serviceAccount, logger: { warn: vi.fn() }, fetch })
 
-    expect(await push.send(message)).toEqual({ sent: 0, failed: 4, invalidTokens: [] })
+    expect(await push.send(message)).toEqual({ sent: 0, failed: 7, invalidTokens: [] })
   })
 })
 
