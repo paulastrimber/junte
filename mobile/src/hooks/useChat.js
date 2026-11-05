@@ -139,7 +139,7 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
   // Vuelve a pedir la primera página y la fusiona. Es un trabajo de fondo: si falla se conserva lo que se ve y el
   // próximo intento (otra reconexión o el siguiente tick del polling) lo vuelve a pedir; solo importa perder el acceso.
   // De paso manda lo que haya quedado en la cola de pendientes.
-  const recover = useCallback(async () => {
+  const recover = useCallback(async ({ refreshAudio = false } = {}) => {
     const generation = generationRef.current
     outbox.flush()
     try {
@@ -147,7 +147,7 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
       if (generation !== generationRef.current) return
       readCache.save(cacheKey, page)
       setState((current) => {
-        const { messages, isReplaced } = mergeRecoveredPage(current.messages, page)
+        const { messages, isReplaced } = mergeRecoveredPage(current.messages, page, { refreshAudio })
         // Si se estaba mostrando lo guardado, el cursor para ir hacia atrás es el de la página nueva.
         const nextCursor = isReplaced || current.savedAt ? page.nextCursor : current.nextCursor
         // Sin nada nuevo (lo normal en cada tick del polling) se devuelve el mismo estado: React no vuelve a pintar.
@@ -160,6 +160,10 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
       if (ACCESS_LOST.has(error.code)) setState((current) => ({ ...current, status: CHAT_STATUS.ERROR, error }))
     }
   }, [planId, cacheKey])
+
+  // La URL firmada de una nota de voz vence (10 min) y el merge conserva la que ya está: si el reproductor no puede
+  // cargarla, se vuelve a pedir la primera página y se toman las URL nuevas. Solo alcanza a las notas recientes.
+  const refreshAudio = useCallback(() => recover({ refreshAudio: true }), [recover])
 
   // El socket vive solo con la app en primer plano (S6-MOB-04): en segundo plano se suelta la sala (y, si era la
   // última, la conexión) y al volver se reconecta y recupera lo que pasó mientras tanto.
@@ -359,6 +363,7 @@ export function useChat (planId, { user, isActive = true, planTitle = null }) {
     sendVoice,
     retrySend,
     loadOlder,
-    reload: load
+    reload: load,
+    refreshAudio
   }
 }

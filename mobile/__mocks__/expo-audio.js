@@ -42,11 +42,12 @@ module.exports = {
     return ref.current
   }),
   useAudioRecorderState: jest.fn((recorder) => ({ isRecording: recorder.isRecording, durationMillis: recorder.currentTime * 1000 })),
+  // Como el real: con otra fuente se crea otro reproductor.
   useAudioPlayer: jest.fn((source) => {
     const React = require('react')
     const ref = React.useRef(null)
-    ref.current ??= createPlayer(source)
+    if (!ref.current || ref.current.source?.uri !== source?.uri) ref.current = createPlayer(source)
     return ref.current
   }),
-  useAudioPlayerStatus: jest.fn((player) => ({ playing: player.playing, currentTime: 0, duration: 0, didJustFinish: false }))
+  useAudioPlayerStatus: jest.fn((player) => ({ playing: player.playing, currentTime: 0, duration: 0, didJustFinish: false, error: player.error ?? null }))
 }

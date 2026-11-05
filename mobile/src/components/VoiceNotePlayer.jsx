@@ -1,5 +1,5 @@
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Pressable, View } from 'react-native'
 
 import { createThemedStyles, sizes, spacing } from '../theme/index.js'
@@ -15,15 +15,38 @@ export const TEXTS = Object.freeze({
 
 /**
  * Reproductor de una nota de voz del chat: play/pausa y la duración. Presentacional; el audio llega como URL firmada
- * (o el archivo local mientras se envía).
- * @param {{ source: string | null, durationMs: number, color?: string }} props
+ * (o el archivo local mientras se envía). La URL firmada vence: si el audio no carga se llama a `onExpired` (una vez por
+ * intento de reproducción) para que el padre traiga una nueva, y cuando llega se reintenta el play.
+ * @param {{ source: string | null, durationMs: number, color?: string, onExpired?: () => void }} props
  */
-export function VoiceNotePlayer ({ source, durationMs, color = 'text' }) {
+export function VoiceNotePlayer ({ source, durationMs, color = 'text', onExpired }) {
   const styles = useStyles()
   const player = useAudioPlayer(source ? { uri: source } : null)
   const status = useAudioPlayerStatus(player)
   const isPlaying = Boolean(status?.playing)
   const duration = formatDuration(durationMs)
+  const hasRetried = useRef(false)
+  const isRetryPending = useRef(false)
+
+  // Falló la carga (URL vencida): se pide una nueva una sola vez; si la segunda también falla, no se insiste.
+  const error = status?.error
+  useEffect(() => {
+    if (!error || !onExpired || hasRetried.current) return
+    hasRetried.current = true
+    isRetryPending.current = true
+    onExpired()
+  }, [error, onExpired])
+
+  // Con la URL nueva llega otro reproductor: se reintenta lo que quería el usuario.
+  useEffect(() => {
+    if (!isRetryPending.current) return
+    isRetryPending.current = false
+    Promise.resolve(player.play()).catch(() => {})
+  }, [player])
+
+  useEffect(() => {
+    if (isPlaying) hasRetried.current = false
+  }, [isPlaying])
 
   // Al terminar vuelve al principio para poder escucharla otra vez.
   useEffect(() => {

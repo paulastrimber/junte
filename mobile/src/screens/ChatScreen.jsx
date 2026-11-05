@@ -71,7 +71,7 @@ const keyOf = (message) => message.clientId ?? message.id
  * (`isLast`); la esquina chica de la burbuja ("cola"), también solo en el último. Con `onLongPress` (mensajes de otros
  * ya confirmados) se pueden reportar (S6-MOB-03).
  */
-const MessageRow = memo(function MessageRow ({ message, isOwn, isFirst, isLast, onRetry, onLongPress }) {
+const MessageRow = memo(function MessageRow ({ message, isOwn, isFirst, isLast, onRetry, onLongPress, onAudioExpired }) {
   const styles = useStyles()
   const isPending = message.status === MESSAGE_STATUS.PENDING
   const isFailed = message.status === MESSAGE_STATUS.FAILED
@@ -114,7 +114,7 @@ const MessageRow = memo(function MessageRow ({ message, isOwn, isFirst, isLast, 
         >
           {isOwn || !isFirst ? null : <Text variant='label' color='primary'>{name}</Text>}
           {isText ? <Text color={bodyColor} selectable>{message.text}</Text> : null}
-          {isVoice ? <VoiceNotePlayer source={message.audioUrl ?? message.localUri ?? null} durationMs={message.durationMs} color={bodyColor} /> : null}
+          {isVoice ? <VoiceNotePlayer source={message.audioUrl ?? message.localUri ?? null} durationMs={message.durationMs} color={bodyColor} onExpired={message.audioUrl ? onAudioExpired : undefined} /> : null}
           {!isText && !isVoice ? <Text color={metaColor} variant='caption'>{TEXTS.unsupported}</Text> : null}
           <Text variant='caption' color={metaColor} style={styles.time}>{status}</Text>
         </Pressable>
@@ -256,7 +256,7 @@ export default function ChatScreen ({ navigation, route }) {
   // Pantalla activa: solo entonces se hace polling.
   const isFocused = useScreenFocus(navigation)
   const chat = useChat(planId, { user, isActive: isFocused, planTitle: title ?? null })
-  const { loadOlder, retrySend, send, sendVoice, reload } = chat
+  const { loadOlder, retrySend, send, sendVoice, reload, refreshAudio } = chat
   const userId = user?.id
 
   // El teclado no tapa el campo: se mide a qué altura de la ventana empieza la pantalla (debajo del encabezado).
@@ -280,8 +280,8 @@ export default function ChatScreen ({ navigation, route }) {
     const { isFirst, isLast } = messageGroupPosition(messages, index)
     const isOwn = item.sender?.id === userId
     const canReport = !isOwn && item.status === MESSAGE_STATUS.SENT
-    return <MessageRow message={item} isOwn={isOwn} isFirst={isFirst} isLast={isLast} onRetry={retrySend} onLongPress={canReport ? openMessageActions : undefined} />
-  }, [messages, userId, retrySend, openMessageActions])
+    return <MessageRow message={item} isOwn={isOwn} isFirst={isFirst} isLast={isLast} onRetry={retrySend} onLongPress={canReport ? openMessageActions : undefined} onAudioExpired={refreshAudio} />
+  }, [messages, userId, retrySend, openMessageActions, refreshAudio])
 
   function olderFooter () {
     if (chat.isLoadingOlder) {
