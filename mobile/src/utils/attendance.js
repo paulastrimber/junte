@@ -33,6 +33,10 @@ export function planActions (plan, now = new Date()) {
     isCheckInOpen,
     wasNoShow: Boolean(participation?.noShow),
     canJoin: !isJoined && plan.status === 'open' && !hasStarted && !plan.isFull,
+    // "Avisarme si se libera un lugar" (S5-MOB-06): solo en un plan lleno, abierto y que no empezó (con cupo ilimitado
+    // nunca está lleno). `spotAlertRequested` dice si ya lo pidió.
+    canAskSpotAlert: !isJoined && plan.status === 'open' && !hasStarted && Boolean(plan.isFull) && !plan.spotAlertRequested,
+    canCancelSpotAlert: !isJoined && Boolean(plan.spotAlertRequested),
     canLeave: isJoined && isLive && !hasStarted && !hasCheckedIn,
     // Quien no creó el plan escanea el QR; el creador inscripto registra su asistencia desde la pantalla del QR.
     canCheckIn: isJoined && !plan.isCreator && isCheckInOpen && !hasCheckedIn,

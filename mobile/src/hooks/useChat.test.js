@@ -543,3 +543,21 @@ describe('useChat: sin conexión y moderación (S6)', () => {
     }
   })
 })
+
+describe('useChat: notas de voz y URL firmada', () => {
+  const url = (signature) => `https://bucket.s3.amazonaws.com/messages/a.m4a?X-Amz-Signature=${signature}`
+  const voice = (signature) => message(1, { type: 'voice', text: null, durationMs: 4000, audioUrl: url(signature) })
+
+  it('el polling no cambia la URL de una nota que ya está; refreshAudio sí pide una firmada nueva', async () => {
+    listMessages.mockResolvedValue({ items: [voice('uno')], nextCursor: null })
+    const { result } = await setup()
+    listMessages.mockResolvedValue({ items: [voice('dos')], nextCursor: null })
+
+    await socket.setStatus('connected')
+    const polled = result.current.messages[0]
+    expect(polled.audioUrl).toBe(url('uno'))
+
+    await act(async () => { await result.current.refreshAudio() })
+    expect(result.current.messages[0].audioUrl).toBe(url('dos'))
+  })
+})

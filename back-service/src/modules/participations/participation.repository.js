@@ -46,6 +46,13 @@ export function createParticipationRepository (ParticipationModel) {
       return (await ParticipationModel.exists({ planId, userId, status: 'active' })) !== null
     },
 
+    /** @returns {Promise<string[]>} IDs de los usuarios con inscripción activa en el plan (avisos push). */
+    async findActiveUserIds (planId) {
+      if (!areValidIds(planId)) return []
+      const docs = await ParticipationModel.find({ planId, status: 'active' }).select({ userId: 1 }).lean()
+      return docs.map((doc) => String(doc.userId))
+    },
+
     /** @returns {Promise<string[]>} IDs de los planes en los que el usuario está inscripto (inscripción activa). */
     async findActivePlanIds (userId) {
       if (!areValidIds(userId)) return []

@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { joinPlan, leavePlan } from '../services/api/participations.js'
+import { cancelSpotAlert, joinPlan, leavePlan, requestSpotAlert } from '../services/api/participations.js'
 import { updatePlan } from '../services/api/plans.js'
 import { OUTBOX_STATUS, OUTBOX_TYPE, connectivity, isTransportFailure, outbox } from '../services/offline/index.js'
 import { toViewError } from '../utils/errorMessages.js'
 import { useOutbox } from './useOffline.js'
 
-export const PLAN_ACTION = Object.freeze({ JOIN: 'join', LEAVE: 'leave', CLOSE: 'close', REOPEN: 'reopen', CANCEL: 'cancel' })
+export const PLAN_ACTION = Object.freeze({
+  JOIN: 'join', LEAVE: 'leave', CLOSE: 'close', REOPEN: 'reopen', CANCEL: 'cancel', SPOT_ALERT: 'spotAlert', CANCEL_SPOT_ALERT: 'cancelSpotAlert'
+})
 
 // Qué se le dice al usuario según el `code` (la app decide por `code`, nunca por `message`). Lo que no figura acá
 // usa el texto general (`toViewError`).
@@ -23,7 +25,14 @@ export const PLAN_ACTION_MESSAGES = Object.freeze({
   },
   [PLAN_ACTION.CLOSE]: { PLAN_CLOSED: 'Solo se pueden cerrar las inscripciones antes de que empiece el plan.' },
   [PLAN_ACTION.REOPEN]: { PLAN_CLOSED: 'Solo se pueden reabrir las inscripciones antes de que empiece el plan.' },
-  [PLAN_ACTION.CANCEL]: { PLAN_CLOSED: 'El plan ya terminó o ya estaba cancelado.' }
+  [PLAN_ACTION.CANCEL]: { PLAN_CLOSED: 'El plan ya terminó o ya estaba cancelado.' },
+  [PLAN_ACTION.SPOT_ALERT]: {
+    PLAN_NOT_FULL: 'Se liberó un lugar: ya podés inscribirte.',
+    PLAN_CLOSED: 'Este plan ya no admite inscripciones.',
+    ALREADY_JOINED: 'Ya tenés tu lugar en este plan.',
+    NOT_FOUND: 'Este plan ya no está disponible.'
+  },
+  [PLAN_ACTION.CANCEL_SPOT_ALERT]: {}
 })
 
 const QUEUEABLE = Object.freeze({ [PLAN_ACTION.JOIN]: OUTBOX_TYPE.JOIN, [PLAN_ACTION.LEAVE]: OUTBOX_TYPE.LEAVE })
@@ -79,6 +88,8 @@ export function usePlanActions (planId, { onChanged, planTitle = null }) {
   const closeSignUps = useCallback(() => run(PLAN_ACTION.CLOSE, () => updatePlan(planId, { status: 'closed' })), [run, planId])
   const reopenSignUps = useCallback(() => run(PLAN_ACTION.REOPEN, () => updatePlan(planId, { status: 'open' })), [run, planId])
   const cancel = useCallback(() => run(PLAN_ACTION.CANCEL, () => updatePlan(planId, { status: 'cancelled' })), [run, planId])
+  const askSpotAlert = useCallback(() => run(PLAN_ACTION.SPOT_ALERT, () => requestSpotAlert(planId)), [run, planId])
+  const cancelSpotAlertRequest = useCallback(() => run(PLAN_ACTION.CANCEL_SPOT_ALERT, () => cancelSpotAlert(planId)), [run, planId])
 
   /** Descarta algo de la cola de este plan (cancelar una inscripción pendiente, o dar por visto un rechazo). */
   const discardQueued = useCallback((id) => outbox.remove(id), [])
@@ -91,5 +102,7 @@ export function usePlanActions (planId, { onChanged, planTitle = null }) {
     isWaiting: queuedItems.some((item) => item.status !== OUTBOX_STATUS.FAILED)
   }
 
-  return { ...state, isBusy: state.pending !== null, join, leave, closeSignUps, reopenSignUps, cancel, queued, discardQueued }
+  return {
+    ...state, isBusy: state.pending !== null, join, leave, closeSignUps, reopenSignUps, cancel, askSpotAlert, cancelSpotAlert: cancelSpotAlertRequest, queued, discardQueued
+  }
 }

@@ -3,8 +3,8 @@
 import mongoose from 'mongoose'
 
 export const MESSAGE_STATUSES = Object.freeze(['visible', 'hidden'])
-// Las notas de voz (decididas, para un PR posterior) suman 'voice' + `audioKey`.
-export const MESSAGE_TYPES = Object.freeze(['text'])
+// Notas de voz (S5-BE-09): `type: 'voice'` + `audioKey` (S3, por el flujo de uploads/presign) + `durationMs`, sin texto.
+export const MESSAGE_TYPES = Object.freeze(['text', 'voice'])
 export const MESSAGE_TEXT_MAX_LENGTH = 2000
 export const CLIENT_ID_MAX_LENGTH = 64
 
@@ -16,7 +16,11 @@ const messageSchema = new mongoose.Schema(
     // Siempre del token.
     senderId: { type: ObjectId, ref: 'User', required: true },
     type: { type: String, enum: MESSAGE_TYPES, default: 'text', required: true },
-    text: { type: String, required: true, trim: true, minlength: 1, maxlength: MESSAGE_TEXT_MAX_LENGTH },
+    // Obligatorio en los de texto; una nota de voz no lleva texto.
+    text: { type: String, required: function () { return this.type !== 'voice' }, trim: true, minlength: 1, maxlength: MESSAGE_TEXT_MAX_LENGTH },
+    // Solo notas de voz: clave del audio en S3 (nunca sale en una respuesta: va la URL firmada) y duración que informa la app.
+    audioKey: { type: String },
+    durationMs: { type: Number, min: 1 },
     status: { type: String, enum: MESSAGE_STATUSES, default: 'visible', required: true },
     // Lo genera el teléfono para que un reintento no duplique el mensaje (índice único parcial { senderId, clientId }).
     clientId: { type: String, maxlength: CLIENT_ID_MAX_LENGTH }

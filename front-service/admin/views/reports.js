@@ -58,7 +58,10 @@ export function mountReports (container, ui) {
     if (!preview) return h('p', { class: 'muted' }, 'Lo reportado ya no existe.')
     const rows = []
     if (type === 'message') {
-      rows.push(['Mensaje', h('blockquote', { class: 'quote' }, preview.text)])
+      const content = preview.type === 'voice'
+        ? `Nota de voz (${Math.max(1, Math.round((preview.durationMs ?? 0) / 1000))} s)`
+        : preview.text
+      rows.push(['Mensaje', h('blockquote', { class: 'quote' }, content)])
       rows.push(['Escrito por', userLabel(preview.sender)])
       rows.push(['En el plan', preview.plan?.title ?? '—'])
       rows.push(['Enviado', formatDate(preview.createdAt)])

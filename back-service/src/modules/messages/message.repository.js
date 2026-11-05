@@ -9,8 +9,10 @@ const DUPLICATE_KEY = 11000
  * @property {string} id
  * @property {string} planId
  * @property {string} senderId
- * @property {'text'} type
- * @property {string} text
+ * @property {'text' | 'voice'} type
+ * @property {string | null} text  null en las notas de voz.
+ * @property {string | null} audioKey  Solo notas de voz.
+ * @property {number | null} durationMs  Solo notas de voz.
  * @property {'visible' | 'hidden'} status
  * @property {string | null} clientId
  * @property {Date} createdAt
@@ -24,7 +26,9 @@ function toEntity (doc) {
     senderId: String(doc.senderId),
     // Sin `type` (mensajes anteriores a S5) es texto.
     type: doc.type ?? 'text',
-    text: doc.text,
+    text: doc.text ?? null,
+    audioKey: doc.audioKey ?? null,
+    durationMs: doc.durationMs ?? null,
     status: doc.status,
     clientId: doc.clientId ?? null,
     createdAt: doc.createdAt
@@ -42,13 +46,14 @@ export function createMessageRepository (MessageModel) {
   return {
     /**
      * Crea un mensaje visible. Con un `clientId` que ese remitente ya usó no crea otro: devuelve el existente.
-     * @param {{ planId: string, senderId: string, text: string, clientId?: string, at: Date }} params
+     * @param {{ planId: string, senderId: string, clientId?: string, at: Date } & ({ type: 'text', text: string } | { type: 'voice', audioKey: string, durationMs: number })} params
      * @returns {Promise<{ message: MessageEntity, created: boolean }>}
      */
-    async create ({ planId, senderId, text, clientId, at }) {
+    async create ({ planId, senderId, type = 'text', text, audioKey, durationMs, clientId, at }) {
+      const content = type === 'voice' ? { type, audioKey, durationMs } : { type: 'text', text }
       try {
         // `createdAt` del reloj inyectado (Mongoose no lo pisa si ya viene): el orden del chat usa la hora del back.
-        const doc = await MessageModel.create({ planId, senderId, type: 'text', text, status: 'visible', ...(clientId ? { clientId } : {}), createdAt: at })
+        const doc = await MessageModel.create({ planId, senderId, ...content, status: 'visible', ...(clientId ? { clientId } : {}), createdAt: at })
         return { message: toEntity(doc), created: true }
       } catch (err) {
         if (!isDuplicateClientId(err)) throw err

@@ -39,7 +39,8 @@ describe('loadConfig', () => {
       redis: { url: 'redis://localhost:6379' },
       jwt: { secret: SECRET },
       storage: null,
-      feed: { weights: { interests: 0.5, distance: 0.3, schedule: 0.2 } }
+      feed: { weights: { interests: 0.5, distance: 0.3, schedule: 0.2 } },
+      push: null
     })
     expect(Object.isFrozen(config)).toBe(true)
     expect(Object.isFrozen(config.mongo)).toBe(true)
@@ -200,5 +201,28 @@ describe('loadConfig', () => {
 
       expect(JSON.stringify(config)).not.toMatch(/AWS_ACCESS|AWS_SECRET|"x"|"y"/)
     })
+  })
+})
+
+describe('FCM_SERVICE_ACCOUNT', () => {
+  const account = {
+    type: 'service_account',
+    project_id: 'junte-dev',
+    client_email: 'firebase-adminsdk@junte-dev.iam.gserviceaccount.com',
+    private_key: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\\n'
+  }
+
+  it('lee project_id, client_email y private_key del JSON', () => {
+    expect(loadConfig({ ...validEnv, FCM_SERVICE_ACCOUNT: JSON.stringify(account) }).push).toEqual({
+      fcm: { projectId: 'junte-dev', clientEmail: account.client_email, privateKey: account.private_key }
+    })
+  })
+
+  it('un JSON inválido o incompleto la nombra sin mostrar el valor', () => {
+    for (const raw of ['no-es-json', JSON.stringify({ ...account, private_key: undefined })]) {
+      const err = errorOf({ ...validEnv, FCM_SERVICE_ACCOUNT: raw })
+      expect(err.variables).toEqual(['FCM_SERVICE_ACCOUNT'])
+      expect(err.message).not.toContain('junte-dev')
+    }
   })
 })

@@ -253,3 +253,26 @@ describe('messageGroupPosition', () => {
     expect(messageGroupPosition([from('ana', at(14, 0))], 0)).toEqual({ isFirst: true, isLast: true })
   })
 })
+
+describe('mergeMessages: notas de voz', () => {
+  const url = (key, signature) => `https://bucket.s3.amazonaws.com/${key}?X-Amz-Signature=${signature}`
+  const voice = (key, signature) => sent('m1', '2026-10-14T10:00:00Z', { type: 'voice', text: null, durationMs: 5000, audioUrl: url(key, signature) })
+
+  it('si es la misma nota y solo cambió la firma conserva el mensaje y la URL (el player no se recrea)', () => {
+    const current = [voice('messages/a.m4a', 'uno')]
+
+    expect(mergeMessages(current, [voice('messages/a.m4a', 'dos')])).toBe(current)
+  })
+
+  it('si cambió el archivo toma la URL nueva', () => {
+    const merged = mergeMessages([voice('messages/a.m4a', 'uno')], [voice('messages/b.m4a', 'uno')])
+
+    expect(merged[0].audioUrl).toBe(url('messages/b.m4a', 'uno'))
+  })
+
+  it('con refreshAudio toma la URL firmada nueva aunque sea el mismo archivo', () => {
+    const merged = mergeMessages([voice('messages/a.m4a', 'uno')], [voice('messages/a.m4a', 'dos')], { refreshAudio: true })
+
+    expect(merged[0].audioUrl).toBe(url('messages/a.m4a', 'dos'))
+  })
+})

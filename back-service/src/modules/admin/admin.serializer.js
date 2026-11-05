@@ -22,6 +22,8 @@ export function serializeAdminMessage ({ message, sender }) {
     planId: message.planId,
     type: message.type,
     text: message.text,
+    // Notas de voz: el panel muestra la duración; el audio no se reproduce desde el panel (ver docs/pendientes.md).
+    ...(message.type === 'voice' ? { durationMs: message.durationMs } : {}),
     status: message.status,
     createdAt: message.createdAt.toISOString(),
     sender: serializeAdminUser(sender)

@@ -23,7 +23,7 @@ export function createPlanSerializer ({ storage, serializeCreator }) {
       }
     : null)
 
-  async function serialize ({ plan, creator, myParticipation }, viewerId) {
+  async function serialize ({ plan, creator, myParticipation, spotAlertRequested }, viewerId) {
     return {
       id: plan.id,
       title: plan.title,
@@ -51,6 +51,8 @@ export function createPlanSerializer ({ storage, serializeCreator }) {
       checkInRadiusMeters: plan.checkInRadiusMeters,
       // Estado del usuario del token en este plan (null = nunca se inscribió). No va en los listados del feed.
       ...(myParticipation !== undefined ? { myParticipation: serializeMyParticipation(myParticipation) } : {}),
+      // Solo en el detalle: si el usuario del token pidió que le avisen cuando se libere un lugar (S5-BE-10).
+      ...(spotAlertRequested !== undefined ? { spotAlertRequested } : {}),
       // Solo en el feed por cercanía: distancia al punto consultado, redondeada (no revela la posición de nadie).
       ...(plan.distanceMeters !== undefined ? { distanceMeters: Math.round(plan.distanceMeters) } : {}),
       createdAt: plan.createdAt.toISOString()

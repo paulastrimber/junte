@@ -64,3 +64,49 @@ export async function verifyUploadedImage ({ storage, objectKey, prefix }) {
     throw invalidImage(`La imagen debe pesar entre 1 byte y ${MAX_IMAGE_BYTES / (1024 * 1024)} MB`)
   }
 }
+
+// Notas de voz del chat (S5-BE-09, docs/pendientes.md#notas-de-voz-y-contactos): AAC en contenedor M4A, el mismo
+// flujo de presign que las fotos. La clave cuelga del plan y de quien la grabó: messages/<planId>/<userId>/<uuid>.m4a.
+
+/** Tipos de audio permitidos y la extensión de la clave. La app graba AAC (.m4a) en Android y en iOS. */
+export const ALLOWED_AUDIO_TYPES = Object.freeze({ 'audio/mp4': 'm4a' })
+
+/** 60 segundos de AAC a 128 kbps son ~1 MB: 2 MB deja margen sin permitir audios largos. */
+export const MAX_AUDIO_BYTES = 2 * 1024 * 1024
+
+/** Duración máxima de una nota de voz (la informa la app; el tamaño la acota del lado del back). */
+export const VOICE_MAX_DURATION_MS = 60 * 1000
+
+/** Prefijo de las notas de voz de un usuario en el chat de un plan. */
+export const voiceObjectPrefix = (planId, userId) => `messages/${planId}/${userId}/`
+
+/** Forma de la clave de una nota de voz (validación de forma de la request). El dueño lo decide el servicio. */
+export const AUDIO_KEY_PATTERN = /^messages\/[0-9a-f]{24}\/[0-9a-f]{24}\/[A-Za-z0-9-]{1,64}\.m4a$/
+
+const invalidAudio = (message) => new AppError('VALIDATION_ERROR', message)
+
+const AUDIO_NAME = /^[A-Za-z0-9-]{1,64}\.m4a$/
+
+/**
+ * Verifica una nota de voz ya subida a S3 antes de guardar el mensaje: dueño (prefijo) → forma de la clave →
+ * existencia → tipo y tamaño REALES. Si lo subido no cumple se borra el objeto.
+ * @param {object} params
+ * @param {import('../adapters/storage/index.js').Storage} params.storage
+ * @param {string} params.objectKey
+ * @param {string} params.prefix  `messages/<planId>/<userId>/`.
+ * @throws {AppError} FORBIDDEN (otro dueño u otro plan), VALIDATION_ERROR (clave, tipo o tamaño) o NOT_FOUND (no se subió).
+ */
+export async function verifyUploadedAudio ({ storage, objectKey, prefix }) {
+  if (!objectKey.startsWith(prefix)) throw errors.forbidden('Ese audio no te pertenece')
+  if (!AUDIO_NAME.test(objectKey.slice(prefix.length))) throw invalidAudio('La clave del audio no es válida')
+  const head = await storage.headObject(objectKey)
+  if (!head) throw errors.notFound('No encontramos el audio subido')
+  if (!ALLOWED_AUDIO_TYPES[head.contentType]) {
+    await storage.deleteObject(objectKey)
+    throw invalidAudio('El audio tiene que ser AAC (.m4a)')
+  }
+  if (head.sizeBytes < 1 || head.sizeBytes > MAX_AUDIO_BYTES) {
+    await storage.deleteObject(objectKey)
+    throw invalidAudio(`El audio debe pesar entre 1 byte y ${MAX_AUDIO_BYTES / (1024 * 1024)} MB`)
+  }
+}

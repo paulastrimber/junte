@@ -47,11 +47,16 @@ function isSameSender (a, b) {
 
 // Un mensaje que volvió a llegar sin cambios (por el polling o al reconectar) conserva el objeto que ya estaba: así
 // la fila memoizada no se vuelve a pintar y el avatar no se vuelve a descargar por una URL firmada nueva.
-function isSameServerMessage (saved, incoming) {
+// Las notas de voz traen `audioUrl` firmada de nuevo en cada respuesta: misma ruta (la clave del audio) = misma nota,
+// y se conserva la URL que ya está (si cambia, el reproductor se recrea y corta lo que suena). Con `refreshAudio` se
+// toma la nueva: la anterior vence a los 10 minutos.
+function isSameServerMessage (saved, incoming, refreshAudio) {
   if (saved.status !== MESSAGE_STATUS.SENT) return false
-  return Object.keys(incoming).every((key) => (key === 'sender'
-    ? isSameSender(saved.sender, incoming.sender)
-    : key === 'status' || Object.is(saved[key], incoming[key])))
+  return Object.keys(incoming).every((key) => {
+    if (key === 'sender') return isSameSender(saved.sender, incoming.sender)
+    if (key === 'audioUrl' && !refreshAudio) return isSameSignedFile(saved.audioUrl, incoming.audioUrl)
+    return key === 'status' || Object.is(saved[key], incoming[key])
+  })
 }
 
 /**
@@ -60,9 +65,10 @@ function isSameServerMessage (saved, incoming) {
  * había no se toca y, si no cambió nada, devuelve la misma lista (`current`).
  * @param {object[]} current  Ordenada como la devuelve esta función.
  * @param {object[]} incoming  Mensajes tal como los devuelve el servidor.
+ * @param {{ refreshAudio?: boolean }} [options]  `refreshAudio`: tomar la URL firmada nueva de las notas de voz.
  * @returns {object[]} lista del más nuevo al más viejo.
  */
-export function mergeMessages (current, incoming) {
+export function mergeMessages (current, incoming, { refreshAudio = false } = {}) {
   const merged = [...current]
   let hasChanges = false
   for (const message of incoming) {
@@ -71,10 +77,11 @@ export function mergeMessages (current, incoming) {
       index = merged.findIndex((item) => isUnsent(item) && item.clientId === message.clientId)
     }
     const previous = index === -1 ? null : merged[index]
-    if (previous && isSameServerMessage(previous, message)) continue
+    if (previous && isSameServerMessage(previous, message, refreshAudio)) continue
     // Si solo cambió la firma de la foto se conserva el `sender` anterior (misma imagen, misma URL para `Image`).
     const sender = previous && isSameSender(previous.sender, message.sender) ? previous.sender : message.sender
     const saved = { ...message, sender, status: MESSAGE_STATUS.SENT }
+    if (previous?.audioUrl && !refreshAudio && isSameSignedFile(previous.audioUrl, message.audioUrl)) saved.audioUrl = previous.audioUrl
     if (index === -1) merged.push(saved)
     else merged[index] = saved
     hasChanges = true
@@ -90,12 +97,12 @@ export function mergeMessages (current, incoming) {
  * @param {{ items: object[], nextCursor: string | null }} page
  * @returns {{ messages: object[], isReplaced: boolean }}  `isReplaced`: el cursor para ir hacia atrás es el de la página.
  */
-export function mergeRecoveredPage (current, page) {
+export function mergeRecoveredPage (current, page, options) {
   const known = new Set(current.filter((message) => !isUnsent(message)).map((message) => message.id))
   const overlaps = page.items.some((message) => known.has(message.id))
   const isReplaced = known.size === 0 || (!overlaps && page.nextCursor !== null)
   const base = isReplaced ? current.filter(isUnsent) : current
-  return { messages: mergeMessages(base, page.items), isReplaced }
+  return { messages: mergeMessages(base, page.items, options), isReplaced }
 }
 
 /**
@@ -138,4 +145,14 @@ export function messageGroupPosition (messages, index) {
     isFirst: !isSameGroup(messages[index + 1], message),
     isLast: !isSameGroup(message, messages[index - 1])
   }
+}
+
+/**
+ * Duración de una nota de voz: "0:07", "1:00".
+ * @param {number} ms
+ * @returns {string}
+ */
+export function formatDuration (ms) {
+  const total = Math.max(0, Math.round((Number(ms) || 0) / 1000))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
 }

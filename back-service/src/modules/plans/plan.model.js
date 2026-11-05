@@ -100,7 +100,9 @@ const planSchema = new mongoose.Schema(
     qrPreviousNonceHash: { type: String },
     qrPreviousExpiresAt: { type: Date },
     // Solo-backend: cuándo el job cerró la asistencia (noShow y +1 del creador). Se escribe una sola vez.
-    attendanceClosedAt: { type: Date }
+    attendanceClosedAt: { type: Date },
+    // Solo-backend (S5-BE-08): cuándo el job mandó el recordatorio. Se escribe una sola vez; cambiar `startsAt` lo borra.
+    reminderSentAt: { type: Date }
   },
   {
     collection: 'plans',

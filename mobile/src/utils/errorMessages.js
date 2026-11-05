@@ -12,6 +12,7 @@ const MESSAGES = Object.freeze({
   TOKEN_EXPIRED: 'Tu sesión terminó. Iniciá sesión de nuevo.',
   PROFILE_INCOMPLETE: 'Completá tu perfil (nombre, fecha de nacimiento y al menos un interés) para crear planes.',
   PLAN_CLOSED: 'Este plan ya no se puede modificar.',
+  PLAN_NOT_FULL: 'Este plan tiene lugar: podés inscribirte directamente.',
   [CLIENT_ERROR_CODES.NETWORK_ERROR]: 'No pudimos conectarnos con el servidor. Revisá tu conexión.',
   [CLIENT_ERROR_CODES.TIMEOUT]: 'El servidor tardó demasiado en responder. Probá de nuevo.'
 })

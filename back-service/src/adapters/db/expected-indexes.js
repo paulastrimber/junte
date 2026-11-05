@@ -17,6 +17,7 @@ export const EXPECTED_INDEXES = Object.freeze([
   { collection: 'messages', name: 'senderId_clientId_unique', key: { senderId: 1, clientId: 1 }, unique: true },
   { collection: 'reports', name: 'status_createdAt', key: { status: 1, createdAt: 1 } },
   { collection: 'reports', name: 'reporterId_targetType_targetId_pending_unique', key: { reporterId: 1, targetType: 1, targetId: 1 }, unique: true },
+  { collection: 'spotAlerts', name: 'planId_userId_unique', key: { planId: 1, userId: 1 }, unique: true },
   { collection: 'deviceTokens', name: 'token_unique', key: { token: 1 }, unique: true },
   { collection: 'deviceTokens', name: 'userId', key: { userId: 1 } },
   { collection: 'sessions', name: 'sid_unique', key: { sid: 1 }, unique: true },

@@ -12,6 +12,7 @@
 // que estar RESTRINGIDA en Google Cloud a esta app (nombre de paquete + huella SHA-1) y a "Maps SDK for Android".
 // No se commitea: sale de mobile/.env en local y de las variables de entorno de EAS en los builds.
 
+import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import { loadProjectEnv } from '@expo/env'
@@ -24,6 +25,15 @@ loadProjectEnv(fileURLToPath(new URL('.', import.meta.url)), { mode: process.env
 // Identificador de la app en Android (`package`) e iOS (`bundleIdentifier`). Es permanente: no se cambia una vez
 // publicada, y la clave de Google Maps se restringe a este paquete + la huella SHA-1 del certificado de firma.
 const APP_ID = 'com.junte.app'
+
+// Proyecto de EAS. Por defecto el del equipo (@man1111s-team/junte; el projectId no es secreto). Para compilar en otra
+// cuenta de Expo sin editar este archivo: EAS_OWNER=<cuenta> en mobile/.env o en la terminal, `npx eas-cli init` y
+// EAS_PROJECT_ID=<id que muestra>. Con EAS_OWNER propio no se usa el projectId del equipo (EAS lo rechazaría).
+const DEFAULT_EAS_OWNER = 'man1111s-team'
+const DEFAULT_EAS_PROJECT_ID = 'fce23ad9-8c35-4b99-8399-5e390e72218b'
+const EAS_OWNER = process.env.EAS_OWNER?.trim() || DEFAULT_EAS_OWNER
+const EAS_PROJECT_ID = process.env.EAS_PROJECT_ID?.trim() ||
+  (EAS_OWNER === DEFAULT_EAS_OWNER ? DEFAULT_EAS_PROJECT_ID : undefined)
 
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:'])
 // Dominio reservado (RFC 2606) usado como marcador en eas.json hasta que exista el DNS real.
@@ -71,12 +81,25 @@ function readGoogleMapsAndroidKey () {
   return key || undefined
 }
 
+// Avisos push (S5-MOB-04): config de Firebase de la app de Android. No se versiona (.gitignore). En EAS se sube como
+// variable de entorno de tipo archivo GOOGLE_SERVICES_JSON (EAS la reemplaza por la ruta del archivo); en local, se
+// baja a mobile/google-services.json. Sin ella la app compila igual, pero no recibe avisos push.
+function readGoogleServicesFile () {
+  const fromEas = process.env.GOOGLE_SERVICES_JSON?.trim()
+  if (fromEas) return fromEas
+  const local = fileURLToPath(new URL('./google-services.json', import.meta.url))
+  return existsSync(local) ? './google-services.json' : undefined
+}
+
 export default ({ config }) => ({
   ...config,
   name: 'junte',
   slug: 'junte',
+  owner: EAS_OWNER,
   version: '0.1.0',
   orientation: 'portrait',
+  // Enlaces para invitar a un plan: junte://plans/<id> abre el detalle (S5-MOB-05).
+  scheme: 'junte',
   icon: './assets/icon.png',
   // Modo claro u oscuro según el sistema; los colores de cada modo están en src/theme/colors.js.
   userInterfaceStyle: 'automatic',
@@ -86,6 +109,7 @@ export default ({ config }) => ({
   },
   android: {
     package: APP_ID,
+    googleServicesFile: readGoogleServicesFile(),
     // La ubicación solo se usa con la app abierta (S6-MOB-04): aunque alguna librería la declare, el permiso de
     // ubicación en segundo plano no entra al manifiesto.
     blockedPermissions: ['android.permission.ACCESS_BACKGROUND_LOCATION'],
@@ -111,7 +135,12 @@ export default ({ config }) => ({
       isAndroidBackgroundLocationEnabled: false
     }],
     // Check-in: la cámara solo se usa para leer el QR de asistencia (sin micrófono ni grabación).
-    ['expo-camera', { cameraPermission: 'junte usa la cámara para leer el QR de asistencia de los planes.', microphonePermission: false, recordAudioAndroid: false }],
+    // (El micrófono lo pide expo-audio, para las notas de voz: la cámara nunca graba.)
+    ['expo-camera', { cameraPermission: 'junte usa la cámara para leer el QR de asistencia de los planes.', recordAudioAndroid: false }],
+    // Notas de voz del chat (S5-MOB-05): solo se graba mientras la persona mantiene la grabación abierta en el chat.
+    ['expo-audio', { microphonePermission: 'junte usa el micrófono para grabar las notas de voz que mandás en el chat de un plan.', enableBackgroundRecording: false, enableBackgroundPlayback: false }],
+    // Avisos push (FCM): nuevo inscripto, lugar liberado y recordatorio.
+    ['expo-notifications', { defaultChannel: 'default' }],
     // Compatibilidad horaria del feed: solo se lee cuándo estás ocupado, nunca el contenido de los eventos.
     ['expo-calendar', { calendarPermission: 'junte mira cuándo estás ocupado en tu calendario para recomendarte planes en horarios que te queden libres.' }],
     // Mapa para elegir el lugar de un plan. En iOS usa Apple Maps (sin clave).
@@ -119,6 +148,7 @@ export default ({ config }) => ({
   ],
   extra: {
     ...config.extra,
+    ...(EAS_PROJECT_ID && { eas: { ...config.extra?.eas, projectId: EAS_PROJECT_ID } }),
     appEnv: process.env.APP_ENV ?? 'development',
     apiUrl: readApiUrl()
   }

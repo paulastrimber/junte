@@ -30,6 +30,7 @@ Toda respuesta de error, venga de donde venga (Express o Nginx), tiene esta form
 | `EMAIL_TAKEN` | 409 | Registro con email existente (también con otras mayúsculas o espacios) |
 | `PROFILE_INCOMPLETE` | 409 | Crear plan sin perfil completo |
 | `PLAN_FULL` | 409 | Sin cupos |
+| `PLAN_NOT_FULL` | 409 | Pedir aviso de lugar libre (`PUT /plans/:id/spot-alert`) en un plan con lugar o de cupo ilimitado (S5) |
 | `PLAN_CLOSED` | 409 | El plan no admite esa operación en su estado actual: inscripción (cerrado o ya empezado), baja (empezado, cancelado, completado o con el check-in hecho), edición, QR o check-in de un plan cancelado o completado, o un cambio de `status` que no corresponde |
 | `ALREADY_JOINED` | 409 | Inscripción activa duplicada |
 | `CAPACITY_BELOW_PARTICIPANTS` | 409 | `PATCH capacity` menor a los inscriptos (pasar a `null`, cupo ilimitado, nunca lo dispara) |
@@ -87,7 +88,7 @@ Logger estructurado en JSON (**pino**), una línea por evento, salida a stdout �
 |--------|--------|
 | Cada request (al terminar) | `requestId`, `method`, `route` (patrón, no URL con IDs), `status`, `durationMs`, `userId?` |
 | Error 500 | Lo anterior + `err` con stack |
-| Eventos de negocio relevantes | `event` (`plan.joined`, `plan.left`, `plan.checked_in`, `plan.status_changed`, `plan.attendance_closed`, `plan.completed`), `planId`, `userId` |
+| Eventos de negocio relevantes | `event` (`plan.joined`, `plan.left`, `plan.checked_in`, `plan.status_changed`, `plan.attendance_closed`, `plan.completed`, `spot_alert.requested`, `spot_alert.cancelled`, `device.registered`, `device.unregistered`, `message.sent` con `type`), `planId`, `userId` |
 | Socket.io | `connect`/`disconnect`, `userId`, motivo |
 | Jobs | `job`, inicio y fin, `processed`, `durationMs`, `lockAcquired`; `warn` si no hay Redis (el ciclo se saltea) |
 | FCM | fallos de envío y tokens eliminados (sin el token completo) |

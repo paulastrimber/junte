@@ -23,9 +23,15 @@ const planFull = () => new AppError('PLAN_FULL', 'El plan no tiene cupos disponi
  * @param {{ info: (obj: object, msg: string) => void }} deps.logger
  * @param {{ removeMember: (params: { planId: string, userId: string }) => void }} [deps.chatAccess]  Saca al usuario del chat
  *   en tiempo real al darse de baja (Socket.io). Nunca lanza.
+ * @param {{ remove: (params: { planId: string, userId: string }) => Promise<boolean> }} [deps.spotAlerts]  Pedidos de
+ *   "avisame si se libera un lugar" (módulo `spot-alerts`): al inscribirse se borra el del usuario.
+ * @param {{ planJoined: (params: { planId: string, userId: string }) => Promise<void>, spotFreed: (params: { planId: string }) => Promise<void> }} [deps.notifier]
+ *   Avisos push (módulo `notifications`): se llaman después del commit, sin esperarlos (nunca rechazan).
  */
 export function createParticipationService ({
-  plans, planRepo, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger, chatAccess = { removeMember () {} }
+  plans, planRepo, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger, chatAccess = { removeMember () {} },
+  spotAlerts = { remove: async () => false },
+  notifier = { planJoined: async () => {}, spotFreed: async () => {} }
 }) {
   // El `$inc` condicional no se aplicó: se averigua por qué con el estado actual.
   async function explainJoinFailure (planId, now) {
@@ -64,8 +70,14 @@ export function createParticipationService ({
         return participationRepo.activate({ planId, userId, at: now }, { session })
       })
 
-      // Después del commit (regla 10). El aviso al creador por un nuevo inscripto es de S5.
+      // Después del commit (regla 10).
       logger.info({ event: 'plan.joined', planId, userId }, 'plan joined')
+      // Ya tiene su lugar: su pedido de aviso no sirve más. Si falla, queda hasta que el plan empiece (job de limpieza)
+      // y el aviso de cupo liberado igual saltea a los inscriptos.
+      spotAlerts.remove({ planId, userId })
+        .catch((err) => logger.warn({ err, planId, userId }, 'could not remove spot alert after joining'))
+      // Aviso al creador: no se espera (no bloquea la respuesta) y nunca rechaza.
+      notifier.planJoined({ planId, userId })
       return participation
     },
 
@@ -80,21 +92,26 @@ export function createParticipationService ({
       const visible = await plans.requireVisible({ planId, userId })
       const now = clock.now()
 
-      const left = await withTransaction(async (session) => {
+      const after = await withTransaction(async (session) => {
         const cancelled = await participationRepo.cancel({ planId, userId, at: now }, { session })
-        if (!cancelled) return false
+        if (!cancelled) return null
         // La reputación del check-in no se deshace: quien ya registró su asistencia no se puede dar de baja.
         if (await checkInRepo.exists(planId, userId, { session })) throw planClosed('Ya registraste tu asistencia: no podés darte de baja')
         const plan = await planRepo.decrementCount(planId, { now, session })
         if (!plan) throw await explainLeaveFailure(planId, now)
-        return true
+        return plan
       })
+      const left = after !== null
 
-      // Después del commit (regla 10). El aviso de cupo liberado es de S5.
+      // Después del commit (regla 10).
       if (left) {
         logger.info({ event: 'plan.left', planId, userId }, 'plan left')
         // Ya no es parte del plan: deja de recibir el chat aunque tenga la conexión abierta. El creador sigue en el chat.
         if (visible.creatorId !== userId) chatAccess.removeMember({ planId, userId })
+        // Estaba lleno y se liberó un lugar: avisa a quienes lo pidieron (sin esperar; nunca rechaza).
+        if (after.status === 'open' && after.capacity !== null && after.participantCount === after.capacity - 1) {
+          notifier.spotFreed({ planId })
+        }
       }
       return { left }
     },

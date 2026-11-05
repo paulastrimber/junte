@@ -46,5 +46,5 @@ El chat (S5) depende de las inscripciones (S4) porque el permiso es "participant
 | 2 | ✅ Sesiones múltiples, perfil completo, fecha de nacimiento (decididos) |
 | 3 | ✅ Intereses del plan, compatibilidad horaria, paginación del feed, visibilidad, filtros, costo y cupo ilimitado (decididos) |
 | 4 | ✅ Parámetros del check-in, estados del plan, reactivación y jobs: decididos en [s4-decisiones.md](s4-decisiones.md). El aviso de cupo liberado pasó completo a S5 |
-| 5 | ✅ Notas de voz y contactos (para después del chat de texto) y cupo liberado (decididos). Falta crear el proyecto de Firebase para FCM |
+| 5 | ✅ Notas de voz y contactos (para después del chat de texto) y cupo liberado (decididos). Proyecto de Firebase `junte-ebef4` creado; lo que falta (AWS, EAS, teléfono) en [s5-continuacion.md](s5-continuacion.md) |
 | 6 | Endpoints y métricas de admin |

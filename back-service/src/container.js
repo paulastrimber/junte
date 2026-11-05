@@ -7,6 +7,7 @@ import { createArgon2Hasher } from './adapters/passwordHasher.js'
 import { connectRedis, disconnectRedis, pingRedis } from './adapters/redis.js'
 import { createRedisLock } from './adapters/redisLock.js'
 import { createRedisSocketAdapter } from './adapters/socketAdapter.js'
+import { createMemoryPush, createPushFromConfig } from './adapters/push/index.js'
 import { createMemoryStorage, createS3Storage } from './adapters/storage/index.js'
 import { createScheduler } from './jobs/scheduler.js'
 import { createAuthenticate } from './middlewares/authenticate.js'
@@ -21,6 +22,8 @@ import {
 import {
   CheckIn, createAttendanceService, createCheckInController, createCheckInRepository, createCheckInRoutes, createCheckInService
 } from './modules/checkins/index.js'
+import { DeviceToken, createDeviceController, createDeviceRoutes, createDeviceService, createDeviceTokenRepository } from './modules/devices/index.js'
+import { createNotifier } from './modules/notifications/index.js'
 import { buildScorers, createFeedController, createFeedRoutes, createFeedService } from './modules/feed/index.js'
 import {
   Message, createMessageController, createMessageRepository, createMessageRoutes, createMessageSerializer, createMessageService
@@ -30,11 +33,14 @@ import {
 } from './modules/participations/index.js'
 import {
   Plan, createMyPlansRoutes, createPlanController, createPlanRepository, createPlanRoutes, createPlanSerializer, createPlanService,
-  isLive, matchesQrChallenge, pickFilters, planIdParams
+  isFull, isLive, matchesQrChallenge, pickFilters, planIdParams
 } from './modules/plans/index.js'
 import {
   Report, createReportController, createReportRepository, createReportRoutes, createReportService
 } from './modules/reports/index.js'
+import {
+  SpotAlert, createSpotAlertController, createSpotAlertRepository, createSpotAlertRoutes, createSpotAlertService
+} from './modules/spot-alerts/index.js'
 import { createUploadController, createUploadRoutes, createUploadService } from './modules/uploads/index.js'
 import { createChatBroadcaster } from './sockets/chat.broadcaster.js'
 import { createSocketServer } from './sockets/index.js'
@@ -52,9 +58,10 @@ import {
  * @param {import('./adapters/clock.js').Clock} deps.clock
  * @param {import('./adapters/passwordHasher.js').PasswordHasher} deps.passwordHasher
  * @param {import('./adapters/storage/index.js').Storage} deps.storage
+ * @param {import('./adapters/push/index.js').Push} [deps.push]  Avisos push (FCM); por defecto, en memoria (no envía nada).
  * @param {number} [deps.maxActiveSessions]
  */
-export function buildModules ({ config, logger, clock, passwordHasher, storage, maxActiveSessions }) {
+export function buildModules ({ config, logger, clock, passwordHasher, storage, push = createMemoryPush(), maxActiveSessions }) {
   const userRepo = createUserRepository(User)
   const sessionRepo = createSessionRepository(Session)
   const tokens = createTokenService({ secret: config.jwt.secret, clock })
@@ -67,20 +74,44 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const checkInRepo = createCheckInRepository(CheckIn)
   const messageRepo = createMessageRepository(Message)
   const reportRepo = createReportRepository(Report)
+  const spotAlertRepo = createSpotAlertRepository(SpotAlert)
+  const deviceTokenRepo = createDeviceTokenRepository(DeviceToken)
 
   const userService = createUserService({
     userRepo, storage, catalogs: catalogService, clock, logger, countNoShows: participationRepo.countNoShows
   })
   const userSerializer = createUserSerializer({ storage, clock })
-  const messageSerializer = createMessageSerializer({ serializeSender: userSerializer.serializePublic })
+  const messageSerializer = createMessageSerializer({ serializeSender: userSerializer.serializePublic, storage })
   // Tiempo real del chat: se conecta al servidor Socket.io cuando arranca (attachSockets); antes no emite nada.
   const chatBroadcaster = createChatBroadcaster({ serializeMessage: messageSerializer.serialize, logger })
 
   const planService = createPlanService({
-    planRepo, userRepo, participationRepo, checkInRepo, catalogs: catalogService, isProfileComplete, storage, clock, logger
+    planRepo,
+    userRepo,
+    participationRepo,
+    checkInRepo,
+    catalogs: catalogService,
+    isProfileComplete,
+    storage,
+    clock,
+    logger,
+    spotAlerts: { isRequested: spotAlertRepo.exists }
   })
+  // Avisos push: siempre después del commit y sin bloquear la respuesta (regla 10).
+  const notifier = createNotifier({ push, deviceTokenRepo, planRepo, participationRepo, spotAlertRepo, userRepo, isFull, clock, logger })
+  const spotAlertService = createSpotAlertService({ plans: planService, planRepo, participationRepo, spotAlertRepo, isFull, clock, logger })
   const participationService = createParticipationService({
-    plans: planService, planRepo, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger, chatAccess: chatBroadcaster
+    plans: planService,
+    planRepo,
+    participationRepo,
+    checkInRepo,
+    userRepo,
+    withTransaction,
+    clock,
+    logger,
+    chatAccess: chatBroadcaster,
+    spotAlerts: spotAlertRepo,
+    notifier
   })
   const checkInService = createCheckInService({
     plans: planService, isLive, matchesQrChallenge, participationRepo, checkInRepo, userRepo, withTransaction, clock, logger
@@ -91,10 +122,11 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const feedService = createFeedService({
     planRepo, userRepo, participationRepo, attachCreators: planService.attachCreators, scorers: buildScorers(config.feed.weights), clock
   })
-  const uploadService = createUploadService({ storage, plans: planService })
   const messageService = createMessageService({
-    plans: planService, participationRepo, messageRepo, userRepo, broadcaster: chatBroadcaster, clock, logger
+    plans: planService, participationRepo, messageRepo, userRepo, broadcaster: chatBroadcaster, clock, logger, storage
   })
+  // Fotos (perfil y plan) y notas de voz del chat (solo para quien es parte del chat).
+  const uploadService = createUploadService({ storage, plans: planService, messages: messageService })
   const reportService = createReportService({ reportRepo, userRepo, plans: planService, messages: messageService, clock, logger })
   const catalogAdmin = createCatalogAdminService({ catalogRepo, catalogService })
   const adminService = createAdminService({
@@ -120,6 +152,9 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const catalogController = createCatalogController({ catalogService })
   const planController = createPlanController({ planService, planSerializer, feedService })
   const feedController = createFeedController({ feedService, planSerializer, pickFilters })
+  const spotAlertController = createSpotAlertController({ spotAlertService })
+  const deviceService = createDeviceService({ deviceTokenRepo, clock, logger })
+  const deviceController = createDeviceController({ deviceService })
   const participationController = createParticipationController({ participationService, serializeParticipant: userSerializer.serializePublic })
   const checkInController = createCheckInController({ checkInService })
   const messageController = createMessageController({ messageService, messageSerializer })
@@ -137,8 +172,11 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     // Inscripciones y check-in cuelgan de /plans/:id.
     { path: '/plans', router: createParticipationRoutes({ participationController, planIdParams, authenticate }) },
     { path: '/plans', router: createCheckInRoutes({ checkInController, planIdParams, authenticate }) },
+    { path: '/plans', router: createSpotAlertRoutes({ spotAlertController, planIdParams, authenticate }) },
     { path: '/plans', router: createMessageRoutes({ messageController, planIdParams, authenticate }) },
     { path: '/feed', router: createFeedRoutes({ feedController, authenticate }) },
+    // Tokens de push (FCM) del teléfono.
+    { path: '/devices', router: createDeviceRoutes({ deviceController, authenticate }) },
     { path: '/reports', router: createReportRoutes({ reportController, authenticate }) },
     // Panel de administración: todo exige rol admin (router y servicio).
     { path: '/admin', router: createAdminRoutes({ adminController, authenticate }) }
@@ -147,7 +185,11 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   // Jobs periódicos: el scheduler los corre con lock (uno por ciclo entre todas las instancias).
   const jobs = [
     { name: 'close-attendance', run: attendanceService.closeDueAttendance },
-    { name: 'complete-plans', run: attendanceService.completeDuePlans }
+    { name: 'complete-plans', run: attendanceService.completeDuePlans },
+    // Recordatorio push a los inscriptos, una hora antes (una sola vez por plan: `reminderSentAt`).
+    { name: 'send-reminders', run: notifier.sendDueReminders },
+    // Pedidos de aviso de planes que ya empezaron o se cancelaron (se conservan hasta entonces).
+    { name: 'purge-spot-alerts', run: spotAlertService.purgeExpired }
   ]
 
   return {
@@ -161,6 +203,9 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     planService,
     feedService,
     participationService,
+    spotAlertService,
+    notifier,
+    push,
     checkInService,
     attendanceService,
     messageService,
@@ -190,8 +235,13 @@ export function createContainer (config) {
     : createMemoryStorage({ clock })
   if (!config.storage) logger.warn('S3_BUCKET/AWS_REGION not set: using in-memory storage (photos are not persisted)')
 
+  // Sin FCM_SERVICE_ACCOUNT (todavía no hay proyecto de Firebase en todos los entornos) los avisos no salen: se usa un
+  // push no-op sin estado (el de memoria acumularía lo "enviado" para siempre). Ver docs/pendientes.md.
+  const push = createPushFromConfig({ config, logger })
+  if (!config.push) logger.warn('FCM_SERVICE_ACCOUNT not set: push notifications are disabled (no-op push)')
+
   /** Routers de los módulos, montados bajo /internal por createApp. */
-  const modules = buildModules({ config, logger, clock, passwordHasher: createArgon2Hasher(), storage })
+  const modules = buildModules({ config, logger, clock, passwordHasher: createArgon2Hasher(), storage, push })
   const { routes, jobs } = modules
 
   let redis = null

@@ -69,8 +69,17 @@ describe('messages: idempotencia por clientId', () => {
     expect(await raw('messages').countDocuments()).toBe(2)
   })
 
-  it('rechaza un type que no es texto (las notas de voz todavía no existen)', async () => {
+  it('notas de voz: con audio y duración y sin texto; un texto sin audio (S5)', async () => {
+    const audioKey = `messages/${new mongoose.Types.ObjectId()}/${SENDER_ID}/abc.m4a`
+    const voice = (overrides) => { const { text, ...rest } = message({ type: 'voice', audioKey, durationMs: 3000, ...overrides }); return rest }
+    await raw('messages').insertOne(voice())
+
     await expect(raw('messages').insertOne(message({ type: 'voice' }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('messages').insertOne({ ...voice(), text: 'hola' })).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('messages').insertOne(voice({ durationMs: 60001 }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('messages').insertOne(voice({ audioKey: 'otra/clave.mp3' }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('messages').insertOne(message({ audioKey }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('messages').insertOne(message({ type: 'image' }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
   })
 
   it('rechaza un clientId con caracteres no permitidos o de más de 64', async () => {
@@ -108,6 +117,21 @@ describe('validadores $jsonSchema (sin pasar por Mongoose)', () => {
 
     await expect(raw('plans').updateOne({ _id: plan._id }, { $set: { participantCount: 3 } }))
       .rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+
+  it('rechaza un reminderSentAt que no es fecha (S5)', async () => {
+    const plan = await makePlan()
+
+    await expect(raw('plans').updateOne({ _id: plan._id }, { $set: { reminderSentAt: 'ayer' } }))
+      .rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+
+  it('spotAlerts: un solo pedido por persona y plan, con planId y userId obligatorios (S5)', async () => {
+    const alert = { planId: new mongoose.Types.ObjectId(), userId: new mongoose.Types.ObjectId(), createdAt: new Date() }
+    await raw('spotAlerts').insertOne({ ...alert })
+
+    await expect(raw('spotAlerts').insertOne({ ...alert })).rejects.toMatchObject({ code: 11000 })
+    await expect(raw('spotAlerts').insertOne({ planId: alert.planId, createdAt: new Date() })).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
   })
 
   it('rechaza participantCount negativo', async () => {

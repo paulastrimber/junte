@@ -25,7 +25,7 @@ App ──WSS /api/v1/socket.io──▶ ALB público ──▶ Nginx (rewrite) 
 |--------|-----------|---------|--------------|
 | `chat:join` | C → S | `{ planId }` | `{ ok }` o `{ error: { code, message } }` |
 | `chat:leave` | C → S | `{ planId }` | `{ ok }` |
-| `chat:send` | C → S | `{ planId, text, clientId }` | `{ ok, message }`; persiste y emite `chat:message` a la sala |
+| `chat:send` | C → S | `{ planId, text, clientId }` o nota de voz `{ planId, type: 'voice', audioKey, durationMs, clientId }` | `{ ok, message }`; persiste y emite `chat:message` a la sala |
 | `chat:message` | S → C | mensaje serializado | — |
 | `chat:hidden` | S → C | `{ planId, messageId }` | Un admin ocultó un mensaje (S6): la app lo saca de la lista. Volver a mostrarlo no emite nada (aparece al recargar el historial) |
 
@@ -58,9 +58,11 @@ Al reconectar, el cliente vuelve a hacer `chat:join` (las salas no sobreviven a 
 
 | Aviso | Disparador | Destinatarios |
 |-------|-----------|---------------|
-| Nuevo inscripto | `join` confirmado | Creador del plan |
-| Cupo liberado | `leave` confirmado en un plan que estaba lleno | Pendiente: ¿a quién? (no hay lista de espera) |
-| Recordatorio | Job programado X min antes de `startsAt` | Participantes activos |
+| Nuevo inscripto (`plan.joined`) | `join` confirmado (salvo que se inscriba el creador) | Creador del plan |
+| Cupo liberado (`plan.spot_freed`) | `leave` confirmado en un plan que estaba lleno y sigue `open` sin empezar | **Todos** los que pidieron aviso (`spotAlerts`), menos los ya inscriptos. Sin orden: el primero que se inscribe se queda el lugar. Los pedidos se conservan |
+| Recordatorio (`plan.reminder`) | Job `send-reminders` cuando faltan ≤ 60 min para `startsAt` (una vez: `reminderSentAt`) | Participantes activos |
+
+**Implementado en S5** (`src/adapters/push/` + `src/modules/notifications/`): FCM API HTTP v1 sin `firebase-admin` (la cuenta de servicio firma un JWT con `jose`; el access token se cachea). Credencial: `FCM_SERVICE_ACCOUNT` (JSON en una línea) o, en AWS, `FCM_SERVICE_ACCOUNT_SECRET_ID` (Secrets Manager). Sin ella se usa el push en memoria (no sale nada; se loguea `push.sent`). `data: { type, planId }` para que la app abra el plan. Log: `event: 'push.sent'`, `type`, `planId`, `recipients`, `devices`, `sent`, `failed`, `removedTokens` (nunca tokens). Inválido = HTTP 404 o `UNREGISTERED` / `INVALID_ARGUMENT`.
 
 Reglas:
 - Se envían **después del commit** de la transacción y nunca bloquean la respuesta HTTP.
@@ -69,4 +71,4 @@ Reglas:
 
 ### Jobs programados
 
-Con 2+ instancias del back, un `setInterval` correría duplicado. Los jobs (recordatorios, cierre automático de planes) toman un **lock en Redis** (`SET key value NX PX ttl`) antes de ejecutar; solo la instancia que lo obtiene trabaja. Marcar en Mongo qué recordatorio ya se envió (`reminderSentAt`) para que un reinicio no los repita. Ver [pendientes](../pendientes.md#jobs-programados).
+Con 2+ instancias del back, un `setInterval` correría duplicado. Los jobs (recordatorios, cierre automático de planes) toman un **lock en Redis** (`SET key value NX PX ttl`) antes de ejecutar; solo la instancia que lo obtiene trabaja. Marcar en Mongo qué recordatorio ya se envió (`reminderSentAt`) para que un reinicio no los repita. **S5:** el plan se reserva con una actualización condicional sobre `reminderSentAt: null` **antes** de enviar (a lo sumo una vez; si FCM falla no se reintenta). Jobs actuales: `close-attendance`, `complete-plans`, `send-reminders` y `purge-spot-alerts`. Ver [pendientes](../pendientes.md#jobs-programados).

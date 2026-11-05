@@ -35,8 +35,13 @@ const STATUS_CHANGE_ERRORS = Object.freeze({
  * @param {import('../../adapters/storage/index.js').Storage} deps.storage
  * @param {import('../../adapters/clock.js').Clock} deps.clock
  * @param {{ warn: (obj: object, msg: string) => void }} deps.logger
+ * @param {{ isRequested: (params: { planId: string, userId: string }) => Promise<boolean> }} [deps.spotAlerts]
+ *   Pedidos de "avisame si se libera un lugar" (módulo `spot-alerts`): `spotAlertRequested` del detalle.
  */
-export function createPlanService ({ planRepo, userRepo, participationRepo, checkInRepo, catalogs, isProfileComplete, storage, clock, logger }) {
+export function createPlanService ({
+  planRepo, userRepo, participationRepo, checkInRepo, catalogs, isProfileComplete, storage, clock, logger,
+  spotAlerts = { isRequested: async () => false }
+}) {
   async function requireUser (userId) {
     // authenticate ya comprobó que existe; si desapareció en el medio, la sesión ya no corresponde a un usuario.
     const user = await userRepo.findById(userId)
@@ -86,8 +91,14 @@ export function createPlanService ({ planRepo, userRepo, participationRepo, chec
     })
   }
 
-  /** Detalle de un plan para un usuario: plan + creador + su propio estado. */
-  const withDetail = async (plan, userId) => (await attachMyParticipation(await attachCreators([plan]), userId))[0]
+  /** Detalle de un plan para un usuario: plan + creador + su propio estado (inscripción y pedido de aviso). */
+  async function withDetail (plan, userId) {
+    const [[item], spotAlertRequested] = await Promise.all([
+      attachMyParticipation(await attachCreators([plan]), userId),
+      spotAlerts.isRequested({ planId: plan.id, userId })
+    ])
+    return { ...item, spotAlertRequested }
+  }
 
   /** Cambio de estado del creador: una sola operación condicional (nunca "consultar y después escribir"). */
   async function changeStatus (current, userId, to) {
@@ -146,7 +157,7 @@ export function createPlanService ({ planRepo, userRepo, participationRepo, chec
       if (details.length > 0) throw errors.validation(details)
 
       const plan = await planRepo.create({ ...data, creatorId, university: creator.university })
-      return { plan, creator, myParticipation: null }
+      return { plan, creator, myParticipation: null, spotAlertRequested: false }
     },
 
     /**

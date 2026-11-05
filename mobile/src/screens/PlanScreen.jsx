@@ -1,4 +1,4 @@
-import { ScrollView, View } from 'react-native'
+import { ScrollView, Share, View } from 'react-native'
 
 import { Avatar } from '../components/Avatar.jsx'
 import { Button } from '../components/Button.jsx'
@@ -23,6 +23,7 @@ import { borders, createThemedStyles, sizes, spacing } from '../theme/index.js'
 import { formatReputation } from '../utils/attendance.js'
 import { messageForError } from '../utils/errorMessages.js'
 import { formatJoined, formatPrice, formatSchedule, formatSpots } from '../utils/plans.js'
+import { planInviteMessage } from '../utils/planLinks.js'
 
 export const TEXTS = Object.freeze({
   title: 'Plan',
@@ -81,7 +82,13 @@ export const TEXTS = Object.freeze({
   reportCreator: (name) => `Reportar a ${name ?? 'quien organiza'}`,
   reportPerson: 'Reportar',
   reportPlanLabel: 'este plan',
-  reportUserLabel: (name) => `a ${name ?? 'esta persona'}`
+  reportUserLabel: (name) => `a ${name ?? 'esta persona'}`,
+  // Aviso de lugar libre (S5-MOB-06)
+  askSpotAlert: 'Avisarme si se libera un lugar',
+  spotAlertOn: 'Te avisamos si se libera un lugar. Quien se inscriba primero se lo queda.',
+  cancelSpotAlert: 'No avisarme más',
+  // Invitar compartiendo un enlace (S5-MOB-05)
+  invite: 'Invitar a alguien'
 })
 
 // Textos de cada confirmación (las acciones que no tienen vuelta atrás).
@@ -151,7 +158,7 @@ export default function PlanScreen ({ navigation, route }) {
   const { planId, version = 0 } = route.params
   const detail = usePlanDetail(planId, { version, navigation })
   const { status, plan, error, refreshError, savedAt, reload, can, activities, actions, participants, confirmation } = detail
-  const { join, closeSignUps, reopenSignUps, discardQueued } = actions
+  const { join, closeSignUps, reopenSignUps, discardQueued, askSpotAlert, cancelSpotAlert } = actions
   const { askCancel, askLeave, confirm, dismiss } = confirmation
   const { user } = useAuth()
   const offline = useOfflineStatus()
@@ -265,6 +272,16 @@ export default function PlanScreen ({ navigation, route }) {
         {needsConnection ? <Notice tone='warning' icon='cloud-offline-outline' message={TEXTS.needsConnection} /> : null}
 
         {can.canJoin && !queued.isWaiting ? <Button title={TEXTS.join} haptic loading={isPending(PLAN_ACTION.JOIN)} disabled={actions.isBusy} onPress={join} /> : null}
+        {can.canAskSpotAlert
+          ? <Button title={TEXTS.askSpotAlert} variant='secondary' icon='notifications-outline' loading={isPending(PLAN_ACTION.SPOT_ALERT)} disabled={actions.isBusy || !isOnline} onPress={askSpotAlert} />
+          : null}
+        {can.canCancelSpotAlert
+          ? (
+            <Notice tone='success' icon='notifications-outline' message={TEXTS.spotAlertOn} accessibilityLiveRegion='polite'>
+              <Button title={TEXTS.cancelSpotAlert} variant='ghost' size='sm' loading={isPending(PLAN_ACTION.CANCEL_SPOT_ALERT)} disabled={actions.isBusy || !isOnline} onPress={cancelSpotAlert} style={styles.start} />
+            </Notice>
+            )
+          : null}
         {can.canCheckIn
           ? <Button title={TEXTS.checkIn} icon='qr-code-outline' disabled={!isOnline} onPress={() => navigation.navigate(ROUTES.CHECK_IN, { planId: plan.id })} />
           : null}
@@ -312,6 +329,10 @@ export default function PlanScreen ({ navigation, route }) {
               : null}
           </View>
           )
+        : null}
+
+      {plan.status === 'open' || plan.status === 'closed'
+        ? <Button title={TEXTS.invite} variant='secondary' icon='share-outline' onPress={() => Share.share({ message: planInviteMessage(plan) }).catch(() => {})} />
         : null}
 
       {!plan.isCreator

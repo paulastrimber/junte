@@ -184,6 +184,19 @@ describe('logout', () => {
     expect(tokenStorage.getAccessToken()).toBeNull()
   })
 
+  it('antes de borrar la sesión local corre los ganchos (baja del token de push) con el token todavía guardado', async () => {
+    const { service, tokenStorage } = setup({ stored: SAVED })
+    await tokenStorage.load()
+    const seen = []
+    service.onBeforeLogout(() => { seen.push(tokenStorage.getAccessToken()) })
+    service.onBeforeLogout(() => { throw new Error('un gancho que falla no frena el logout') })
+
+    await service.logout()
+
+    expect(seen).toEqual(['access-0'])
+    expect(tokenStorage.getAccessToken()).toBeNull()
+  })
+
   it('logoutAll cierra todas las sesiones y luego la local; si el servidor falla NO cierra nada', async () => {
     const { service, api, tokenStorage, secureStore } = setup({ stored: SAVED })
     await tokenStorage.load()

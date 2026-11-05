@@ -14,6 +14,7 @@ import { io as defaultIo } from 'socket.io-client'
 import { getConfig } from '../config/index.js'
 import { originOf } from '../utils/url.js'
 import { ApiError, CLIENT_ERROR_CODES } from './api/errors.js'
+import { messageContent } from './api/messages.js'
 import { authService } from './auth.js'
 
 /** Ruta de Socket.io detrás de Nginx (docs/arquitectura/08-tiempo-real-y-push.md). */
@@ -287,10 +288,10 @@ export function createSocketService ({
      * @returns {Promise<object>} el mensaje guardado.
      * @throws {ApiError} NETWORK_ERROR si no hay conexión, TIMEOUT si no hubo ack, o el error que devolvió el servidor.
      */
-    sendChatMessage ({ planId, text, clientId }) {
+    sendChatMessage ({ planId, clientId, ...content }) {
       if (!socket?.connected) return Promise.reject(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.NETWORK_ERROR }))
       return new Promise((resolve, reject) => {
-        socket.timeout(ackTimeoutMs).emit('chat:send', { planId, text, clientId }, (timeoutError, response) => {
+        socket.timeout(ackTimeoutMs).emit('chat:send', { planId, ...messageContent(content), clientId }, (timeoutError, response) => {
           if (timeoutError) return reject(new ApiError({ status: 0, code: CLIENT_ERROR_CODES.TIMEOUT }))
           if (response?.ok && response.message) return resolve(response.message)
           reject(response?.error ? errorFromAck(response.error) : new ApiError({ status: 0, code: CLIENT_ERROR_CODES.UNKNOWN_ERROR }))
