@@ -26,7 +26,7 @@ El cursor es **opaco** (base64url de la última clave de orden, p. ej. `{ create
 | 401 | Token ausente, inválido, vencido o revocado; login fallido; cuenta suspendida. `TOKEN_EXPIRED` solo para un access vencido (la app intenta el refresh); un refresh vencido, revocado o reutilizado es `UNAUTHENTICATED` | `UNAUTHENTICATED`, `TOKEN_EXPIRED`, `INVALID_CREDENTIALS`, `ACCOUNT_SUSPENDED` |
 | 403 | Autenticado pero sin permiso | `FORBIDDEN`, `QR_INVALID`, `OUT_OF_RANGE` |
 | 404 | No existe o no es visible para el usuario | `NOT_FOUND` |
-| 409 | Conflicto de estado | `EMAIL_TAKEN`, `PLAN_FULL`, `ALREADY_JOINED`, `PLAN_CLOSED`, `PROFILE_INCOMPLETE`, `CAPACITY_BELOW_PARTICIPANTS`, `CHECKIN_WINDOW_CLOSED`, `ALREADY_CHECKED_IN` |
+| 409 | Conflicto de estado | `EMAIL_TAKEN`, `PLAN_FULL`, `PLAN_NOT_FULL`, `ALREADY_JOINED`, `PLAN_CLOSED`, `PROFILE_INCOMPLETE`, `CAPACITY_BELOW_PARTICIPANTS`, `CHECKIN_WINDOW_CLOSED`, `ALREADY_CHECKED_IN` |
 | 429 | Rate limit (lo genera Nginx) | `RATE_LIMITED` |
 | 500 | Falla interna, sin detalles | `INTERNAL` |
 
@@ -59,10 +59,10 @@ Catálogo completo y reglas en [errores-y-logs.md](../practicas/errores-y-logs.m
 | `GET /users/me/plans` | `role` (`created`\|`joined`), `when` (`upcoming`\|`past`), `limit, cursor` | 200 paginado de planes, con `myParticipation` | 400, 401 | Usuario | ➕ |
 | `PUT /users/me` | cualquiera de `name, birthDate, university, career, city, neighborhood, interests, onboardingCompleted` (cambio parcial, al menos uno) | 200 perfil actualizado | 400 | Usuario sobre su perfil | ✔ |
 | `PUT /users/me/photo` | `objectKey` | 200 perfil actualizado | 400, 403 objeto ajeno, 404 no existe en S3 | Usuario | ✔ |
-| `POST /devices` | `token, platform` (`android`\|`ios`) | 201 creado / 200 actualizado | 400 | Usuario | ➕ |
-| `DELETE /devices/:token` | — | 204 (también si ya no existía) | 403 token de otro usuario | Usuario sobre su token | ➕ |
+| `POST /devices` | `token, platform` (`android`\|`ios`) | 201 creado / 200 actualizado, `{ token, platform }` | 400 | Usuario | ✔ S5 |
+| `DELETE /devices/:token` | — | 204 (también si ya no existía) | 403 token de otro usuario | Usuario sobre su token | ✔ S5 |
 
-`POST /devices` hace *upsert* por `token`: si el mismo token estaba asociado a otro usuario (el teléfono cambió de cuenta), se reasigna al usuario del JWT.
+`POST /devices` hace *upsert* por `token`: si el mismo token estaba asociado a otro usuario (el teléfono cambió de cuenta), se reasigna al usuario del JWT. `token`: el token nativo de FCM (o APNs), 1 a 4096 caracteres `[A-Za-z0-9_:.-]`; en la URL va con `encodeURIComponent`. Nunca se loguea (el log del back guarda el patrón de la ruta, no la URL).
 
 `GET /users/me` **no tiene 404**: el registro crea el usuario y `authenticate` responde 401 si el usuario ya no existe, así que ese caso no se puede alcanzar.
 
@@ -149,6 +149,8 @@ Respuesta de `GET`/`PUT /users/me`, `register` y `login` (solo la ve su dueño):
 | `PUT /plans/:id/photo` | `objectKey` | 200 plan | 400, 403, 404 | Creador | ✔ |
 | `POST /plans/:id/join` | — (cualquier campo es 400) | 201 `{ planId, status, joinedAt }` | 404, 409 `PLAN_FULL` / `ALREADY_JOINED` / `PLAN_CLOSED` | Usuario | ✔ |
 | `DELETE /plans/:id/join` | — | 204 (también si no estaba) | 404, 409 `PLAN_CLOSED` si ya no admite bajas | Usuario sobre su inscripción | ✔ |
+| `PUT /plans/:id/spot-alert` | — (cualquier campo es 400) | 204 (también si ya lo había pedido) | 404, 409 `PLAN_CLOSED` / `ALREADY_JOINED` / `PLAN_NOT_FULL` | Usuario | ✔ S5 |
+| `DELETE /plans/:id/spot-alert` | — | 204 (también si no lo había pedido) | 400 | Usuario sobre su pedido | ✔ S5 |
 | `GET /plans/:id/participants` | `limit, cursor` | 200 paginado de anotados (`id, name, photoUrl, reputation`) | 400, 403, 404 | Participante activo o creador | ➕ |
 | `POST /plans/:id/qr` | — | 201 `{ qrToken, expiresAt }` | 403, 404, 409 `CHECKIN_WINDOW_CLOSED` / `PLAN_CLOSED` | Creador | ✔ |
 | `POST /plans/:id/check-in` | `qrToken, latitude, longitude, accuracyMeters` | 201 `{ planId, checkedInAt, method, distanceMeters }` | 400, 403 `FORBIDDEN`/`QR_INVALID`/`OUT_OF_RANGE`, 404, 409 `PLAN_CLOSED`/`ALREADY_CHECKED_IN`/`CHECKIN_WINDOW_CLOSED` | Participante activo | ✔ |
@@ -184,6 +186,7 @@ Respuesta de `POST`, `GET /plans/:id`, `PATCH`, `PUT …/photo` y de cada elemen
   "checkInClosesAt": "2026-10-25T22:00:00.000Z",
   "checkInRadiusMeters": 150,
   "myParticipation": { "status": "active", "joinedAt": "2026-10-20T14:00:00.000Z", "checkedInAt": null, "noShow": false },
+  "spotAlertRequested": false,
   "distanceMeters": 812,
   "createdAt": "2026-10-12T15:00:00.000Z"
 }
@@ -207,11 +210,12 @@ Campos que solo devuelve el back:
 
 - `university`: la del perfil del creador al crear el plan (`null` si no tiene). `status`: `open` al crear; `completed` lo pone solo el back.
 - `checkInOpensAt` y `checkInClosesAt`: la **ventana de asistencia la calcula siempre el back** (`startsAt − 15 min` a `startsAt + 60 min`, y nunca después de `endsAt`); se recalcula sola cuando cambian las fechas. Mandarlas en un body es 400.
+- `spotAlertRequested` (S5): si el usuario del token pidió que le avisen cuando se libere un lugar. Solo en el detalle (`POST`, `GET /plans/:id`, `PATCH`, `PUT …/photo`).
 - `myParticipation`: el estado del usuario del token en ese plan, o `null` si nunca se inscribió. `status` (`active` \| `cancelled`), `joinedAt`, `checkedInAt` (`null` si no registró su asistencia) y `noShow`. Va en el detalle (`POST`, `GET /plans/:id`, `PATCH`, `PUT …/photo`) y en `GET /users/me/plans`; **no** en los listados del feed.
 - `participantCount`, `availableSpots` e `isFull`: **"lleno" se calcula** (`participantCount >= capacity`), no es un `status`. Con cupo ilimitado (`capacity: null`) `availableSpots` es `null` e `isFull` siempre `false`. Crear un plan no consume cupo: el creador se inscribe aparte.
 - `creator`: vista pública del creador (`id`, `name`, `photoUrl`, `reputation`). `isCreator`: si el usuario del token es quien lo creó (la app lo usa para ofrecer "Editar").
 - `photoUrl`: URL `GET` firmada de 10 minutos, o `null`. `distanceMeters`: solo en resultados por cercanía (`POST /feed`, `GET /plans?near=`), redondeada al metro.
-- Nunca salen `photoKey`, `qrNonceHash`, `qrExpiresAt`, el desafío anterior (`qrPreviousNonceHash`, `qrPreviousExpiresAt`), `attendanceClosedAt` ni `creatorId` suelto.
+- Nunca salen `photoKey`, `qrNonceHash`, `qrExpiresAt`, el desafío anterior (`qrPreviousNonceHash`, `qrPreviousExpiresAt`), `attendanceClosedAt`, `reminderSentAt` ni `creatorId` suelto.
 
 Reglas:
 
@@ -239,6 +243,8 @@ open ◀──▶ closed ──▶ completed      (el back, al llegar endsAt; ta
 #### Inscripciones y asistencia
 
 **Inscribirse (`POST /plans/:id/join`).** El plan tiene que estar `open`, no haber empezado y tener lugar. Vale igual para quien se había dado de baja (se reactiva su misma inscripción). El creador no ocupa cupo al crear: se inscribe como cualquiera. Motivo del rechazo, en orden: plan inexistente o no visible → 404; no está `open` o ya empezó → 409 `PLAN_CLOSED`; sin lugar → 409 `PLAN_FULL` (nunca con cupo ilimitado); ya inscripto → 409 `ALREADY_JOINED`.
+
+**Avisarme si se libera un lugar (`PUT`/`DELETE /plans/:id/spot-alert`, S5).** Solo sobre un plan visible, `open`, que no empezó y **lleno** (con cupo ilimitado nunca está lleno). Motivo del rechazo, en orden: 404; no está `open` o ya empezó → 409 `PLAN_CLOSED`; ya inscripto → 409 `ALREADY_JOINED`; tiene lugar → 409 `PLAN_NOT_FULL`. Pedirlo dos veces deja un solo pedido. Cuando alguien se da de baja de un plan que estaba lleno (y sigue `open`), después del commit se avisa por push **a todos** los que lo pidieron (no a los ya inscriptos); el primero que se inscribe se queda con el lugar. El pedido **se conserva** después del aviso, hasta que el usuario se inscribe (se borra solo), lo cancela o el plan empieza o se cancela (un job lo borra). `spotAlertRequested` en el detalle dice si lo pidió.
 
 **Darse de baja (`DELETE /plans/:id/join`).** Con el plan `open` o `closed` y antes de `startsAt`. Idempotente: sin inscripción activa responde 204. Responde 409 `PLAN_CLOSED` si el plan ya empezó, está cancelado o completado, o si la persona **ya registró su asistencia**.
 
@@ -309,7 +315,7 @@ POST /api/v1/feed
 | Método y ruta | Body / query | OK | Errores | Permiso | Estado |
 |---|---|---|---|---|---|
 | `GET /plans/:id/messages` | `limit, cursor` | 200 paginado (más nuevo primero) | 400, 403, 404 | Participante activo o creador | ✔ |
-| `POST /plans/:id/messages` | `text` (1–2000), `clientId?` | 201 creado / 200 reintento | 400, 403, 404 | Participante activo o creador | ✔ |
+| `POST /plans/:id/messages` | `text` (1–2000), `clientId?` — o nota de voz: `type: 'voice'`, `audioKey`, `durationMs`, `clientId?` | 201 creado / 200 reintento | 400, 403, 404 | Participante activo o creador | ✔ |
 
 ```json
 { "id": "6710…", "planId": "507f1f77bcf86cd799439011", "sender": { "id": "665f…", "name": "Beto", "photoUrl": null, "reputation": 3 },
@@ -319,7 +325,13 @@ POST /api/v1/feed
 - **Permiso:** el participante con inscripción activa o el creador del plan (aunque no esté inscripto), en cualquier estado del plan. Plan inexistente o no visible para el usuario → 404; visible pero sin pertenecer → 403. Quien se da de baja pierde el acceso (403) y deja de recibir los mensajes en tiempo real.
 - **`text`** se recorta antes de validar: vacío o de solo espacios → 400. El `senderId` sale del token; cualquier otro campo (`senderId`, `status`…) es 400.
 - **`clientId`** (opcional, 1–64 caracteres `[A-Za-z0-9_-]`): lo genera la app para cada mensaje. Si el mismo remitente lo repite, el back **no crea otro mensaje**: responde **200** con el que ya existía (también si el primero entró por Socket.io). El mismo `clientId` en otro plan es 400.
-- **Historial:** solo mensajes `visible`, del más nuevo al más viejo; cursor sobre `createdAt` + `id` (estable aunque haya mensajes en el mismo milisegundo). `Cache-Control: no-store`. `sender` es la vista pública del usuario (`null` si ya no existe); `status` no sale. `type` hoy es siempre `text` (las notas de voz sumarán `voice`).
+- **Historial:** solo mensajes `visible`, del más nuevo al más viejo; cursor sobre `createdAt` + `id` (estable aunque haya mensajes en el mismo milisegundo). `Cache-Control: no-store`. `sender` es la vista pública del usuario (`null` si ya no existe); `status` no sale. `type` es `text` o `voice`.
+- **Notas de voz (S5-BE-09):** el audio se sube antes por `POST /uploads/presign` (`audio/mp4` + `planId`) y el mensaje lleva `type: 'voice'`, `audioKey` (la que devolvió el presign) y `durationMs` (entero de 1 a 60000), **sin** `text`. Un mensaje de texto no lleva `audioKey` ni `durationMs` (400). El back verifica que la clave sea del usuario y de ese plan (`messages/<planId>/<userId>/…`; si no, 403), que exista (404) y el tipo y tamaño reales (400; si no cumple, borra el objeto). En la respuesta: `text: null`, `audioUrl` (GET firmada de 10 minutos) y `durationMs`; `audioKey` nunca sale. Por Socket.io, `chat:send` acepta los mismos campos.
+
+```json
+{ "id": "6711…", "planId": "507f…", "sender": { "id": "665f…", "name": "Beto", "photoUrl": null, "reputation": 3 },
+  "type": "voice", "text": null, "audioUrl": "https://…firmada…", "durationMs": 4200, "clientId": "m2k9x1-5a1b", "createdAt": "2026-11-04T19:30:00.000Z" }
+```
 - Un mensaje creado por REST también se emite por Socket.io (`chat:message`) a la sala del plan.
 
 Eventos Socket.io: ver [08-tiempo-real-y-push.md](08-tiempo-real-y-push.md#eventos).
@@ -329,7 +341,7 @@ Eventos Socket.io: ver [08-tiempo-real-y-push.md](08-tiempo-real-y-push.md#event
 | Método y ruta | Body | OK | Errores | Permiso | Estado |
 |---|---|---|---|---|---|
 | `POST /reports` | `targetType` (`user`\|`plan`\|`message`), `targetId, reason, description` | 201 `{ id, status }` (200 si ya había uno pendiente) | 400, 404 | Usuario | ✔ S6 |
-| `POST /uploads/presign` | `contentType, sizeBytes` + opcional `planId` | 200 `{ url, objectKey, expiresAt }` | 400, 403, 404 | Usuario; creador si `planId` | ✔ |
+| `POST /uploads/presign` | `contentType, sizeBytes` + opcional `planId` | 200 `{ url, objectKey, expiresAt }` | 400, 403, 404 | Usuario; creador si `planId` (foto); parte del chat (nota de voz) | ✔ |
 
 **Reportes (S6).** El `reporterId` sale del token (en el body es 400). `reason` ∈ `spam`, `harassment`, `inappropriate`, `scam`, `other`; `description` opcional, se recorta, hasta 500 caracteres y **obligatoria con `other`**. El objetivo tiene que existir y ser accesible para quien reporta; si no, **404** (no se revela que existe):
 
@@ -343,6 +355,7 @@ Eventos Socket.io: ver [08-tiempo-real-y-push.md](08-tiempo-real-y-push.md#event
 `presign`: `contentType` ∈ `image/jpeg`, `image/png`, `image/webp`; `sizeBytes` entero de 1 a 5 242 880 (5 MB). La `objectKey` la genera el back; la URL `PUT` vence a los 5 minutos y lleva firmados el tipo y el tamaño.
 
 - Sin `planId`: foto de perfil, clave `users/<userId>/<uuid>.<ext>`; se vincula con `PUT /users/me/photo`.
+- Nota de voz (S5): `contentType: 'audio/mp4'` (AAC en `.m4a`), `sizeBytes` hasta 2 097 152 (2 MB) y `planId` **obligatorio**; solo para el participante activo o el creador (403 si no; 404 si el plan no le es visible). Clave `messages/<planId>/<userId>/<uuid>.m4a`; se usa en `POST /plans/:id/messages` con `type: 'voice'`.
 - Con `planId`: foto de ese plan, clave `plans/<planId>/<uuid>.<ext>`. Solo su creador (403); 404 si el plan no existe o no le es visible. Se vincula con `PUT /plans/:id/photo`, que vuelve a verificar creador, prefijo de la clave, existencia y tipo y tamaño reales (mismo flujo que la foto de perfil).
 
 ### Administración (requiere `role: admin`)

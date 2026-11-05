@@ -82,6 +82,7 @@ Reglas: máximo 5 sesiones activas (`revokedAt` vacío y `expiresAt` futuro) por
 | `checkInRadiusMeters` | int 50–1000 | **➕ S4.** Lo elige el creador; 150 por defecto |
 | `qrNonceHash`, `qrExpiresAt` | string?, Date? | Desafío QR vigente (hash SHA-256 del nonce, nunca el nonce) |
 | `qrPreviousNonceHash`, `qrPreviousExpiresAt` | string?, Date? | **➕ S4.** Desafío anterior: al renovar el QR sigue valiendo 10 segundos (y nunca más allá de su propio vencimiento). Se escriben en la misma operación que guarda el nuevo |
+| `reminderSentAt` | Date? | **➕ S5.** Cuándo el job mandó el recordatorio push (una sola vez por plan, actualización condicional). Cambiar `startsAt` lo borra. Migración `20261104120100-plans-reminder-sent-at` (solo validador) |
 | `attendanceClosedAt` | Date? | **➕ S4.** Cuándo el job cerró la asistencia (marcó `noShow` y resolvió el +1 del creador). Sin valor = pendiente. Se escribe una sola vez |
 
 Los parámetros de la asistencia (15 y 60 minutos, radio 50/150/1000 m, precisión máxima de 100 m, QR de 90 s con 10 s de margen para el anterior, y los 2 asistentes que necesita el creador) se definen en un único lugar: `back-service/src/shared/attendance.js`.
@@ -101,6 +102,7 @@ Un **único registro por par** plan–usuario; una baja lo pasa a `cancelled` (c
 ### `messages`
 
 `planId`, `senderId` (del token), `type` (`text`; **➕ S5**, sin `type` cuenta como texto), `text` (1–2000, recortado), `status` (`visible` \| `hidden`), `clientId?`, `createdAt` (hora del servidor).
+**➕ S5 (notas de voz):** `type: 'voice'` + `audioKey` (clave S3 `messages/<planId>/<userId>/<uuid>.m4a`) + `durationMs` (1–60000), sin `text`; los de texto siguen exigiendo `text` y no llevan audio (validador `oneOf`, migración `20261104120200-messages-voice`).
 `clientId` (**➕ S5**): clave de idempotencia que genera el teléfono (1–64 caracteres `[A-Za-z0-9_-]`, opcional). Con el índice único parcial `{ senderId, clientId }`, un reintento del mismo mensaje (por Socket.io o por REST) devuelve el que ya existía en lugar de crear otro.
 
 ### `reports`
@@ -108,6 +110,10 @@ Un **único registro por par** plan–usuario; una baja lo pasa a `cancelled` (c
 `reporterId` (del token), `targetType` (`user` \| `plan` \| `message`), `targetId`, `reason`, `description`, `status` (`pending` \| `reviewed` \| `dismissed`), `createdAt`.
 
 **➕ S6:** `reason` es uno de los motivos fijos `spam` \| `harassment` \| `inappropriate` \| `scam` \| `other`; `description` (opcional, obligatoria con `other`) tiene de 1 a 500 caracteres; `resolvedBy` (el admin) y `resolvedAt` se completan al resolverlo. Índice único **parcial** `{ reporterId, targetType, targetId }` solo para los `pending`: la misma persona no puede tener dos reportes pendientes sobre lo mismo (reportar otra vez devuelve el que existía); una vez resuelto, puede volver a reportarlo. Migración `20261014130000-reports-reasons-and-resolution` (sin backfill: no había reportes).
+
+### `spotAlerts`
+
+**➕ S5.** `planId`, `userId` (del token), `createdAt`, `updatedAt`. Un pedido de "avisame si se libera un lugar" por persona y plan (índice único). Se borra al inscribirse, al cancelarlo, o por el job `purge-spot-alerts` cuando el plan empezó, se canceló o ya no existe. Migración `20261104120000-create-spot-alerts`.
 
 ### `deviceTokens`
 
@@ -129,6 +135,7 @@ Un **único registro por par** plan–usuario; una baja lo pasa a `cancelled` (c
 | `messages` | `{ senderId: 1, clientId: 1 }` único, parcial (`clientId` string) | Un reintento de envío no duplica el mensaje (**➕ S5**) |
 | `reports` | `{ status: 1, createdAt: 1 }` | Cola de moderación |
 | `reports` | `{ reporterId: 1, targetType: 1, targetId: 1 }` único, parcial (`status: 'pending'`) | Un solo reporte pendiente por persona y objetivo (**➕ S6**) |
+| `spotAlerts` | `{ planId: 1, userId: 1 }` único | Un pedido de aviso por persona y plan; buscar los de un plan (**➕ S5**) |
 | `deviceTokens` | `{ token: 1 }` único | Un registro por dispositivo |
 | `deviceTokens` | `{ userId: 1 }` | Enviar push a un usuario |
 | `sessions` | `{ sid: 1 }` único | Una sesión por `sid` (lo usa la rotación del refresh) |

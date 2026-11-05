@@ -101,6 +101,11 @@ mobile/
 - Si el WebSocket falla 3 veces seguidas, `useChat` pasa a polling de `GET /plans/:id/messages` cada 5 s mientras la pantalla está activa, y lo avisa en un banner.
 - Push: como el back envía directo por FCM, el token se obtiene con `getDevicePushTokenAsync()` (token nativo FCM), **no** con el token de Expo Push. Se registra en `POST /devices` y se borra con `DELETE /devices/:token` al cerrar sesión.
 - Push solo se prueba en un **development build** (Expo Go no lo soporta).
+- **Implementado en S5** (`services/push.js` + `hooks/usePlanLinks.js`): con la sesión iniciada (al montar los tabs) se pide el permiso una vez, se crea el canal `default` de Android, se registra el token y se vuelve a registrar si FCM lo rota. Al cerrar sesión (`logout` o `logout-all`) `authService.onBeforeLogout` da de baja el token antes de borrar la sesión local (el access token sigue valiendo esos segundos). Sin permiso, en Expo Go o sin Firebase configurado, no pasa nada (la app sigue sin avisos).
+- Cada aviso trae `data: { type, planId }` (`plan.joined`, `plan.spot_freed`, `plan.reminder`): al tocarlo se abre el detalle del plan en el tab "Planes" (`navigation/navigationRef.js`), también si fue lo que abrió la app (se atiende cuando ya hay sesión). Con la app abierta se muestra el banner (sin sonido).
+- **Firebase (`google-services.json`)**: no se versiona. En local va en `mobile/google-services.json` (ignorado por Git); en EAS se carga como variable de entorno **de tipo archivo** `GOOGLE_SERVICES_JSON` (`eas env:create --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --environment development` y lo mismo para `preview`/`production`). `app.config.js` toma primero la variable y si no, el archivo local; sin ninguno compila igual, sin push.
+- **Enlaces para invitar** (S5-MOB-05): "Invitar a alguien" en el detalle comparte (hoja nativa de compartir) el título, cuándo, dónde y `junte://plans/<id>`; el enlace abre la app en ese plan (`scheme: 'junte'`). No se leen ni se suben contactos.
+- **Notas de voz** (S5-MOB-05): con el campo vacío, el botón del chat graba (`expo-audio`, AAC `.m4a` mono 64 kbps, hasta 60 s, se corta solo). Al enviar: `POST /uploads/presign` con `audio/mp4` y el `planId`, `PUT` a S3 y `chat:send` (o REST) con `type: 'voice'`, `audioKey` y `durationMs`. No pasan por la cola offline: sin conexión quedan "No se envió · Reintentar" (el archivo sigue en el teléfono; si ya se subió, el reintento solo manda el mensaje).
 
 ## Permisos del dispositivo
 
@@ -112,7 +117,8 @@ Pedirlos **en el momento en que se usan**, explicando para qué, y degradar con 
 | Cámara | Escanear QR | No hay check-in |
 | Calendario | Compatibilidad horaria del feed (solo lectura: próximos 30 días, hasta 200 franjas, sin eventos de día completo) | No se manda nada: `H = 0.5` (neutral), salvo los planes en los que ya está inscripto, que el back conoce |
 | Notificaciones | Después del login | Sin push; todo sigue funcionando |
-| Micrófono / contactos | Notas de voz / invitar (sprint 5) | Funcionalidad oculta |
+| Micrófono | Al tocar "Grabar una nota de voz" en el chat (S5) | Aviso en el chat; se sigue pudiendo escribir |
+| Contactos | No se piden: invitar es compartir un enlace con la hoja nativa (S5) | — |
 
 ## Offline
 
