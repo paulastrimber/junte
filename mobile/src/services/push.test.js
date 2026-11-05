@@ -1,3 +1,4 @@
+import { deferred } from '../../tests/helpers/deferred.js'
 import { createPushService, planIdFromResponse } from './push.js'
 
 const PLAN_ID = '885f1c2a9b1e8a001234567a'
@@ -67,6 +68,49 @@ describe('push.unregister', () => {
     devices.unregisterDevice.mockRejectedValue(new Error('offline'))
     await expect(push.unregister()).resolves.toBeUndefined()
     expect(devices.unregisterDevice).toHaveBeenCalledWith('fcm-token-1')
+  })
+})
+
+describe('push: logout durante un registro en curso', () => {
+  it('si el logout llega mientras se obtiene el token, el registro no deja token, registro ni listener', async () => {
+    const { push, devices, notifications } = setup()
+    const pending = deferred()
+    notifications.getDevicePushTokenAsync.mockReturnValue(pending.promise)
+    const registering = push.register()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const unregistering = push.unregister()
+    pending.resolve({ type: 'android', data: 'fcm-token-1' })
+
+    expect(await registering).toBeNull()
+    await unregistering
+    expect(devices.registerDevice).not.toHaveBeenCalled()
+    expect(notifications.addPushTokenListener).not.toHaveBeenCalled()
+  })
+
+  it('si el logout llega mientras se registra en el back, unregister espera y da de baja ese token', async () => {
+    const { push, devices, notifications } = setup()
+    const registered = deferred()
+    devices.registerDevice.mockReturnValue(registered.promise)
+    const registering = push.register()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const unregistering = push.unregister()
+    registered.resolve()
+    await Promise.all([registering, unregistering])
+
+    expect(devices.unregisterDevice).toHaveBeenCalledWith('fcm-token-1')
+    expect(notifications.addPushTokenListener).not.toHaveBeenCalled()
+  })
+
+  it('después de un logout se puede volver a registrar (otra cuenta)', async () => {
+    const { push, devices } = setup()
+    await push.register()
+    await push.unregister()
+    devices.registerDevice.mockClear()
+
+    expect(await push.register()).toBe('fcm-token-1')
+    expect(devices.registerDevice).toHaveBeenCalledTimes(1)
   })
 })
 

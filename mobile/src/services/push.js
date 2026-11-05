@@ -26,6 +26,9 @@ export function createPushService ({ notifications = ExpoNotifications, devices 
   let token = null
   let tokenSubscription = null
   let handledResponseId = null
+  // Registro en curso y "época" de la sesión: `unregister` la avanza para invalidar un registro que todavía no terminó.
+  let inFlight = null
+  let epoch = 0
 
   async function hasPermission () {
     const current = await notifications.getPermissionsAsync()
@@ -37,6 +40,28 @@ export function createPushService ({ notifications = ExpoNotifications, devices 
   async function registerToken (value) {
     await devices.registerDevice({ token: value, platform })
     token = value
+  }
+
+  async function doRegister (myEpoch) {
+    try {
+      if (!await hasPermission() || myEpoch !== epoch) return null
+      if (platform === 'android') {
+        await notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, { name: 'Avisos de tus planes', importance: notifications.AndroidImportance.HIGH })
+      }
+      const { data } = await notifications.getDevicePushTokenAsync()
+      // Hubo un logout mientras tanto: no se registra nada.
+      if (myEpoch !== epoch) return null
+      await registerToken(data)
+      // El logout llegó mientras se registraba: `unregister` (que espera a este registro) da de baja el token.
+      if (myEpoch !== epoch) return null
+      tokenSubscription ??= notifications.addPushTokenListener(({ data: next }) => {
+        if (next && next !== token) registerToken(next).catch(() => {})
+      })
+      return token
+    } catch {
+      // Expo Go, sin Google Play Services, sin google-services.json o sin conexión: la app sigue sin avisos.
+      return null
+    }
   }
 
   return {
@@ -52,26 +77,19 @@ export function createPushService ({ notifications = ExpoNotifications, devices 
      * cambia (FCM lo rota) lo vuelve a registrar. Nunca lanza.
      * @returns {Promise<string | null>} el token registrado, o null si no hay permiso o no se pudo.
      */
-    async register () {
-      try {
-        if (!await hasPermission()) return null
-        if (platform === 'android') {
-          await notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, { name: 'Avisos de tus planes', importance: notifications.AndroidImportance.HIGH })
-        }
-        const { data } = await notifications.getDevicePushTokenAsync()
-        await registerToken(data)
-        tokenSubscription ??= notifications.addPushTokenListener(({ data: next }) => {
-          if (next && next !== token) registerToken(next).catch(() => {})
-        })
-        return token
-      } catch {
-        // Expo Go, sin Google Play Services, sin google-services.json o sin conexión: la app sigue sin avisos.
-        return null
+    register () {
+      if (!inFlight) {
+        const attempt = doRegister(epoch).finally(() => { if (inFlight === attempt) inFlight = null })
+        inFlight = attempt
       }
+      return inFlight
     },
 
     /** Al cerrar sesión (con el token de acceso todavía válido): el teléfono deja de recibir avisos de esta cuenta. */
     async unregister () {
+      epoch += 1
+      // Si había un registro en curso se espera: así el token que deje queda a la vista para darlo de baja.
+      await inFlight?.catch(() => {})
       tokenSubscription?.remove()
       tokenSubscription = null
       const current = token
