@@ -153,6 +153,21 @@ else
   skip "[local] path reescrito y query string en el access log"
 fi
 
+# El token FCM viaja en el path de DELETE /devices/:token: no puede quedar en el access log (ni path ni upstreamPath).
+device_token="smoke-fcm-token-$(rand):APA91bSecretValue"
+request device_delete -X DELETE "$BASE_URL/api/v1/devices/$device_token"
+if $local_checks; then
+  line="$(nginx_log_line "$(header device_delete X-Request-Id)")"
+  if [ -n "$line" ] && ! grep -qF -e "$device_token" -e 'APA91bSecretValue' <<<"$line" \
+     && grep -q '"path":"/api/v1/devices/\*\*\*"' <<<"$line" && grep -q '"upstreamPath":"/internal/devices/\*\*\*"' <<<"$line"; then
+    ok "[local] el access log enmascara el token de DELETE /devices/:token"
+  else
+    fail "[local] el access log guarda el token de /devices/:token (o no se encontró la línea)" "$line"
+  fi
+else
+  skip "[local] token de /devices/:token enmascarado en el access log"
+fi
+
 request internal "$BASE_URL/internal/health"
 if [ "$(status internal)" = 404 ] && grep -q '"code":"NOT_FOUND"' "$TMP/internal.body"; then
   ok "/internal/* no se publica (404 JSON de Nginx)"
