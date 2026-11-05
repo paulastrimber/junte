@@ -7,7 +7,7 @@ import { createArgon2Hasher } from './adapters/passwordHasher.js'
 import { connectRedis, disconnectRedis, pingRedis } from './adapters/redis.js'
 import { createRedisLock } from './adapters/redisLock.js'
 import { createRedisSocketAdapter } from './adapters/socketAdapter.js'
-import { createFcmPush, createMemoryPush } from './adapters/push/index.js'
+import { createMemoryPush, createPushFromConfig } from './adapters/push/index.js'
 import { createMemoryStorage, createS3Storage } from './adapters/storage/index.js'
 import { createScheduler } from './jobs/scheduler.js'
 import { createAuthenticate } from './middlewares/authenticate.js'
@@ -235,10 +235,10 @@ export function createContainer (config) {
     : createMemoryStorage({ clock })
   if (!config.storage) logger.warn('S3_BUCKET/AWS_REGION not set: using in-memory storage (photos are not persisted)')
 
-  // Sin FCM_SERVICE_ACCOUNT (todavía no hay proyecto de Firebase en todos los entornos) los avisos no salen: se usa el
-  // push en memoria y se loguea cada envío que se habría hecho (sin tokens). Ver docs/pendientes.md.
-  const push = config.push ? createFcmPush({ serviceAccount: config.push.fcm, logger }) : createMemoryPush()
-  if (!config.push) logger.warn('FCM_SERVICE_ACCOUNT not set: push notifications are disabled (in-memory push)')
+  // Sin FCM_SERVICE_ACCOUNT (todavía no hay proyecto de Firebase en todos los entornos) los avisos no salen: se usa un
+  // push no-op sin estado (el de memoria acumularía lo "enviado" para siempre). Ver docs/pendientes.md.
+  const push = createPushFromConfig({ config, logger })
+  if (!config.push) logger.warn('FCM_SERVICE_ACCOUNT not set: push notifications are disabled (no-op push)')
 
   /** Routers de los módulos, montados bajo /internal por createApp. */
   const modules = buildModules({ config, logger, clock, passwordHasher: createArgon2Hasher(), storage, push })

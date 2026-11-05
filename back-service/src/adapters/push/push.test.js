@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto'
 import { decodeJwt } from 'jose'
 import { describe, expect, it, vi } from 'vitest'
-import { createFcmPush, createMemoryPush } from './index.js'
+import { createFcmPush, createMemoryPush, createNoopPush, createPushFromConfig } from './index.js'
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } })
 const serviceAccount = { projectId: 'junte-dev', clientEmail: 'push@junte-dev.iam.gserviceaccount.com', privateKey }
@@ -75,5 +75,25 @@ describe('createMemoryPush', () => {
 
     expect(await push.send({ ...message, tokens: ['tok-ok', 'tok-gone'] })).toEqual({ sent: 1, failed: 0, invalidTokens: ['tok-gone'] })
     expect(push.sent).toEqual([{ ...message, tokens: ['tok-ok'] }])
+  })
+})
+
+describe('createPushFromConfig y createNoopPush', () => {
+  const logger = { info: vi.fn(), warn: vi.fn() }
+
+  it('en producción sin credencial usa el no-op: no acumula nada y no loguea tokens', async () => {
+    const push = createPushFromConfig({ config: { env: 'production', push: null }, logger })
+
+    expect(push.sent).toBeUndefined()
+    expect(await push.send(message)).toEqual({ sent: 0, failed: 0, invalidTokens: [] })
+    expect(Object.keys(push)).toEqual(['send'])
+    expect(JSON.stringify(logger.info.mock.calls)).not.toMatch(/tok-/)
+  })
+
+  it('en tests sin credencial usa el de memoria, y con credencial usa FCM', async () => {
+    expect(createPushFromConfig({ config: { env: 'test', push: null }, logger }).sent).toEqual([])
+    const fcm = createPushFromConfig({ config: { env: 'production', push: { fcm: serviceAccount } }, logger })
+    expect(fcm.sent).toBeUndefined()
+    expect(createNoopPush({ logger })).not.toBe(fcm)
   })
 })
