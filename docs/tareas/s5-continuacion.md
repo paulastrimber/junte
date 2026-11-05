@@ -32,18 +32,14 @@ Para `entrega`, el mismo comando con `--name junte/entrega/fcm-service-account`.
 
 ### A2. Pasar el nombre del secreto al back
 
-En `infra/templates/40-back.yml`:
+Hecho (2026-11-05): `infra/templates/40-back.yml` tiene el parámetro `Push` (`enabled` / `disabled`, por defecto `disabled`). Con `enabled`, el UserData escribe `FCM_SERVICE_ACCOUNT_SECRET_ID=junte/<env>/fcm-service-account` en `/opt/junte/back.env`; con `disabled` la deja vacía y el back arranca sin push.
 
-- En las dos líneas de `UserData` (las que empiezan con `#!/bin/bash\nREGION=...`), al lado de `MONGO_URI_SECRET_ID='junte/${Env}/mongo-app-uri'`, agregar:
-  ```
-  FCM_SERVICE_ACCOUNT_SECRET_ID='junte/${Env}/fcm-service-account'
-  ```
-- En el bloque que escribe `/opt/junte/back.env`, debajo de `MONGO_URI_SECRET_ID=$MONGO_URI_SECRET_ID`, agregar:
-  ```
-  FCM_SERVICE_ACCOUNT_SECRET_ID=$FCM_SERVICE_ACCOUNT_SECRET_ID
-  ```
+| Entorno | `Push` en `infra/parameters/<env>/40-back.json` |
+|---------|------|
+| `dev` | `enabled` |
+| `entrega` | `disabled`: pasarlo a `enabled` después de crear el secreto en la cuenta B (A1) |
 
-⚠️ Si el back recibe `FCM_SERVICE_ACCOUNT_SECRET_ID` y el secreto no existe o no se puede leer, **no arranca**. Por eso A1 va primero. El back que hoy corre en AWS ignora la variable, así que A1 y A2 se pueden hacer antes de mergear el PR.
+⚠️ Con `Push=enabled`, si el secreto no existe o no se puede leer, el back **no arranca**. Por eso A1 va primero en cada cuenta.
 
 ### A3. Desplegar (con el PR del sprint 5 ya en `main`)
 

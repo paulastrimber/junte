@@ -1,5 +1,6 @@
 [
   { "ParameterKey": "Env", "ParameterValue": "dev" },
   { "ParameterKey": "BackCount", "ParameterValue": "1" },
-  { "ParameterKey": "InstanceType", "ParameterValue": "t3.small" }
+  { "ParameterKey": "InstanceType", "ParameterValue": "t3.small" },
+  { "ParameterKey": "Push", "ParameterValue": "enabled" }
 ]

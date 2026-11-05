@@ -37,13 +37,21 @@ Parameters:
   ImageId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+  Push:
+    Type: String
+    AllowedValues: [enabled, disabled]
+    Default: disabled
+    Description: >-
+      enabled = el back lee la cuenta de servicio de Firebase de junte/<env>/fcm-service-account y manda push.
+      El secreto tiene que existir antes (si no, el back no arranca). disabled = sin push (el back lo avisa en el log).
 
 Conditions:
   TwoBacks: !Equals [!Ref BackCount, 2]
+  PushEnabled: !Equals [!Ref Push, enabled]
 
 # Arranque de una instancia del back. Deja en la instancia la configuración del contenedor
 # (/opt/junte/back.env, sin valores de secretos: el back los resuelve con el SDK a partir de
-# JWT_SECRET_ID y MONGO_URI_SECRET_ID) y /opt/junte/start-back.sh <tag>, que baja la imagen y
+# JWT_SECRET_ID, MONGO_URI_SECRET_ID y, con Push=enabled, FCM_SERVICE_ACCOUNT_SECRET_ID) y /opt/junte/start-back.sh <tag>, que baja la imagen y
 # reemplaza el contenedor. Lo llama el primer boot y después `task back:release` por Session
 # Manager. Reintenta hasta que egress esté arriba; --restart always lo levanta tras un reinicio.
 Mappings:
@@ -76,6 +84,7 @@ Mappings:
         AWS_REGION=$REGION
         JWT_SECRET_ID=$JWT_SECRET_ID
         MONGO_URI_SECRET_ID=$MONGO_URI_SECRET_ID
+        FCM_SERVICE_ACCOUNT_SECRET_ID=$FCM_SERVICE_ACCOUNT_SECRET_ID
         ENV
 
         cat > /opt/junte/start-back.sh <<'START'
@@ -177,12 +186,13 @@ Resources:
           Ebs: { VolumeSize: 10, VolumeType: gp3, Encrypted: true }
       UserData:
         Fn::Base64: !Sub
-          - "#!/bin/bash\nREGION='${AWS::Region}' REPOSITORY_URI='${RepositoryUri}' IMAGE_TAG='${ImageTag}' LOG_GROUP='${LogGroup}' LOG_LEVEL='${LogLevel}' MONGO_DB_NAME='${MongoDbName}' REDIS_URL='${RedisUrl}' S3_BUCKET='${PhotosBucket}' JWT_SECRET_ID='junte/${Env}/jwt-secret' MONGO_URI_SECRET_ID='junte/${Env}/mongo-app-uri' bash <<'BOOT'\n${Body}\nBOOT\n"
+          - "#!/bin/bash\nREGION='${AWS::Region}' REPOSITORY_URI='${RepositoryUri}' IMAGE_TAG='${ImageTag}' LOG_GROUP='${LogGroup}' LOG_LEVEL='${LogLevel}' MONGO_DB_NAME='${MongoDbName}' REDIS_URL='${RedisUrl}' S3_BUCKET='${PhotosBucket}' JWT_SECRET_ID='junte/${Env}/jwt-secret' MONGO_URI_SECRET_ID='junte/${Env}/mongo-app-uri' FCM_SERVICE_ACCOUNT_SECRET_ID='${FcmSecretId}' bash <<'BOOT'\n${Body}\nBOOT\n"
           - RepositoryUri: { 'Fn::ImportValue': !Sub 'junte-${Env}-BackRepositoryUri' }
             LogGroup: { 'Fn::ImportValue': !Sub 'junte-${Env}-BackLogGroup' }
             RedisUrl: { 'Fn::ImportValue': !Sub 'junte-${Env}-RedisUrl' }
             PhotosBucket: { 'Fn::ImportValue': !Sub 'junte-${Env}-PhotosBucket' }
             Body: !FindInMap [Bootstrap, Script, Body]
+            FcmSecretId: !If [PushEnabled, !Sub 'junte/${Env}/fcm-service-account', '']
       Tags:
         - { Key: Name, Value: !Sub 'junte-${Env}-back-a' }
         - { Key: layer, Value: aplicacion }
@@ -203,12 +213,13 @@ Resources:
           Ebs: { VolumeSize: 10, VolumeType: gp3, Encrypted: true }
       UserData:
         Fn::Base64: !Sub
-          - "#!/bin/bash\nREGION='${AWS::Region}' REPOSITORY_URI='${RepositoryUri}' IMAGE_TAG='${ImageTag}' LOG_GROUP='${LogGroup}' LOG_LEVEL='${LogLevel}' MONGO_DB_NAME='${MongoDbName}' REDIS_URL='${RedisUrl}' S3_BUCKET='${PhotosBucket}' JWT_SECRET_ID='junte/${Env}/jwt-secret' MONGO_URI_SECRET_ID='junte/${Env}/mongo-app-uri' bash <<'BOOT'\n${Body}\nBOOT\n"
+          - "#!/bin/bash\nREGION='${AWS::Region}' REPOSITORY_URI='${RepositoryUri}' IMAGE_TAG='${ImageTag}' LOG_GROUP='${LogGroup}' LOG_LEVEL='${LogLevel}' MONGO_DB_NAME='${MongoDbName}' REDIS_URL='${RedisUrl}' S3_BUCKET='${PhotosBucket}' JWT_SECRET_ID='junte/${Env}/jwt-secret' MONGO_URI_SECRET_ID='junte/${Env}/mongo-app-uri' FCM_SERVICE_ACCOUNT_SECRET_ID='${FcmSecretId}' bash <<'BOOT'\n${Body}\nBOOT\n"
           - RepositoryUri: { 'Fn::ImportValue': !Sub 'junte-${Env}-BackRepositoryUri' }
             LogGroup: { 'Fn::ImportValue': !Sub 'junte-${Env}-BackLogGroup' }
             RedisUrl: { 'Fn::ImportValue': !Sub 'junte-${Env}-RedisUrl' }
             PhotosBucket: { 'Fn::ImportValue': !Sub 'junte-${Env}-PhotosBucket' }
             Body: !FindInMap [Bootstrap, Script, Body]
+            FcmSecretId: !If [PushEnabled, !Sub 'junte/${Env}/fcm-service-account', '']
       Tags:
         - { Key: Name, Value: !Sub 'junte-${Env}-back-b' }
         - { Key: layer, Value: aplicacion }
