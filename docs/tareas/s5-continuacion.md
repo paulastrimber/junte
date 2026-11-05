@@ -64,7 +64,14 @@ Si pasa, tachar S5-NG-01 en [05-chat-y-notificaciones.md](05-chat-y-notificacion
 
 ### B1. Subir `google-services.json` a EAS
 
-Desde `mobile/` (con `eas login` hecho):
+Desde `mobile/`. Primero, una sola vez:
+
+```bash
+npx eas-cli login     # interactivo, con la cuenta de Expo del equipo
+npx eas-cli init      # vincula el proyecto de EAS
+```
+
+Al 2026-11-04 el proyecto todavía no está vinculado: `app.config.js` no tiene `extra.eas.projectId`. Como la config es dinámica, `eas init` muestra el `projectId` y pide agregarlo a mano en `extra` de `app.config.js`. Ese cambio se commitea; no es un secreto. Después:
 
 ```bash
 for env in development preview production; do
