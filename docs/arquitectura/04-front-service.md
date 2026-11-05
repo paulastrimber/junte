@@ -22,6 +22,7 @@ front-service/
   nginx.conf               # http {}: logs JSON, maps (requestId, upgrade, path), includes
   templates/               # lo que cambia por entorno; envsubst al arrancar → /etc/nginx/env.d/
     00-realip.conf.template    # set_real_ip_from ${NGINX_TRUSTED_CIDR} / real_ip_header
+    05-errorlog.conf.template  # error_log … ${NGINX_ERROR_LOG_LEVEL}
     20-upstream.conf.template  # resolver ${NGINX_RESOLVER} + $backend = ${NGINX_BACKEND}
   conf.d/                  # igual en todos los entornos
     10-ratelimit.conf      # limit_req_zone (api, auth) + status 429; `auth` solo la usan login y register
@@ -42,6 +43,7 @@ Los templates los procesa el entrypoint de la imagen oficial de Nginx (`/etc/ngi
 | `NGINX_TRUSTED_CIDR` | `172.30.0.128/25` (IPs de los contenedores de la red de compose) | CIDR de la VPC, p. ej. `10.0.0.0/16` |
 | `NGINX_RESOLVER` | `127.0.0.11` (DNS embebido de docker) | `169.254.169.253` (DNS de la VPC) |
 | `NGINX_BACKEND` | `back:3000` | `<DNS del ALB interno>:3000` |
+| `NGINX_ERROR_LOG_LEVEL` | `warn` | `crit`: el error log incluye la línea del request con su query string (coordenadas) y va a CloudWatch |
 
 ## Configuración clave
 

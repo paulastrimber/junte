@@ -1,5 +1,5 @@
 [
   { "ParameterKey": "Env", "ParameterValue": "entrega" },
   { "ParameterKey": "ZoneName", "ParameterValue": "app.junteapp.me" },
-  { "ParameterKey": "CreateCertificate", "ParameterValue": "false" }
+  { "ParameterKey": "CreateCertificate", "ParameterValue": "true" }
 ]

@@ -7,7 +7,7 @@
 **Decidir antes:** [Redis](../pendientes.md#redis).
 
 **✅ Cerrado en dev (2026-10-28, decidido por Paula).** El objetivo se cumple: entorno local completo y la API respondiendo `/health` por HTTPS en `https://api.dev.junteapp.me` con los dos ALB sanos ([evidencia](../evidencia/s1-paso-1.9-dns-front.md)). Quedan abiertas, a propósito:
-- **S1-INF-08 y S1-INF-09** piden la topología completa (3 nodos de MongoDB, back en 2 AZ). En dev hay una instancia por capa para cuidar el crédito; se cierran en la cuenta B con **S7-QA-06** ([07](07-validacion-y-entrega.md)).
+- **S1-INF-08** (3 nodos de MongoDB) quedó cerrada en dev el 2026-11-01: dev pasó a 3 nodos de forma permanente. **S1-INF-09** (back en 2 AZ) sigue con una instancia en dev para cuidar el crédito y se cierra en la cuenta B con **S7-QA-06** ([07](07-validacion-y-entrega.md)).
 - **S1-DOC-01 y S1-DOC-02**, a cargo del equipo: validar los pendientes y que alguien que no escribió el README haga el setup.
 
 ## Repositorio y entorno local
@@ -73,9 +73,9 @@
   *Estado:* los seis grupos, sin el 22 ni el 80 y sin salida "todo permitido" (#12). La prueba de aislamiento con todas las capas encendidas es S7-QA-04.
 - [x] ✅ **S1-INF-07 · S3 privado, Secrets Manager, roles IAM** de mínimo privilegio, Redis privado.
   *Estado:* `00-base.yml` y `30-redis.yml` (#13, #19); fotos privadas (URL sin firma → 403), 7 secretos, Redis en ElastiCache detrás de `sg-redis`. **Limitación:** los roles por capa están escritos detrás de `CreateIamRoles`, pero el lab no permite crearlos (todas las EC2 usan `LabInstanceProfile`). Evidencia: [base](../evidencia/s1-base-pasos-1.1-1.2.md) y [Redis y back](../evidencia/s1-pasos-1.7-1.8-redis-back.md).
-- [ ] 🔄 (Paula) **S1-INF-08 · MongoDB replica set** de 3 nodos en 3 AZ, autenticación, usuario de la app, migraciones aplicadas.
+- [x] ✅ (Paula) **S1-INF-08 · MongoDB replica set** de 3 nodos en 3 AZ, autenticación, usuario de la app, migraciones aplicadas.
   *Acepta:* `rs.status()` con 3 miembros; apagar el primario elige otro.
-  *Estado:* en dev, replica set de **1 nodo** con autenticación, `keyFile`, 4 usuarios de mínimo privilegio, transacciones, 20 migraciones y los 14 índices obligatorios ([evidencia](../evidencia/s1-pasos-1.5-1.6-egress-mongo.md)). El replica set de 3 nodos y la elección de primario se probaron en Docker local; **falta en AWS (cuenta B, `task aws:mongo-init`)**.
+  *Estado:* en dev, replica set de **3 nodos** (uno por zona) desde el 2026-11-01, con autenticación, `keyFile`, 4 usuarios de mínimo privilegio, transacciones, 20 migraciones y los 14 índices obligatorios ([evidencia de 1 nodo](../evidencia/s1-pasos-1.5-1.6-egress-mongo.md), [paso a 3 nodos y elección de primario](../evidencia/s6-backup-restore-3-nodos.md)). En la cuenta B se repite con `task aws:mongo-init ENV=entrega`.
 - [ ] 🔄 (Paula) **S1-INF-09 · ALB interno** (:3000, health `/internal/health`, **idle 300 s**) + back en 2 AZ.
   *Estado:* `40-back.yml` desplegado en dev con **1 instancia**: destino `healthy`, el back lee los secretos con el SDK y su health da Mongo y Redis `up` ([evidencia](../evidencia/s1-pasos-1.7-1.8-redis-back.md)). Desde Nginx el ALB interno responde 200 y el back no es alcanzable salteándolo ([evidencia](../evidencia/s1-paso-1.9-dns-front.md)). **Falta en AWS:** 2 instancias en 2 AZ (cuenta B).
 - [x] ✅ **S1-INF-10 · Nginx en 2 AZ + ALB público** (443, ACM, :8080, **idle 300 s**), DNS.
