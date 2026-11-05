@@ -30,6 +30,8 @@ export function useVoiceRecorder ({ onLimit } = {}) {
   const [elapsedMs, setElapsedMs] = useState(0)
   const startedAtRef = useRef(0)
   const timerRef = useRef(null)
+  const isStartingRef = useRef(false)
+  const isUnmountedRef = useRef(false)
   const onLimitRef = useRef(onLimit)
   useEffect(() => { onLimitRef.current = onLimit })
 
@@ -52,7 +54,9 @@ export function useVoiceRecorder ({ onLimit } = {}) {
   }, [recorder])
 
   const start = useCallback(async () => {
-    if (timerRef.current) return
+    // Sin doble inicio: ni con la grabación en curso ni mientras se prepara (permiso, modo de audio, grabador).
+    if (timerRef.current || isStartingRef.current) return
+    isStartingRef.current = true
     setStatus(RECORDER_STATUS.STARTING)
     try {
       const permission = await requestRecordingPermissionsAsync()
@@ -62,6 +66,11 @@ export function useVoiceRecorder ({ onLimit } = {}) {
       }
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true })
       await recorder.prepareToRecordAsync()
+      // La pantalla se cerró mientras se preparaba: no se graba y se devuelve el modo de audio.
+      if (isUnmountedRef.current) {
+        setAudioModeAsync({ allowsRecording: false }).catch(() => {})
+        return
+      }
       recorder.record()
       startedAtRef.current = Date.now()
       setElapsedMs(0)
@@ -75,7 +84,10 @@ export function useVoiceRecorder ({ onLimit } = {}) {
       }, TICK_MS)
     } catch {
       clearTimer()
-      setStatus(RECORDER_STATUS.ERROR)
+      setAudioModeAsync({ allowsRecording: false }).catch(() => {})
+      if (!isUnmountedRef.current) setStatus(RECORDER_STATUS.ERROR)
+    } finally {
+      isStartingRef.current = false
     }
   }, [recorder, finish])
 
@@ -88,10 +100,18 @@ export function useVoiceRecorder ({ onLimit } = {}) {
   }, [finish])
 
   // Al salir del chat con una grabación abierta, se descarta.
-  useEffect(() => () => {
-    if (timerRef.current) {
+  useEffect(() => {
+    isUnmountedRef.current = false
+    return () => {
+      isUnmountedRef.current = true
+      if (!timerRef.current) return
       clearTimer()
-      recorder.stop().catch(() => {})
+      try {
+        Promise.resolve(recorder.stop()).catch(() => {})
+      } catch {
+        // `stop` puede lanzar de forma sincrónica: ya se está saliendo, no hay nada que hacer.
+      }
+      setAudioModeAsync({ allowsRecording: false }).catch(() => {})
     }
   }, [recorder])
 
