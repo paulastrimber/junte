@@ -43,7 +43,7 @@ describe('useVoiceRecorder', () => {
     await starting
 
     expect(recorderOf().record).not.toHaveBeenCalled()
-    expect(audio.setAudioModeAsync).toHaveBeenLastCalledWith({ allowsRecording: false })
+    expect(audio.setAudioModeAsync).toHaveBeenLastCalledWith({ allowsRecording: false, playsInSilentMode: true })
   })
 
   it('al desmontar con una grabación abierta la descarta, restaura el modo de audio y tolera un stop que lanza', async () => {
@@ -55,6 +55,6 @@ describe('useVoiceRecorder', () => {
     await expect(unmount()).resolves.not.toThrow()
 
     expect(recorderOf().stop).toHaveBeenCalled()
-    expect(audio.setAudioModeAsync).toHaveBeenCalledWith({ allowsRecording: false })
+    expect(audio.setAudioModeAsync).toHaveBeenCalledWith({ allowsRecording: false, playsInSilentMode: true })
   })
 })
