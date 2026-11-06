@@ -1,0 +1,6 @@
+# Límite de la location de login y registro (conf.d/30-server.conf la incluye). Nginx no admite variables
+# en burst, por eso es un template. Termina en .inc y no en .conf: nginx.conf incluye env.d/*.conf a nivel
+# http, y esta línea solo vale dentro de una location.
+#   - Local y dev (1 Nginx): NGINX_AUTH_BURST=5
+#   - Entrega (2 Nginx):     NGINX_AUTH_BURST=2  (3 requests de una vez por instancia, 6 entre las dos)
+limit_req zone=auth burst=${NGINX_AUTH_BURST} nodelay;
