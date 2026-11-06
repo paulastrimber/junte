@@ -24,7 +24,7 @@ Sin ID de cuenta ni valores de secretos: las salidas se pasaron por `sed -E 's/[
 | Secreto de FCM (5.1) | ✅ `junte/entrega/fcm-service-account` creado. El push sigue apagado (ver 6) |
 | Cierre | ✅ `task aws:down`: nada cobrando por hora |
 | Duración del entorno completo | 24 min con `bootstrap` (sin la espera del DNS); 13 min para encender la sesión |
-| Crédito usado | 3,4 USD al abrir · PENDIENTE al cerrar (de 50 USD) |
+| Crédito usado | 3,4 USD al abrir · 3,4 USD al cerrar según el panel del lab, que actualiza el consumo con demora; estimado ≈ 1 USD más por ~1,7 h con todo encendido (de 50 USD) |
 
 ## 1. Presupuesto (paso 0.2)
 
