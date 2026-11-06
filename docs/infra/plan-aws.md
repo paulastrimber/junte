@@ -2,7 +2,7 @@
 
 Plan de trabajo de la responsable de AWS: qué hay hecho, qué falta, en qué orden hacerlo, cuánto cuesta y cómo verificarlo.
 
-**Estado (2026-10-28):** en la cuenta A está verificada la cadena completa del sprint 1: `https://api.dev.junteapp.me/api/v1/health` responde 200 por HTTPS con Mongo y Redis `up` (pasos 1.1 a 1.10). Quedan siempre creados `network`, `base`, `dns` (zona `dev.junteapp.me` y certificado) y `mongo` (replica set de 3 nodos desde el 2026-11-01); `egress`, `redis`, `back` y `front` se encienden y apagan por sesión con `task aws:up` / `task aws:down`. Evidencia en [docs/evidencia/](../evidencia/). Siguiente: la cuenta B (paso 7.1).
+**Estado (2026-10-28):** en la cuenta A está verificada la cadena completa del sprint 1: `https://api.dev.junteapp.me/api/v1/health` responde 200 por HTTPS con Mongo y Redis `up` (pasos 1.1 a 1.10). Quedan siempre creados `network`, `base`, `dns` (zona `dev.junteapp.me` y certificado) y `mongo` (replica set de 3 nodos desde el 2026-11-01); `egress`, `redis`, `back` y `front` se encienden y apagan por sesión con `task aws:up` / `task aws:down`. Evidencia en [docs/evidencia/](../evidencia/). **2026-11-06:** la cuenta B ("entrega", `https://api.app.junteapp.me/api/v1`) quedó desplegada y verificada (paso 7.1, [evidencia](../evidencia/s7-paso-7.1-entrega.md)), con el secreto de FCM cargado y el push todavía apagado. Siguiente: las pruebas del paso 7.2.
 
 Escrito el 2026-10-12 a partir del informe de arquitectura (`docs/junte.pdf`), `CLAUDE.md`, `docs/` e `infra/`.
 
@@ -482,6 +482,7 @@ Sin recursos nuevos. Una sola cosa para tener presente:
   7. Al terminar cada sesión, `task aws:down ENV=entrega`.
 - **Verificación:** las mismas de los pasos 1.6 a 1.9.
 - **Lo necesita:** la app, para generar el APK con las URLs de producción (S7-MOB-01).
+- **Estado:** ✅ 2026-11-06 ([evidencia](../evidencia/s7-paso-7.1-entrega.md)). `task aws:bootstrap ENV=entrega` en 24 min sin contar la espera del DNS (zona `app.junteapp.me` delegada en Namecheap); back en `main` con `task back:release ENV=entrega`, porque `bootstrap` no reconstruye la imagen si ya hay una `latest` en ECR. Smoke test 33 ok después de corregir el chequeo del `X-Forwarded-For`, que fallaba con 2 Nginx (PR #33); `aws:verify` sin observaciones. Presupuesto `junte-entrega-30usd` (0.2) creado por CLI. Secreto `junte/entrega/fcm-service-account` (5.1) cargado, pero el push sigue apagado: falta `Push=enabled` en `infra/parameters/entrega/40-back.json`. Queda por decidir: con N Nginx el rate limit de `/auth/*` es unas N veces el configurado. Falta la clave de Google Maps del perfil de entrega. La cuenta B tiene 50 USD de crédito.
 
 **7.2 · Pruebas del sprint 7 que tocan infraestructura**
 
