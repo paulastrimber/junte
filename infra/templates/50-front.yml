@@ -34,8 +34,11 @@ Conditions:
   TwoFronts: !Equals [!Ref FrontCount, 2]
 
 # Arranque de una instancia de Nginx: replica el servicio nginx del compose local (mismos
-# montajes, envsubst de templates/ con las cuatro variables NGINX_*). Espera a que la
+# montajes, envsubst de templates/ con las variables NGINX_*). Espera a que la
 # configuración esté en S3 (llega por el endpoint de S3) y a que egress esté arriba.
+# La zona auth (login y registro) se divide por FrontCount: cada Nginx cuenta por separado y
+# así el total entre las instancias queda como con una sola (10r/m y 6 requests de una vez).
+# CloudFormation no hace cuentas: con FrontCount en 1 o 2, alcanza con TwoFronts.
 Mappings:
   Bootstrap:
     Script:
@@ -61,6 +64,7 @@ Mappings:
           --log-opt awslogs-group="$LOG_GROUP" --log-opt awslogs-stream="nginx-$INSTANCE_ID" \
           -e NGINX_TRUSTED_CIDR="$TRUSTED_CIDR" -e NGINX_RESOLVER=169.254.169.253 \
           -e NGINX_BACKEND="$BACKEND" -e NGINX_ERROR_LOG_LEVEL=crit \
+          -e NGINX_AUTH_RATE="$AUTH_RATE" -e NGINX_AUTH_BURST="$AUTH_BURST" \
           -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/env.d -e NGINX_ENVSUBST_FILTER='^NGINX_' \
           --tmpfs /etc/nginx/env.d \
           -v "$CONF/nginx.conf:/etc/nginx/nginx.conf:ro" \
@@ -162,11 +166,13 @@ Resources:
           Ebs: { VolumeSize: 8, VolumeType: gp3, Encrypted: true }
       UserData:
         Fn::Base64: !Sub
-          - "#!/bin/bash\nREGION='${AWS::Region}' OPS_BUCKET='${OpsBucket}' LOG_GROUP='${LogGroup}' NGINX_IMAGE='${NginxImage}' TRUSTED_CIDR='${VpcCidr}' BACKEND='${InternalAlbDns}:3000' bash <<'BOOT'\n${Body}\nBOOT\n"
+          - "#!/bin/bash\nREGION='${AWS::Region}' OPS_BUCKET='${OpsBucket}' LOG_GROUP='${LogGroup}' NGINX_IMAGE='${NginxImage}' TRUSTED_CIDR='${VpcCidr}' BACKEND='${InternalAlbDns}:3000' AUTH_RATE='${AuthRate}' AUTH_BURST='${AuthBurst}' bash <<'BOOT'\n${Body}\nBOOT\n"
           - OpsBucket: { 'Fn::ImportValue': !Sub 'junte-${Env}-OpsBucket' }
             LogGroup: { 'Fn::ImportValue': !Sub 'junte-${Env}-NginxLogGroup' }
             VpcCidr: { 'Fn::ImportValue': !Sub 'junte-${Env}-VpcCidr' }
             InternalAlbDns: { 'Fn::ImportValue': !Sub 'junte-${Env}-InternalAlbDns' }
+            AuthRate: !If [TwoFronts, '5r/m', '10r/m']
+            AuthBurst: !If [TwoFronts, '2', '5']
             Body: !FindInMap [Bootstrap, Script, Body]
       Tags:
         - { Key: Name, Value: !Sub 'junte-${Env}-front-a' }
@@ -188,11 +194,13 @@ Resources:
           Ebs: { VolumeSize: 8, VolumeType: gp3, Encrypted: true }
       UserData:
         Fn::Base64: !Sub
-          - "#!/bin/bash\nREGION='${AWS::Region}' OPS_BUCKET='${OpsBucket}' LOG_GROUP='${LogGroup}' NGINX_IMAGE='${NginxImage}' TRUSTED_CIDR='${VpcCidr}' BACKEND='${InternalAlbDns}:3000' bash <<'BOOT'\n${Body}\nBOOT\n"
+          - "#!/bin/bash\nREGION='${AWS::Region}' OPS_BUCKET='${OpsBucket}' LOG_GROUP='${LogGroup}' NGINX_IMAGE='${NginxImage}' TRUSTED_CIDR='${VpcCidr}' BACKEND='${InternalAlbDns}:3000' AUTH_RATE='${AuthRate}' AUTH_BURST='${AuthBurst}' bash <<'BOOT'\n${Body}\nBOOT\n"
           - OpsBucket: { 'Fn::ImportValue': !Sub 'junte-${Env}-OpsBucket' }
             LogGroup: { 'Fn::ImportValue': !Sub 'junte-${Env}-NginxLogGroup' }
             VpcCidr: { 'Fn::ImportValue': !Sub 'junte-${Env}-VpcCidr' }
             InternalAlbDns: { 'Fn::ImportValue': !Sub 'junte-${Env}-InternalAlbDns' }
+            AuthRate: '5r/m'   # FrontB solo existe con TwoFronts
+            AuthBurst: '2'
             Body: !FindInMap [Bootstrap, Script, Body]
       Tags:
         - { Key: Name, Value: !Sub 'junte-${Env}-front-b' }

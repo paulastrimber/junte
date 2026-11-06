@@ -44,7 +44,7 @@ El informe y `docs/` están escritos pensando en una cuenta común. En Learner L
 | Qué | Dónde |
 |-----|-------|
 | Entorno local completo (Nginx, back, MongoDB de 1 nodo, Redis) | `infra/docker-compose.dev.yml`, `infra/back/`, `infra/mongo/` |
-| Configuración de Nginx lista para AWS, con cuatro variables por entorno (`NGINX_TRUSTED_CIDR`, `NGINX_RESOLVER`, `NGINX_BACKEND`, `NGINX_ERROR_LOG_LEVEL`) | `front-service/` |
+| Configuración de Nginx lista para AWS, con variables por entorno (`NGINX_TRUSTED_CIDR`, `NGINX_RESOLVER`, `NGINX_BACKEND`, `NGINX_ERROR_LOG_LEVEL`, `NGINX_AUTH_RATE`, `NGINX_AUTH_BURST`) | `front-service/` |
 | Imagen de producción del back (target `prod`, propuesta) | `back-service/Dockerfile` |
 | Variables que exige el back, validadas al arrancar | `back-service/.env.example`, `back-service/src/config/` |
 | Storage S3 con credenciales del rol de la instancia | `back-service/src/adapters/` |

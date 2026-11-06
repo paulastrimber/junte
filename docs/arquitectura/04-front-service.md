@@ -23,9 +23,11 @@ front-service/
   templates/               # lo que cambia por entorno; envsubst al arrancar → /etc/nginx/env.d/
     00-realip.conf.template    # set_real_ip_from ${NGINX_TRUSTED_CIDR} / real_ip_header
     05-errorlog.conf.template  # error_log … ${NGINX_ERROR_LOG_LEVEL}
+    10-ratelimit-auth.conf.template  # limit_req_zone auth, rate=${NGINX_AUTH_RATE} (solo login y register)
     20-upstream.conf.template  # resolver ${NGINX_RESOLVER} + $backend = ${NGINX_BACKEND}
+    auth-limit-req.inc.template  # limit_req zone=auth burst=${NGINX_AUTH_BURST}; lo incluye la location de login
   conf.d/                  # igual en todos los entornos
-    10-ratelimit.conf      # limit_req_zone (api, auth) + status 429; `auth` solo la usan login y register
+    10-ratelimit.conf      # limit_req_zone api + status 429
     30-server.conf         # server :8080, /health, /api/v1, /api/v1/socket.io, /admin, 404/429 JSON
   snippets/
     proxy.conf             # reescritura /api/v1 → /internal + headers de proxy
@@ -34,7 +36,9 @@ front-service/
     smoke.sh               # ver "Tests del front service"
 ```
 
-Los templates los procesa el entrypoint de la imagen oficial de Nginx (`/etc/nginx/templates/*.template` → `NGINX_ENVSUBST_OUTPUT_DIR`, con `NGINX_ENVSUBST_FILTER=^NGINX_` para que solo se sustituyan nuestras variables). `nginx.conf` incluye primero `/etc/nginx/env.d/*.conf` y después `/etc/nginx/conf.d/*.conf`.
+Los templates los procesa el entrypoint de la imagen oficial de Nginx (`/etc/nginx/templates/*.template` → `NGINX_ENVSUBST_OUTPUT_DIR`, con `NGINX_ENVSUBST_FILTER=^NGINX_` para que solo se sustituyan nuestras variables). `nginx.conf` incluye primero `/etc/nginx/env.d/*.conf` y después `/etc/nginx/conf.d/*.conf`. `auth-limit-req.inc` termina en `.inc` para que ese include no lo tome: es una línea de `location`, y la incluye `30-server.conf` (Nginx no admite variables en `burst`).
+
+Todas las variables tienen que estar definidas: si falta una, el `${...}` queda literal y Nginx no arranca.
 
 ### Variables por entorno
 
@@ -44,6 +48,8 @@ Los templates los procesa el entrypoint de la imagen oficial de Nginx (`/etc/ngi
 | `NGINX_RESOLVER` | `127.0.0.11` (DNS embebido de docker) | `169.254.169.253` (DNS de la VPC) |
 | `NGINX_BACKEND` | `back:3000` | `<DNS del ALB interno>:3000` |
 | `NGINX_ERROR_LOG_LEVEL` | `warn` | `crit`: el error log incluye la línea del request con su query string (coordenadas) y va a CloudWatch |
+| `NGINX_AUTH_RATE` | `10r/m` | `10r/m` con 1 Nginx (dev); `5r/m` con 2 (entrega). Ver [Rate limit con varias instancias](#rate-limit-con-varias-instancias) |
+| `NGINX_AUTH_BURST` | `5` | `5` con 1 Nginx; `2` con 2 |
 
 ## Configuración clave
 
@@ -65,8 +71,10 @@ map $host $backend { default "http://${NGINX_BACKEND}"; }
 
 # conf.d/10-ratelimit.conf  (valores iniciales, a calibrar)
 limit_req_zone $binary_remote_addr zone=api:10m  rate=10r/s;
-limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/m;
 limit_req_status 429;
+
+# templates/10-ratelimit-auth.conf.template  (10r/m con 1 Nginx)
+limit_req_zone $binary_remote_addr zone=auth:10m rate=${NGINX_AUTH_RATE};
 
 # conf.d/30-server.conf
 server {
@@ -81,7 +89,7 @@ server {
   # Solo login y registro (fuerza bruta, altas masivas). refresh, logout y logout-all usan la zona api.
   # Regex insensible a mayúsculas y con barra final opcional: una variante de la URL no cae en la zona general.
   location ~* ^/api/v1/auth/(login|register)/?$ {
-    limit_req zone=auth burst=5 nodelay;
+    include /etc/nginx/env.d/auth-limit-req.inc;   # limit_req zone=auth burst=${NGINX_AUTH_BURST} nodelay;
     include /etc/nginx/snippets/proxy.conf;
   }
 
@@ -123,6 +131,27 @@ proxy_hide_header X-Request-Id;                    # el de la respuesta lo agreg
 ```
 
 > Valores iniciales: ajustar los límites y el CIDR reales. `nginx -t` corre en CI.
+
+### Rate limit con varias instancias
+
+`limit_req_zone` vive en la memoria de cada Nginx: con N instancias detrás del ALB, cada una cuenta por separado y un cliente consigue hasta N veces el límite. En entrega hay 2 (`FrontCount=2`) y se vio en el paso 7.1: la ráfaga del smoke test recién recibió el 429 en el request 14, en vez del 7.
+
+**Decisión (2026-11-06):** en AWS, la zona `auth` (login y registro) se divide por la cantidad de instancias, para que el total quede como con una sola: 10 por minuto y 6 requests de una vez (1 + `burst`).
+
+| Nginx | `NGINX_AUTH_RATE` | `NGINX_AUTH_BURST` | Total entre todas |
+|-------|-------------------|--------------------|-------------------|
+| 1 (local, dev) | `10r/m` | `5` | 10 por minuto, 6 de una vez |
+| 2 (entrega) | `5r/m` | `2` | 2 × 5 = 10 por minuto, 2 × 3 = 6 de una vez |
+
+`infra/templates/50-front.yml` los deriva de `FrontCount` con la condición `TwoFronts`, sin un parámetro aparte que se pueda desincronizar. CloudFormation no hace cuentas, pero `FrontCount` solo admite 1 o 2. La zona general `api` no se divide: es amplia a propósito, porque en una universidad muchos estudiantes salen por la misma IP.
+
+**Es aproximado,** porque el ALB reparte por request y no por cliente, y no reparte exacto:
+
+- **Nunca pasa del límite con una sola instancia.** Cada Nginx deja pasar como mucho 3 requests de una vez y repone 5 por minuto, así que entre las dos el máximo sigue siendo 6 y 10 por minuto.
+- **Puede quedar más estricto.** Si el ALB manda más requests de un cliente a una instancia, esa se agota antes: el 429 puede llegar en el request 4. La reposición total también baja si los requests no se reparten parejo.
+- **Con una instancia caída, el límite queda a la mitad.** La que sigue cuenta solo con su parte; vuelve a la normalidad cuando la otra vuelve al balanceador (S7-QA-06).
+
+**Alternativa de fondo, sin decidir:** un límite compartido en el back con Redis, que el back ya usa. Daría el mismo número exacto con cualquier cantidad de instancias, pero mueve parte del rate limit fuera del borde, así que hay que decidirlo con el equipo.
 
 ### requestId
 
@@ -167,7 +196,7 @@ Estáticos servidos por Nginx; sus llamadas van a `/api/v1/admin/*` con un JWT d
   - `X-Request-Id` presente y generado por Nginx; el que manda el cliente no llega al back; el back recibe el de Nginx y la respuesta lo trae una sola vez.
   - `/api/v1/health` llega al back; una ruta inexistente `/api/v1/x` devuelve el 404 del back y el access log muestra `upstreamPath: /internal/x` sin query string; `/internal/*` da 404.
   - Body de más de 1 MB → 413.
-  - Ráfaga sobre `/api/v1/auth/login` → 429 JSON `{ code: 'RATE_LIMITED', message, requestId }` con el mismo `requestId` que el header; un `X-Forwarded-For` inventado desde fuera de la red de confianza no evade el límite.
+  - Ráfaga sobre `/api/v1/auth/login` → 429 JSON `{ code: 'RATE_LIMITED', message, requestId }` con el mismo `requestId` que el header; un `X-Forwarded-For` inventado desde fuera de la red de confianza no evade el límite. Para eso manda una segunda ráfaga con un `X-Forwarded-For` distinto en cada request: si Nginx lo tomara como IP, nunca llegaría el 429. Ningún chequeo depende del número exacto de requests hasta el 429, así que valen igual con varias instancias.
   - La zona estricta es solo de `login` y `register`: con la IP ya bloqueada, `/auth/register` y las variantes de la URL de login (`/auth/Login`, `/auth/LOGIN`, `/auth/login/`) también dan 429, mientras que `/auth/refresh`, `/auth/logout` y `/auth/logout-all` (zona general) siguen respondiendo.
   - Rate limit por IP real: desde un contenedor efímero en la red de compose (red de confianza), una ráfaga con `X-Forwarded-For: A` llega a 429 y un request con `X-Forwarded-For: B` no; el access log registra B como `remoteAddr`.
   - Las verificaciones que leen el access log o usan la red de compose solo corren con `base_url` local (se pueden omitir con `SMOKE_SKIP_LOCAL=1`).

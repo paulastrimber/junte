@@ -1,0 +1,6 @@
+# Zona estricta de login y registro (conf.d/30-server.conf). La tasa cambia por entorno: cada instancia
+# de Nginx cuenta por separado, así que en AWS se divide por la cantidad de instancias detrás del ALB
+# (ver docs/arquitectura/04-front-service.md#rate-limit-con-varias-instancias).
+#   - Local y dev (1 Nginx): NGINX_AUTH_RATE=10r/m
+#   - Entrega (2 Nginx):     NGINX_AUTH_RATE=5r/m
+limit_req_zone $binary_remote_addr zone=auth:10m rate=${NGINX_AUTH_RATE};
