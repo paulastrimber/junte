@@ -218,10 +218,19 @@ if [ -n "$limited" ]; then
     && ok "requestId del body = header X-Request-Id" \
     || fail "requestId del body ($rid_body) distinto del header ($(header "$limited" X-Request-Id))"
 
-  # Un cliente externo no puede evadir el límite inventando su X-Forwarded-For.
-  login spoof -H "X-Forwarded-For: 198.51.100.$((RANDOM % 250 + 1))"
-  [ "$(status spoof)" = 429 ] && ok "X-Forwarded-For de un cliente externo se ignora (sigue en 429)" \
-    || fail "con un X-Forwarded-For inventado el cliente externo evadió el límite ($(status spoof))"
+  # Un cliente externo no puede evadir el límite inventando su X-Forwarded-For. Cada request de esta ráfaga
+  # lleva uno distinto: si Nginx lo tomara como IP, cada uno sería un cliente nuevo y nunca llegaría el 429.
+  # No alcanza con un solo request después de la ráfaga: con varias instancias de Nginx detrás del ALB cada
+  # una cuenta por separado, y ese request puede caer en una que todavía tiene cupo.
+  spoof_base=$((RANDOM % 200))
+  spoof_codes=(); spoofed=''
+  for i in $(seq 1 15); do
+    login "spoof$i" -H "X-Forwarded-For: 198.51.100.$((spoof_base + i))"
+    spoof_codes+=("$(status "spoof$i")")
+    if [ "$(status "spoof$i")" = 429 ]; then spoofed="spoof$i"; break; fi
+  done
+  [ -n "$spoofed" ] && ok "X-Forwarded-For inventado y distinto en cada request se ignora (429 en el request ${#spoof_codes[@]})" \
+    || fail "con un X-Forwarded-For inventado distinto en cada request el cliente externo evadió el límite (${spoof_codes[*]})"
 
   # Login y registro comparten la zona estricta; las variantes de la URL de login también.
   # (La IP ya agotó la zona con la ráfaga.) La zona repone de a poco (10 por minuto) y un request suelto
