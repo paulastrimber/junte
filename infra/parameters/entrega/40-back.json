@@ -2,5 +2,5 @@
   { "ParameterKey": "Env", "ParameterValue": "entrega" },
   { "ParameterKey": "BackCount", "ParameterValue": "2" },
   { "ParameterKey": "InstanceType", "ParameterValue": "t3.small" },
-  { "ParameterKey": "Push", "ParameterValue": "disabled" }
+  { "ParameterKey": "Push", "ParameterValue": "enabled" }
 ]
