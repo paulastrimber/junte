@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import { Pressable, View } from 'react-native'
 
 import { createThemedStyles, sizes, spacing } from '../theme/index.js'
+import { setPlaybackAudioMode } from '../utils/audio.js'
 import { formatDuration } from '../utils/chat.js'
 import { Icon } from './Icon.jsx'
 import { Text } from './Text.jsx'
@@ -41,7 +42,7 @@ export function VoiceNotePlayer ({ source, durationMs, color = 'text', onExpired
   useEffect(() => {
     if (!isRetryPending.current) return
     isRetryPending.current = false
-    Promise.resolve(player.play()).catch(() => {})
+    setPlaybackAudioMode().then(() => player.play()).catch(() => {})
   }, [player])
 
   useEffect(() => {
@@ -53,7 +54,11 @@ export function VoiceNotePlayer ({ source, durationMs, color = 'text', onExpired
     if (status?.didJustFinish) Promise.resolve(player.seekTo(0)).catch(() => {})
   }, [status?.didJustFinish, player])
 
-  const toggle = () => (isPlaying ? player.pause() : player.play())
+  // Antes de cada play se fija el modo de reproducción: si no, en iOS el switch de silencio la deja muda.
+  const toggle = () => {
+    if (isPlaying) return player.pause()
+    setPlaybackAudioMode().then(() => player.play())
+  }
   const shown = isPlaying && status?.currentTime ? formatDuration(status.currentTime * 1000) : duration
 
   return (

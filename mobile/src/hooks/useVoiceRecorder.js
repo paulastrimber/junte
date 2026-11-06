@@ -2,6 +2,7 @@ import { AudioQuality, IOSOutputFormat, requestRecordingPermissionsAsync, setAud
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { VOICE_MAX_DURATION_MS } from '../services/voiceNotes.js'
+import { setPlaybackAudioMode } from '../utils/audio.js'
 
 // AAC en .m4a en los dos sistemas (lo que acepta el back), mono a 64 kbps: 60 segundos pesan ~0,5 MB.
 export const VOICE_RECORDING_OPTIONS = Object.freeze({
@@ -46,7 +47,7 @@ export function useVoiceRecorder ({ onLimit } = {}) {
     try {
       await recorder.stop()
     } finally {
-      setAudioModeAsync({ allowsRecording: false }).catch(() => {})
+      setPlaybackAudioMode()
       setStatus(RECORDER_STATUS.IDLE)
       setElapsedMs(0)
     }
@@ -68,7 +69,7 @@ export function useVoiceRecorder ({ onLimit } = {}) {
       await recorder.prepareToRecordAsync()
       // La pantalla se cerró mientras se preparaba: no se graba y se devuelve el modo de audio.
       if (isUnmountedRef.current) {
-        setAudioModeAsync({ allowsRecording: false }).catch(() => {})
+        setPlaybackAudioMode()
         return
       }
       recorder.record()
@@ -84,7 +85,7 @@ export function useVoiceRecorder ({ onLimit } = {}) {
       }, TICK_MS)
     } catch {
       clearTimer()
-      setAudioModeAsync({ allowsRecording: false }).catch(() => {})
+      setPlaybackAudioMode()
       if (!isUnmountedRef.current) setStatus(RECORDER_STATUS.ERROR)
     } finally {
       isStartingRef.current = false
@@ -111,7 +112,7 @@ export function useVoiceRecorder ({ onLimit } = {}) {
       } catch {
         // `stop` puede lanzar de forma sincrónica: ya se está saliendo, no hay nada que hacer.
       }
-      setAudioModeAsync({ allowsRecording: false }).catch(() => {})
+      setPlaybackAudioMode()
     }
   }, [recorder])
 
