@@ -123,7 +123,7 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     planRepo, userRepo, participationRepo, attachCreators: planService.attachCreators, scorers: buildScorers(config.feed.weights), clock
   })
   const messageService = createMessageService({
-    plans: planService, participationRepo, messageRepo, userRepo, broadcaster: chatBroadcaster, clock, logger, storage
+    plans: planService, participationRepo, messageRepo, userRepo, broadcaster: chatBroadcaster, clock, logger, storage, notifier
   })
   // Fotos (perfil y plan) y notas de voz del chat (solo para quien es parte del chat).
   const uploadService = createUploadService({ storage, plans: planService, messages: messageService })

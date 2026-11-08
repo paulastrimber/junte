@@ -1,7 +1,8 @@
-// Avisos push (S5-BE-07/08): nuevo inscripto (al creador), cupo liberado (a todos los que pidieron aviso) y recordatorio
-// (job). Regla 10: se llaman DESPUÉS del commit y nunca bloquean ni rompen la operación de negocio: `planJoined` y
-// `spotFreed` devuelven una promesa que nunca rechaza y quien los llama no la espera. Los tokens que FCM informa como
-// inválidos se borran. No importa Express ni Mongoose: todo llega por parámetro (DI).
+// Avisos push (S5-BE-07/08): nuevo inscripto (al creador), cupo liberado (a todos los que pidieron aviso), recordatorio
+// (job) y mensaje nuevo de chat (a todos los del chat menos el remitente). Regla 10: se llaman DESPUÉS del commit y
+// nunca bloquean ni rompen la operación de negocio: `planJoined`, `spotFreed` y `messageSent` devuelven una promesa que
+// nunca rechaza y quien los llama no la espera. Los tokens que FCM informa como inválidos se borran. No importa Express
+// ni Mongoose: todo llega por parámetro (DI).
 import { NOTIFICATION_TEXTS, NOTIFICATION_TYPES, REMINDER_LEAD_MS } from './notification.rules.js'
 
 // Tope de planes por pasada del job: lo que quede se procesa en el ciclo siguiente.
@@ -60,6 +61,24 @@ export function createNotifier ({ push, deviceTokenRepo, planRepo, participation
         const joiner = await userRepo.findById(userId)
         const texts = NOTIFICATION_TEXTS[type]({ plan, name: joiner?.name })
         await sendToUsers({ type, plan, userIds: [plan.creatorId], texts })
+      })
+    },
+
+    /**
+     * Mensaje nuevo en el chat: avisa a TODOS los del chat (participantes activos + creador) menos el remitente. Una
+     * push por mensaje; el aviso nunca lleva el texto (regla 13 / doc 08), solo quién escribió y en qué plan.
+     * @param {{ planId: string, senderId: string, senderName?: string }} params  `senderId` sale del token.
+     * @returns {Promise<void>} nunca rechaza.
+     */
+    messageSent ({ planId, senderId, senderName }) {
+      const type = NOTIFICATION_TYPES.MESSAGE
+      return safely(type, planId, async () => {
+        const plan = await planRepo.findById(planId)
+        if (!plan) return
+        const active = await participationRepo.findActiveUserIds(planId)
+        const userIds = [...new Set([plan.creatorId, ...active])].filter((id) => id !== senderId)
+        if (userIds.length === 0) return
+        await sendToUsers({ type, plan, userIds, texts: NOTIFICATION_TEXTS[type]({ plan, name: senderName }) })
       })
     },
 

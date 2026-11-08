@@ -34,8 +34,9 @@ function setup ({ visible = true, existing = [] } = {}) {
   const userRepo = { findByIds: vi.fn(async (ids) => ids.map((id) => ({ id, name: id === CREATOR_ID ? 'Ana' : 'Beto' }))) }
   const broadcaster = { publishMessage: vi.fn() }
   const logger = { info: vi.fn() }
-  const service = createMessageService({ plans, participationRepo, messageRepo, userRepo, broadcaster, clock, logger })
-  return { service, messages, broadcaster, logger }
+  const notifier = { messageSent: vi.fn(async () => {}) }
+  const service = createMessageService({ plans, participationRepo, messageRepo, userRepo, broadcaster, clock, logger, notifier })
+  return { service, messages, broadcaster, logger, notifier }
 }
 
 const expectCode = async (promise, code) => expect(promise).rejects.toMatchObject({ code })
@@ -72,8 +73,17 @@ describe('messageService.send', () => {
     expect(broadcaster.publishMessage).toHaveBeenCalledWith(expect.objectContaining({ message: result.message }))
   })
 
-  it('un reintento con el mismo clientId devuelve el mismo mensaje y no lo vuelve a emitir', async () => {
-    const { service, messages, broadcaster } = setup()
+  it('un mensaje nuevo dispara el push con el remitente del token (no se espera)', async () => {
+    const { service, notifier } = setup()
+
+    await service.send({ planId: PLAN_ID, userId: MEMBER_ID, text: 'Hola', clientId: 'abc' })
+
+    expect(notifier.messageSent).toHaveBeenCalledTimes(1)
+    expect(notifier.messageSent).toHaveBeenCalledWith({ planId: PLAN_ID, senderId: MEMBER_ID, senderName: 'Beto' })
+  })
+
+  it('un reintento con el mismo clientId devuelve el mismo mensaje y no lo vuelve a emitir ni a avisar', async () => {
+    const { service, messages, broadcaster, notifier } = setup()
 
     const first = await service.send({ planId: PLAN_ID, userId: MEMBER_ID, text: 'Hola', clientId: 'abc' })
     const retry = await service.send({ planId: PLAN_ID, userId: MEMBER_ID, text: 'Hola', clientId: 'abc' })
@@ -81,6 +91,7 @@ describe('messageService.send', () => {
     expect(retry).toMatchObject({ created: false, message: { id: first.message.id } })
     expect(messages).toHaveLength(1)
     expect(broadcaster.publishMessage).toHaveBeenCalledTimes(1)
+    expect(notifier.messageSent).toHaveBeenCalledTimes(1)
   })
 
   it('el mismo clientId en otro plan es un error de validación, no un reintento', async () => {
@@ -91,11 +102,12 @@ describe('messageService.send', () => {
     expect(broadcaster.publishMessage).not.toHaveBeenCalled()
   })
 
-  it('no participante: FORBIDDEN y no guarda nada', async () => {
-    const { service, messages } = setup()
+  it('no participante: FORBIDDEN, no guarda nada y no avisa', async () => {
+    const { service, messages, notifier } = setup()
 
     await expectCode(service.send({ planId: PLAN_ID, userId: STRANGER_ID, text: 'Hola' }), 'FORBIDDEN')
     expect(messages).toHaveLength(0)
+    expect(notifier.messageSent).not.toHaveBeenCalled()
   })
 
   it('nunca loguea el texto del mensaje', async () => {
