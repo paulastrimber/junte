@@ -156,3 +156,5 @@ Pedirlos **en el momento en que se usan**, explicando para qué, y degradar con 
 | `production` | APK de entrega (`android.buildType: 'apk'`); cambiar a AAB para tiendas | Producción |
 
 Solo variables `EXPO_PUBLIC_*` llegan al binario: **nada secreto** puede ir ahí.
+
+Los builds release (todos los perfiles salvo `development`) pasan por **R8**, que viene activado por defecto en el prebuild de SDK 58. Las clases que una librería crea por reflexión necesitan reglas de keep. Esas reglas se declaran en `app.config.js`, en el plugin `expo-build-properties` (`android.extraProguardRules`), y no en `android/`, que no se versiona. Hoy hay reglas para Room y WorkManager, que trae `react-native-maps`. Sin ellas, el APK se cerraba al abrir. El detalle está en [pendientes.md](../pendientes.md#j-notas-del-sprint-7-apk-de-entrega).

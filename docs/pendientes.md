@@ -513,3 +513,24 @@ Lo que jest no cubre de estos cambios. Marcar cada punto con la fecha, el teléf
 - **BUG-QA-8:** un QR que vencía antes de su renovación dejaba la pantalla en "Generando el QR…" para siempre. Ahora se oculta y la renovación sigue en pie (o pasa a error con "Reintentar" si ya había fallado).
 - **BUG-QA-9:** con el reloj del teléfono adelantado, cada QR se daba por vencido al llegar. Ahora la vida se calcula con la hora del servidor (header `Date`) y se ancla al momento en que llegó la respuesta; sin header se usa `expiresAt` tal cual.
 - **Dependencias:** parches de `expo`, `expo-asset`, `expo-constants`, `expo-dev-client` y `jest-expo` alineados con `expo install --fix`; `expo-doctor` 21/21.
+
+## J. Notas del sprint 7: APK de entrega
+
+### El APK release se cerraba al abrir (2026-11-07)
+
+**Síntoma:** un APK de EAS (perfil local `entrega`, basado en `preview`) se cerraba apenas se abría en un teléfono real (ZTE Blade A76 5G, MyOS 15). En `adb logcat -b crash`: `Unable to get provider androidx.startup.InitializationProvider` → `Failed to create an instance of class androidx.work.impl.WorkDatabase` (con los nombres ofuscados por R8). Con Expo Go o un development build no pasa: el problema es solo del build release.
+
+**Causa:**
+
+- **Minify:** el template de `expo prebuild` de SDK 58 trae `android.enableMinifyInReleaseBuilds=true` en `android/gradle.properties`, así que todo build release (EAS `preview`, `production`, `entrega`) pasa por R8 aunque `app.config.js` no lo pida. `android/` no se versiona: EAS lo genera en cada build.
+- **WorkManager:** lo declara `react-native-maps` (`androidx.work:work-runtime:2.9.1` en su `build.gradle`) y trae Room como dependencia propia. WorkManager se inicializa solo, con `androidx.startup`, **al abrir la app y antes que el JS**, aunque nunca se abra el mapa. Su base interna (`WorkDatabase`) es de Room, y Room crea la implementación generada (`WorkDatabase_Impl`) por reflexión. R8 la dejó sin un constructor que se pueda usar, y Room no pudo instanciarla.
+
+**Arreglo:** reglas de keep para Room y WorkManager con `expo-build-properties` (`android.extraProguardRules` en `app.config.js`). Prebuild las copia a `android/app/proguard-rules.pro`. El minify sigue activo.
+
+**Por qué reglas y no apagar el minify:** la alternativa es `android.enableMinifyInReleaseBuilds: false` en el mismo plugin. Evita cualquier problema de R8 de una vez, pero el APK queda más grande, sin optimizar y sin ofuscar, por un problema que está en una sola librería. Las reglas arreglan solo lo que está roto. El riesgo es que otra librería que use reflexión falle de la misma forma. **Si el APK nuevo vuelve a cerrarse con otra clase ofuscada en el stack, el plan B es apagar el minify** (una línea en `app.config.js`) en vez de perseguir reglas una por una antes de la entrega.
+
+**Pendiente para cerrarlo:**
+
+- [ ] Recompilar el APK (`eas build -p android --profile entrega`, o el perfil que se use para la entrega).
+- [ ] Instalarlo y abrirlo en un teléfono real: tiene que llegar al login sin cerrarse. Si se cierra, guardar la salida de `adb logcat -b crash`.
+- [ ] Probar en ese APK el mapa de "crear plan" y un aviso push (las dos librerías que usan las clases afectadas).
