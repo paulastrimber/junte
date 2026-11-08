@@ -114,14 +114,14 @@ export default ({ config }) => ({
     // ubicación en segundo plano no entra al manifiesto.
     blockedPermissions: ['android.permission.ACCESS_BACKGROUND_LOCATION'],
     adaptiveIcon: {
-      backgroundColor: '#E6F4FE',
-      foregroundImage: './assets/android-icon-foreground.png',
-      backgroundImage: './assets/android-icon-background.png',
-      monochromeImage: './assets/android-icon-monochrome.png'
+      foregroundImage: './assets/adaptive-icon.png',
+      backgroundColor: '#1E1033'
     }
   },
   plugins: [
     'expo-dev-client',
+    // Pantalla de carga: el logo centrado sobre el fondo de marca.
+    ['expo-splash-screen', { image: './assets/splash-icon.png', backgroundColor: '#1E1033', imageWidth: 200 }],
     // Tokens en Keychain / Keystore.
     'expo-secure-store',
     // Fotos de perfil con caché en disco (la URL firmada cambia; la caché va por la ruta sin firma).
@@ -140,7 +140,7 @@ export default ({ config }) => ({
     // Notas de voz del chat (S5-MOB-05): solo se graba mientras la persona mantiene la grabación abierta en el chat.
     ['expo-audio', { microphonePermission: 'junte usa el micrófono para grabar las notas de voz que mandás en el chat de un plan.', enableBackgroundRecording: false, enableBackgroundPlayback: false }],
     // Avisos push (FCM): nuevo inscripto, lugar liberado y recordatorio.
-    ['expo-notifications', { defaultChannel: 'default' }],
+    ['expo-notifications', { icon: './assets/notification-icon.png', color: '#8BD33F', defaultChannel: 'default' }],
     // Compatibilidad horaria del feed: solo se lee cuándo estás ocupado, nunca el contenido de los eventos.
     ['expo-calendar', { calendarPermission: 'junte mira cuándo estás ocupado en tu calendario para recomendarte planes en horarios que te queden libres.' }],
     // Mapa para elegir el lugar de un plan. En iOS usa Apple Maps (sin clave).
