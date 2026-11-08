@@ -61,6 +61,7 @@ Al reconectar, el cliente vuelve a hacer `chat:join` (las salas no sobreviven a 
 | Nuevo inscripto (`plan.joined`) | `join` confirmado (salvo que se inscriba el creador) | Creador del plan |
 | Cupo liberado (`plan.spot_freed`) | `leave` confirmado en un plan que estaba lleno y sigue `open` sin empezar | **Todos** los que pidieron aviso (`spotAlerts`), menos los ya inscriptos. Sin orden: el primero que se inscribe se queda el lugar. Los pedidos se conservan |
 | Recordatorio (`plan.reminder`) | Job `send-reminders` cuando faltan ≤ 60 min para `startsAt` (una vez: `reminderSentAt`) | Participantes activos |
+| Mensaje de chat (`chat.message`) | Mensaje nuevo creado (REST o `chat:send`; una push por mensaje, no en el reintento por `clientId`) | **Todos** los del chat (participantes activos + creador) menos el remitente |
 
 **Implementado en S5** (`src/adapters/push/` + `src/modules/notifications/`): FCM API HTTP v1 sin `firebase-admin` (la cuenta de servicio firma un JWT con `jose`; el access token se cachea). Credencial: `FCM_SERVICE_ACCOUNT` (JSON en una línea) o, en AWS, `FCM_SERVICE_ACCOUNT_SECRET_ID` (Secrets Manager). Sin ella se usa el push en memoria (no sale nada; se loguea `push.sent`). `data: { type, planId }` para que la app abra el plan. Log: `event: 'push.sent'`, `type`, `planId`, `recipients`, `devices`, `sent`, `failed`, `removedTokens` (nunca tokens). Inválido = HTTP 404 o `UNREGISTERED` / `INVALID_ARGUMENT`.
 

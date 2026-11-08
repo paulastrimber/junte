@@ -26,8 +26,9 @@ const messageNotFound = () => errors.notFound('No encontramos ese mensaje')
  * @param {import('../../adapters/clock.js').Clock} deps.clock
  * @param {{ info: (obj: object, msg: string) => void }} deps.logger
  * @param {import('../../adapters/storage/index.js').Storage} [deps.storage]  Para verificar las notas de voz subidas a S3.
+ * @param {{ messageSent: (params: { planId: string, senderId: string, senderName?: string }) => Promise<void> }} [deps.notifier]  Push de chat (regla 10); no se espera.
  */
-export function createMessageService ({ plans, participationRepo, messageRepo, userRepo, broadcaster, clock, logger, storage }) {
+export function createMessageService ({ plans, participationRepo, messageRepo, userRepo, broadcaster, clock, logger, storage, notifier = { messageSent: async () => {} } }) {
   /** Suma a cada mensaje su remitente (una sola consulta para toda la página). */
   async function attachSenders (messages) {
     const senders = await userRepo.findByIds(messages.map((message) => message.senderId))
@@ -114,6 +115,8 @@ export function createMessageService ({ plans, participationRepo, messageRepo, u
       if (created) {
         logger.info({ event: 'message.sent', planId, userId, messageId: message.id, type: message.type }, 'message sent')
         broadcaster.publishMessage(item)
+        // Push a todos los del chat menos el remitente (regla 10): no se espera (no bloquea la respuesta) y nunca rechaza.
+        notifier.messageSent({ planId, senderId: userId, senderName: item.sender?.name })
       }
       return { ...item, created }
     }

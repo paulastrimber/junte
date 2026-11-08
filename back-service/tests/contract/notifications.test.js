@@ -72,6 +72,47 @@ describe('cupo liberado', () => {
   })
 })
 
+describe('mensaje nuevo de chat', () => {
+  it('avisa a todos los del chat (participantes + creador) menos al que escribió', async () => {
+    const { ana, beto, caro, plan, sentOf } = await scenario()
+    await beto.api.post(`/plans/${plan.id}/join`)
+    await caro.api.post(`/plans/${plan.id}/join`)
+
+    await beto.api.post(`/plans/${plan.id}/messages`, { text: 'Hola a todos' })
+
+    await expect.poll(() => sentOf('chat.message').length).toBe(1)
+    const message = sentOf('chat.message')[0]
+    expect(message.tokens.sort()).toEqual([`token-${ana.id}`, `token-${caro.id}`].sort())
+    expect(message).toMatchObject({
+      notification: { title: expect.any(String), body: expect.stringContaining('Beto') },
+      data: { type: 'chat.message', planId: plan.id }
+    })
+    // El aviso nunca lleva el texto del mensaje (regla 13).
+    expect(JSON.stringify(message.notification)).not.toContain('Hola a todos')
+  })
+
+  it('un reintento con el mismo clientId no avisa de nuevo', async () => {
+    const { beto, plan, sentOf } = await scenario()
+    await beto.api.post(`/plans/${plan.id}/join`)
+
+    await beto.api.post(`/plans/${plan.id}/messages`, { text: 'Hola', clientId: 'c-1' })
+    await beto.api.post(`/plans/${plan.id}/messages`, { text: 'Hola', clientId: 'c-1' })
+
+    await expect.poll(() => sentOf('chat.message').length).toBe(1)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(sentOf('chat.message')).toHaveLength(1)
+  })
+
+  it('si solo está el creador en el chat, su mensaje no avisa a nadie', async () => {
+    const { ana, plan, sentOf } = await scenario()
+
+    await ana.api.post(`/plans/${plan.id}/messages`, { text: 'Primer mensaje' })
+    // Una vuelta más para dar tiempo al envío (que no tiene que ocurrir).
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(sentOf('chat.message')).toHaveLength(0)
+  })
+})
+
 describe('tokens inválidos', () => {
   it('los que FCM rechaza se borran; los demás quedan', async () => {
     const { beto, ana, plan, push } = await scenario()
