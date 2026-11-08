@@ -38,6 +38,8 @@ const EAS_PROJECT_ID = process.env.EAS_PROJECT_ID?.trim() ||
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:'])
 // Dominio reservado (RFC 2606) usado como marcador en eas.json hasta que exista el DNS real.
 const PLACEHOLDER_TLD = '.invalid'
+// Valores de APP_ENV (eas.json) de los builds que no son de producción.
+const DEV_APP_ENVS = new Set(['development', 'preview'])
 
 function readApiUrl () {
   const raw = process.env.EXPO_PUBLIC_API_URL?.trim()
@@ -71,8 +73,10 @@ function readApiUrl () {
 
 function readGoogleMapsAndroidKey () {
   const key = process.env.GOOGLE_MAPS_ANDROID_API_KEY?.trim()
-  // En local se puede trabajar sin la clave (el mapa de Android se ve vacío); un build de EAS sin ella saldría roto.
-  if (!key && process.env.EAS_BUILD === 'true' && process.env.EAS_BUILD_PLATFORM !== 'ios') {
+  // Sin la clave el mapa de Android se ve vacío. Se tolera en local y en los builds de desarrollo (perfiles
+  // development y preview, que apuntan a AWS dev) mientras la clave no exista; el APK de producción no sale sin ella.
+  const devBuild = DEV_APP_ENVS.has(process.env.APP_ENV)
+  if (!key && !devBuild && process.env.EAS_BUILD === 'true' && process.env.EAS_BUILD_PLATFORM !== 'ios') {
     throw new Error(
       'Falta GOOGLE_MAPS_ANDROID_API_KEY. Definila como variable de entorno de EAS (clave restringida a la app; ' +
       'ver docs/arquitectura/09-seguridad.md).'
@@ -122,6 +126,11 @@ export default ({ config }) => ({
   },
   plugins: [
     'expo-dev-client',
+    // R8 (activo por defecto en los release de SDK 58) borra el constructor de WorkDatabase_Impl: Room 2.5, que llega
+    // por WorkManager desde react-native-maps, no trae la regla que lo conserva, y la app crashea al abrir.
+    ['expo-build-properties', {
+      android: { extraProguardRules: '-keep class * extends androidx.room.RoomDatabase { <init>(); }' }
+    }],
     // Tokens en Keychain / Keystore.
     'expo-secure-store',
     // Fotos de perfil con caché en disco (la URL firmada cambia; la caché va por la ruta sin firma).
