@@ -144,7 +144,19 @@ export default ({ config }) => ({
     // Compatibilidad horaria del feed: solo se lee cuándo estás ocupado, nunca el contenido de los eventos.
     ['expo-calendar', { calendarPermission: 'junte mira cuándo estás ocupado en tu calendario para recomendarte planes en horarios que te queden libres.' }],
     // Mapa para elegir el lugar de un plan. En iOS usa Apple Maps (sin clave).
-    ['react-native-maps', { androidGoogleMapsApiKey: readGoogleMapsAndroidKey() }]
+    ['react-native-maps', { androidGoogleMapsApiKey: readGoogleMapsAndroidKey() }],
+    // Builds release: el prebuild de SDK 58 activa R8 (minify). react-native-maps trae WorkManager, que arranca solo al
+    // abrir la app y usa una base de Room; Room crea su implementación generada (WorkDatabase_Impl) por reflexión y R8
+    // la dejaba sin constructor: el APK se cerraba al abrir. Ver docs/pendientes.md (sección J).
+    ['expo-build-properties', {
+      android: {
+        extraProguardRules: [
+          '-keep class * extends androidx.room.RoomDatabase { <init>(); }',
+          '-keep class * extends androidx.work.ListenableWorker { public <init>(android.content.Context, androidx.work.WorkerParameters); }',
+          '-keep class * extends androidx.work.InputMerger { public <init>(); }'
+        ].join('\n')
+      }
+    }]
   ],
   extra: {
     ...config.extra,
