@@ -23,6 +23,8 @@ export const EXPECTED_INDEXES = Object.freeze([
   { collection: 'sessions', name: 'sid_unique', key: { sid: 1 }, unique: true },
   { collection: 'sessions', name: 'userId', key: { userId: 1 } },
   { collection: 'sessions', name: 'expiresAt_ttl', key: { expiresAt: 1 }, expireAfterSeconds: 0 },
+  { collection: 'passwordResets', name: 'userId_unique', key: { userId: 1 }, unique: true },
+  { collection: 'passwordResets', name: 'windowEndsAt_ttl', key: { windowEndsAt: 1 }, expireAfterSeconds: 0 },
   { collection: 'interestCategories', name: 'key_unique', key: { key: 1 }, unique: true },
   { collection: 'interests', name: 'key_unique', key: { key: 1 }, unique: true },
   { collection: 'interests', name: 'categoryKey_order', key: { categoryKey: 1, order: 1 } },

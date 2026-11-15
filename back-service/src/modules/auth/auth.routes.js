@@ -1,7 +1,9 @@
-// Solo método + URL + cadena de middlewares. El rate limit estricto de login/register lo aplica Nginx.
+// Solo método + URL + cadena de middlewares. El rate limit estricto de login, registro y contraseñas lo aplica Nginx.
 import { createRouter } from '../../shared/router.js'
 import { validate } from '../../middlewares/validate.js'
-import { loginBody, refreshBody, registerBody } from './auth.validators.js'
+import {
+  changePasswordBody, forgotPasswordBody, loginBody, refreshBody, registerBody, resetPasswordBody
+} from './auth.validators.js'
 
 /**
  * @param {object} deps
@@ -15,5 +17,9 @@ export function createAuthRoutes ({ authController, authenticate }) {
   router.post('/refresh', validate({ body: refreshBody }), authController.refresh)
   router.post('/logout', authenticate, authController.logout)
   router.post('/logout-all', authenticate, authController.logoutAll)
+  // Recuperación de contraseña: públicas (quien las usa no puede iniciar sesión).
+  router.post('/forgot-password', validate({ body: forgotPasswordBody }), authController.forgotPassword)
+  router.post('/reset-password', validate({ body: resetPasswordBody }), authController.resetPassword)
+  router.post('/change-password', authenticate, validate({ body: changePasswordBody }), authController.changePassword)
   return router
 }

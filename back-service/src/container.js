@@ -3,6 +3,7 @@
 import { systemClock } from './adapters/clock.js'
 import { connectDb, disconnectDb, pingDb, withTransaction } from './adapters/db/index.js'
 import { createLogger } from './adapters/logger.js'
+import { createMailerFromConfig, createMemoryMailer } from './adapters/mailer/index.js'
 import { createArgon2Hasher } from './adapters/passwordHasher.js'
 import { connectRedis, disconnectRedis, pingRedis } from './adapters/redis.js'
 import { createRedisLock } from './adapters/redisLock.js'
@@ -17,7 +18,8 @@ import {
   createCatalogAdminService, createCatalogController, createCatalogRepository, createCatalogRoutes, createCatalogService
 } from './modules/catalogs/index.js'
 import {
-  Session, createAuthController, createAuthRoutes, createAuthService, createSessionRepository, createTokenService
+  PasswordReset, Session, createAuthController, createAuthRoutes, createAuthService, createPasswordResetRepository,
+  createPasswordService, createResetCodes, createSessionRepository, createTokenService
 } from './modules/auth/index.js'
 import {
   CheckIn, createAttendanceService, createCheckInController, createCheckInRepository, createCheckInRoutes, createCheckInService
@@ -59,9 +61,10 @@ import {
  * @param {import('./adapters/passwordHasher.js').PasswordHasher} deps.passwordHasher
  * @param {import('./adapters/storage/index.js').Storage} deps.storage
  * @param {import('./adapters/push/index.js').Push} [deps.push]  Avisos push (FCM); por defecto, en memoria (no envía nada).
+ * @param {import('./adapters/mailer/index.js').Mailer} [deps.mailer]  Emails (recuperación de contraseña); por defecto, en memoria.
  * @param {number} [deps.maxActiveSessions]
  */
-export function buildModules ({ config, logger, clock, passwordHasher, storage, push = createMemoryPush(), maxActiveSessions }) {
+export function buildModules ({ config, logger, clock, passwordHasher, storage, push = createMemoryPush(), mailer = createMemoryMailer(), maxActiveSessions }) {
   const userRepo = createUserRepository(User)
   const sessionRepo = createSessionRepository(Session)
   const tokens = createTokenService({ secret: config.jwt.secret, clock })
@@ -76,6 +79,20 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
   const reportRepo = createReportRepository(Report)
   const spotAlertRepo = createSpotAlertRepository(SpotAlert)
   const deviceTokenRepo = createDeviceTokenRepository(DeviceToken)
+  const passwordResetRepo = createPasswordResetRepository(PasswordReset)
+  // Recuperación y cambio de contraseña: el código va por email y se guarda solo su HMAC (con el secreto del back).
+  const passwordService = createPasswordService({
+    userRepo,
+    sessionRepo,
+    passwordResetRepo,
+    passwordHasher,
+    resetCodes: createResetCodes({ secret: config.jwt.secret }),
+    mailer,
+    withTransaction,
+    devices: deviceTokenRepo,
+    clock,
+    logger
+  })
 
   const userService = createUserService({
     userRepo, storage, catalogs: catalogService, clock, logger, countNoShows: participationRepo.countNoShows
@@ -146,7 +163,7 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
 
   const authenticate = createAuthenticate({ authService })
 
-  const authController = createAuthController({ authService, serializeUser: userSerializer.serializeOwner })
+  const authController = createAuthController({ authService, passwordService, serializeUser: userSerializer.serializeOwner })
   const userController = createUserController({ userService, userSerializer })
   const uploadController = createUploadController({ uploadService })
   const catalogController = createCatalogController({ catalogService })
@@ -197,6 +214,7 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     jobs,
     authenticate,
     authService,
+    passwordService,
     userService,
     uploadService,
     catalogService,
@@ -206,6 +224,7 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     spotAlertService,
     notifier,
     push,
+    mailer,
     checkInService,
     attendanceService,
     messageService,
@@ -215,7 +234,8 @@ export function buildModules ({ config, logger, clock, passwordHasher, storage, 
     chatBroadcaster,
     userSerializer,
     userRepo,
-    sessionRepo
+    sessionRepo,
+    passwordResetRepo
   }
 }
 
@@ -240,8 +260,13 @@ export function createContainer (config) {
   const push = createPushFromConfig({ config, logger })
   if (!config.push) logger.warn('FCM_SERVICE_ACCOUNT not set: push notifications are disabled (no-op push)')
 
+  // Sin RESEND_API_KEY/MAIL_FROM no salen emails: en desarrollo el email se muestra en el log (para probar la
+  // recuperación de contraseña) y en producción se descarta con un aviso. Ver docs/pendientes.md.
+  const mailer = createMailerFromConfig({ config, logger })
+  if (!config.mail) logger.warn('RESEND_API_KEY/MAIL_FROM not set: emails are not sent (password reset codes are not delivered)')
+
   /** Routers de los módulos, montados bajo /internal por createApp. */
-  const modules = buildModules({ config, logger, clock, passwordHasher: createArgon2Hasher(), storage, push })
+  const modules = buildModules({ config, logger, clock, passwordHasher: createArgon2Hasher(), storage, push, mailer })
   const { routes, jobs } = modules
 
   let redis = null

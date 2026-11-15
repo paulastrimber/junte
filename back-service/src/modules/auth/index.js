@@ -1,7 +1,11 @@
 // API pública del módulo `auth`: lo único que otros módulos y el container importan.
 export { Session } from './session.model.js'
 export { createSessionRepository } from './session.repository.js'
+export { PasswordReset } from './password-reset.model.js'
+export { createPasswordResetRepository } from './password-reset.repository.js'
+export { createResetCodes } from './reset-code.js'
 export { createTokenService } from './tokens.js'
 export { createAuthService } from './auth.service.js'
+export { createPasswordService } from './password.service.js'
 export { createAuthController } from './auth.controller.js'
 export { createAuthRoutes } from './auth.routes.js'

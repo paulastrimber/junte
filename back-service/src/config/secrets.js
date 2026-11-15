@@ -10,7 +10,9 @@ export const SECRET_REFERENCES = Object.freeze({
   JWT_SECRET_ID: 'JWT_SECRET',
   MONGO_URI_SECRET_ID: 'MONGO_URI',
   // Cuenta de servicio de Firebase para los avisos push (S5-BE-07). Opcional.
-  FCM_SERVICE_ACCOUNT_SECRET_ID: 'FCM_SERVICE_ACCOUNT'
+  FCM_SERVICE_ACCOUNT_SECRET_ID: 'FCM_SERVICE_ACCOUNT',
+  // Clave de API de Resend para los emails de recuperación de contraseña. Opcional (va junto con MAIL_FROM).
+  RESEND_API_KEY_SECRET_ID: 'RESEND_API_KEY'
 })
 
 /**

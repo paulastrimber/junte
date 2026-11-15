@@ -100,6 +100,13 @@ const envSchema = z.object({
   // Push (S5-BE-07). Opcional: sin ella los avisos no salen del back (se loguean); en AWS sale de Secrets Manager
   // (FCM_SERVICE_ACCOUNT_SECRET_ID, ver ./secrets.js).
   FCM_SERVICE_ACCOUNT: fcmServiceAccountField.optional(),
+  // Emails (recuperación de contraseña) por Resend. Opcionales y van las dos juntas: sin ellas no sale ningún email
+  // (en desarrollo se muestra en el log). RESEND_API_KEY es un secreto; en AWS sale de Secrets Manager
+  // (RESEND_API_KEY_SECRET_ID, ver ./secrets.js). MAIL_FROM es el remitente, de un dominio verificado en Resend.
+  RESEND_API_KEY: z.string().regex(/^\S{8,200}$/, { error: 'debe ser la clave de API de Resend, sin espacios' }).optional(),
+  MAIL_FROM: z.string().max(200).regex(/^(?:[^<>\r\n]+ <[^\s@<>]+@[^\s@<>]+>|[^\s@<>]+@[^\s@<>]+)$/, {
+    error: 'debe ser una dirección de email, sola o con nombre: junte <no-reply@ejemplo.com>'
+  }).optional(),
   // Fotos en S3 (S2-BE-09). Opcionales fuera de producción: sin ellas se usa el storage en memoria.
   // Las credenciales NO son variables de la app: salen de la cadena por defecto del SDK / rol IAM.
   S3_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/, { error: 'no es un nombre de bucket válido' }).optional(),
@@ -111,6 +118,11 @@ const envSchema = z.object({
     if (isProduction) {
       ctx.addIssue({ code: 'custom', path: [name], message: 'es obligatoria en producción' })
     } else if (vars[other] !== undefined) {
+      ctx.addIssue({ code: 'custom', path: [name], message: `hay que definirla junto con ${other}` })
+    }
+  }
+  for (const [name, other] of [['RESEND_API_KEY', 'MAIL_FROM'], ['MAIL_FROM', 'RESEND_API_KEY']]) {
+    if (vars[name] === undefined && vars[other] !== undefined) {
       ctx.addIssue({ code: 'custom', path: [name], message: `hay que definirla junto con ${other}` })
     }
   }
@@ -170,7 +182,8 @@ export function loadConfig (env) {
     jwt: { secret: vars.JWT_SECRET },
     storage: vars.S3_BUCKET && vars.AWS_REGION ? { bucket: vars.S3_BUCKET, region: vars.AWS_REGION } : null,
     feed: { weights: { ...(vars.FEED_WEIGHTS ?? DEFAULT_FEED_WEIGHTS) } },
-    push: vars.FCM_SERVICE_ACCOUNT ? { fcm: vars.FCM_SERVICE_ACCOUNT } : null
+    push: vars.FCM_SERVICE_ACCOUNT ? { fcm: vars.FCM_SERVICE_ACCOUNT } : null,
+    mail: vars.RESEND_API_KEY && vars.MAIL_FROM ? { resend: { apiKey: vars.RESEND_API_KEY }, from: vars.MAIL_FROM } : null
   })
 }
 
@@ -194,4 +207,6 @@ function deepFreeze (object) {
  * @property {{ weights: { interests: number, distance: number, schedule: number } }} feed  Pesos del score del feed (suman 1).
  * @property {{ fcm: { projectId: string, clientEmail: string, privateKey: string } } | null} push  null → los avisos push no
  *   salen (implementación en memoria que solo los loguea).
+ * @property {{ resend: { apiKey: string }, from: string } | null} mail  null → no sale ningún email (en desarrollo se
+ *   muestra en el log; en producción se descarta con un aviso).
  */

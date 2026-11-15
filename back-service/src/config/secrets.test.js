@@ -71,6 +71,15 @@ describe('resolveSecrets', () => {
     expect(getSecretString).toHaveBeenCalledTimes(1)
   })
 
+  it('completa RESEND_API_KEY desde Secrets Manager (emails de recuperación de contraseña)', async () => {
+    const env = { ...AWS_ENV, RESEND_API_KEY_SECRET_ID: 'junte/dev/resend-api-key', MAIL_FROM: 'junte <no-reply@junteapp.me>' }
+    const { createClient } = fakeSecrets({ 'junte/dev/jwt-secret': JWT, 'junte/dev/mongo-app-uri': URI, 'junte/dev/resend-api-key': 're_clave_de_prueba_123' })
+
+    const resolved = await resolveSecrets(env, { createClient })
+
+    expect(resolved).toMatchObject({ RESEND_API_KEY: 're_clave_de_prueba_123', MAIL_FROM: env.MAIL_FROM })
+  })
+
   it('sin AWS_REGION no arranca, y no llega a crear el cliente', async () => {
     const { createClient } = fakeSecrets({})
     const { AWS_REGION, ...env } = AWS_ENV
