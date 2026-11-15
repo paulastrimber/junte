@@ -534,3 +534,39 @@ Lo que jest no cubre de estos cambios. Marcar cada punto con la fecha, el teléf
 - [ ] Recompilar el APK (`eas build -p android --profile entrega`, o el perfil que se use para la entrega).
 - [ ] Instalarlo y abrirlo en un teléfono real: tiene que llegar al login sin cerrarse. Si se cierra, guardar la salida de `adb logcat -b crash`.
 - [ ] Probar en ese APK el mapa de "crear plan" y un aviso push (las dos librerías que usan las clases afectadas).
+
+## K. Contraseñas: recuperación y cambio
+
+Decidido con Domenico el 2026-11-15 (no estaba en el informe): **"olvidé mi contraseña" con un código de 6 dígitos por email**, escrito en la app (sin link ni deep link: funciona igual en Expo Go y en el APK); **emails por Resend** (API HTTPS: en AWS el back solo sale por el puerto 443, así que SMTP no sirve sin tocar los Security Groups); y además **"cambiar contraseña" desde el perfil** con la contraseña actual. Contrato en [06-api.md](arquitectura/06-api.md#auth), modelo en [07](arquitectura/07-modelo-de-datos.md#passwordresets). Lo que quedó abierto o se resolvió con la opción más chica:
+
+### Reglas que se resolvieron con la opción más chica
+- **Valores:** código de 6 dígitos, 15 minutos, 5 intentos por código, un código por minuto y 5 por hora por cuenta. Están en `back-service/src/modules/auth/password.service.js`; cambiarlos es un cambio de código. La app espera el minuto con una cuenta regresiva antes de ofrecer "mandarme otro código".
+- **Después del reset hay que iniciar sesión** con la contraseña nueva (no se devuelve una sesión): la app vuelve al login con el email cargado y un aviso. Alternativa: entrar directo.
+- **El reset cierra todas las sesiones y borra los tokens de push de la cuenta**; el cambio desde el perfil cierra las demás sesiones y deja la propia. Los tokens de push de esos otros teléfonos no se borran (igual que con `logout-all`): siguen recibiendo avisos hasta que alguien inicie sesión ahí o FCM los dé de baja. A revisar junto con `logout-all`.
+- **Contraseña actual incorrecta en `change-password` → 400 con el detalle en el campo**, no 401: el panel `/admin` (y cualquier cliente) trata un 401 no renovable como sesión terminada.
+- **Código nuevo `RESET_CODE_INVALID` (401)**, uno solo para "incorrecto", "vencido", "ya usado", "sin intentos" y "la cuenta no existe o está suspendida".
+- **Una cuenta suspendida no recibe códigos** ni puede resetear (no podría entrar igual).
+- **Se manda un email de aviso** cada vez que la contraseña cambia (por cualquiera de los dos caminos), sin la contraseña.
+- **Los emails salen después del commit y sin esperar a Resend:** si Resend falla, `forgot-password` responde 202 igual y queda un `warn` en el log (`password.reset_mail_failed`). La persona puede pedir otro código al minuto.
+- **El HMAC del código usa una clave derivada de `JWT_SECRET`** (no hay un secreto nuevo). Rotar `JWT_SECRET` invalida los códigos pendientes, además de las sesiones.
+- **Emails solo en texto y HTML simples**, en español, sin logo.
+
+### Límites conocidos
+- **Los access tokens ya emitidos siguen valiendo hasta 15 minutos** después de un reset o de un cambio (el mismo límite que tras un `logout`: `authenticate` no consulta la sesión). Los refresh dejan de servir en el acto. Si se quiere cerrar esa ventana: guardar `passwordChangedAt` en `users` y rechazar en `authenticate` los tokens emitidos antes (el usuario ya se lee en cada request).
+- **La respuesta de `forgot-password` no revela si la cuenta existe, pero el tiempo de respuesta difiere en una escritura** (con cuenta se guarda el código). Es una diferencia de milisegundos detrás del límite estricto de Nginx; el registro, además, ya dice `EMAIL_TAKEN`.
+- **El límite por cuenta permite que un tercero haga llegar hasta 5 emails por hora** a una dirección ajena. Lo frena además el límite por IP de Nginx.
+- **Sin verificación de email al registrarse:** quien se registra con un email mal escrito (o ajeno) no puede recuperar la contraseña. No hay verificación de email en el alcance.
+
+### Para el equipo de AWS: conectar Resend
+No se tocó `infra/`. Sin esto la recuperación de contraseña **no manda emails en AWS** (el back arranca igual, avisa `RESEND_API_KEY/MAIL_FROM not set` en el log, y `forgot-password` responde 202 sin enviar nada):
+1. **Cuenta de Resend** del equipo y una API key con permiso "Sending access".
+2. **Verificar `junteapp.me` en Resend** (Domains → Add domain): pide registros DNS (SPF, DKIM y, recomendado, DMARC) que se cargan donde esté el DNS del dominio. Conviene un subdominio de envío (p. ej. `mail.junteapp.me`). Sin dominio verificado, Resend solo entrega a la dirección de la cuenta.
+3. **Secreto** `junte/<env>/resend-api-key` en Secrets Manager (cuentas A y B), con la API key como texto.
+4. **`infra/templates/40-back.yml`:** pasarle al back `RESEND_API_KEY_SECRET_ID=junte/<env>/resend-api-key` y `MAIL_FROM='junte <no-reply@junteapp.me>'` en `back.env`, igual que se hizo con `FCM_SERVICE_ACCOUNT_SECRET_ID` (parámetro `Push`): un parámetro `Mail=enabled|disabled` y, con roles propios, sumar el secreto a la política del back en `00-base.yml`. Con `RESEND_API_KEY_SECRET_ID` definido y sin el secreto, el back no arranca (como con FCM).
+5. La salida es HTTPS a `api.resend.com` (443), ya permitida por `BackHttpsEgress`: no hace falta tocar Security Groups.
+6. Local: opcional, `RESEND_API_KEY` y `MAIL_FROM` en `back-service/.env`. Sin ellas el código se ve en el log del back (`task logs -- back`, evento `mail.dev`).
+
+### Sin probar
+- **Ningún email real:** el adapter de Resend está probado con un `fetch` falso (URL, cabeceras, cuerpo y errores), no contra la API real. Falta la cuenta para probar la entrega y que no caiga en spam.
+- **La app en un teléfono:** el teclado numérico y el autocompletado del código (`one-time-code`), la cuenta regresiva y volver al login con `popTo`. Verificado con tests (jest) y lint.
+- **Nginx:** `nginx -t` y `smoke.sh` con las rutas nuevas en la zona estricta (Docker no estaba disponible en la máquina donde se hizo; lo corre CI).

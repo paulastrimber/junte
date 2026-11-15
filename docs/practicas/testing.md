@@ -34,6 +34,8 @@ Estos casos salen del informe (7.5) y de las reglas de negocio. Cada uno tiene s
 - [x] Token vencido → 401 `TOKEN_EXPIRED`; token con `typ: 'refresh'` usado como access → 401; firma con otro algoritmo → 401. *(también `alg: none`)*
 - [x] Usuario `suspended` → 401.
 - [x] Refresh reutilizado tras rotación → 401 y sesión revocada *(solo esa sesión; 10 refresh simultáneos → 1 éxito)*.
+- [x] Recuperación de contraseña *(tests/contract/password.test.js)*: `forgot-password` responde igual con una cuenta existente, inexistente o suspendida; el código no está en la base, en las respuestas ni en los logs; un código por minuto y 5 por hora; 5 intentos por código; vence a los 15 minutos; sirve una sola vez (también con dos pedidos simultáneos); el de una cuenta no sirve para otra; el reset cierra todas las sesiones.
+- [x] `change-password`: contraseña actual incorrecta → 400 con el detalle en `currentPassword`; cierra las demás sesiones y deja abierta la propia; sin token → 401.
 - [x] `PATCH /plans/:id` de un plan ajeno → 403. *(tests/contract/plans.test.js, src/modules/plans/plan.service.test.js; también `PUT …/photo` y `presign` con `planId`)*
 - [x] `/admin/*` sin rol admin → 403. *(tests/contract/admin.test.js: cada ruta real con un usuario común, sin token → 401, y el servicio también lo rechaza)*
 

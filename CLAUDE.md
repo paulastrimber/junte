@@ -10,7 +10,7 @@ La fuente de verdad del diseño es el *Informe de arquitectura técnico* (ya ent
 - **Borde:** Nginx (front service). Proxy, IP real, rate limit, `requestId`, `/admin` estático. Sin lógica de negocio.
 - **Aplicación:** Node.js + Express 5 + Socket.io (adaptador Redis), JavaScript ESM, Mongoose, Zod, JWT propio (bcrypt o Argon2 para contraseñas).
 - **Datos:** MongoDB replica set (3 nodos / 1 en local; requisito para transacciones). Migraciones con migrate-mongo.
-- **AWS:** ALB público → Nginx → ALB interno → Express; S3 privado, Secrets Manager, CloudWatch, Session Manager, NAT por AZ. **FCM** para push.
+- **AWS:** ALB público → Nginx → ALB interno → Express; S3 privado, Secrets Manager, CloudWatch, Session Manager, NAT por AZ. **FCM** para push. **Resend** (API HTTPS) para los emails de recuperación de contraseña.
 - **Fuera de alcance:** Lambda, API Gateway, DynamoDB, Kubernetes, Cognito.
 
 ## Dónde está cada cosa
@@ -91,17 +91,18 @@ Flujo: `ruta → middlewares → controlador → servicio → repositorio/modelo
 
 - Prefijo `/api/v1` (Nginx → `/internal` en Express). JSON, ISO 8601 con zona, IDs string, **campos en inglés**, GeoJSON `[lng, lat]`.
 - Paginación: `limit` (20, máx 100) + `cursor` opaco → `{ items, nextCursor }` (`null` al final).
-- Todas las rutas de negocio requieren `Authorization: Bearer <access_token>`. Públicas: `/auth/register`, `/auth/login`, `/auth/refresh` y `GET /health` (sin prefijo, 200/503).
+- Todas las rutas de negocio requieren `Authorization: Bearer <access_token>`. Públicas: `/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/forgot-password`, `/auth/reset-password` y `GET /health` (sin prefijo, 200/503).
 - Códigos: 400 validación, 401 token ausente/inválido/vencido, 403 sin permiso, 404 inexistente, 409 conflicto (cupo, duplicado, estado), 429 rate limit, 500 sin detalles sensibles.
-- Endpoints: `auth/*` (`register`, `login`, `refresh`, `logout`, `logout-all`), `users/me` (+ `/photo`, `/plans`), `catalogs`, `plans` (GET/POST), `plans/filters`, `feed` (POST), `plans/:id` (GET/PATCH), `plans/:id/join` (POST/DELETE), `plans/:id/participants`, `plans/:id/qr`, `plans/:id/check-in`, `plans/:id/messages` (GET/POST), `plans/:id/photo`, `reports`, `uploads/presign` y, solo con rol admin, `admin/reports`, `admin/messages/:id`, `admin/users/:id`, `admin/metrics`, `admin/catalogs/:catalog`. Parámetros y permisos en [06-api.md](docs/arquitectura/06-api.md).
+- Endpoints: `auth/*` (`register`, `login`, `refresh`, `logout`, `logout-all`, `forgot-password`, `reset-password`, `change-password`), `users/me` (+ `/photo`, `/plans`), `catalogs`, `plans` (GET/POST), `plans/filters`, `feed` (POST), `plans/:id` (GET/PATCH), `plans/:id/join` (POST/DELETE), `plans/:id/participants`, `plans/:id/qr`, `plans/:id/check-in`, `plans/:id/messages` (GET/POST), `plans/:id/photo`, `reports`, `uploads/presign` y, solo con rol admin, `admin/reports`, `admin/messages/:id`, `admin/users/:id`, `admin/metrics`, `admin/catalogs/:catalog`. Parámetros y permisos en [06-api.md](docs/arquitectura/06-api.md).
 
 ## Modelo de datos
 
-Colecciones: `users`, `sessions`, `plans`, `planParticipants`, `checkIns`, `messages`, `reports`, `deviceTokens` y los catálogos editables por el admin (`interestCategories`, `interests`, `universities`, `careers`, `cities`, `neighborhoods`; ADR-0009). Todas con `createdAt`/`updatedAt`, referencias por `ObjectId`. Detalle en [07-modelo-de-datos.md](docs/arquitectura/07-modelo-de-datos.md).
+Colecciones: `users`, `sessions`, `passwordResets`, `plans`, `planParticipants`, `checkIns`, `messages`, `reports`, `deviceTokens` y los catálogos editables por el admin (`interestCategories`, `interests`, `universities`, `careers`, `cities`, `neighborhoods`; ADR-0009). Todas con `createdAt`/`updatedAt`, referencias por `ObjectId`. Detalle en [07-modelo-de-datos.md](docs/arquitectura/07-modelo-de-datos.md).
 
 Índices obligatorios:
 - `users.email` único
 - `sessions`: `{ sid }` único, `{ userId }` y TTL sobre `expiresAt` (una sesión por dispositivo; máx. 5 activas por usuario)
+- `passwordResets`: `{ userId }` único y TTL sobre `windowEndsAt` (un pedido de recuperación por usuario; guarda el HMAC del código, nunca el código)
 - catálogos: `key` único (`careers`: `{ universityKey, key }`; `neighborhoods`: `{ cityKey, key }`)
 - `plans`: `{ status, startsAt }` y `2dsphere` en `location`
 - `planParticipants` único en `{ planId, userId }` (un registro por par, reactivable)
@@ -134,6 +135,7 @@ Los pesos deben ser configurables sin cambiar el contrato de la API (`FEED_WEIGH
 - Zod en todo input: enteros positivos, fechas coherentes, IDs válidos, longitudes máximas, coordenadas en rango.
 - JWT: verificar firma, algoritmo esperado, vencimiento, tipo de token y usuario activo. Access token de vida corta; refresh token rotado por sesión y revocable (una sesión por dispositivo en `sessions`, que guarda solo el hash del refresh; ver ADR-0008).
 - Fotos: bucket S3 privado, URLs firmadas de corta duración; verificar tipo, tamaño, contenido y dueño antes de vincular `photoKey`. MongoDB guarda la clave, no la imagen.
+- Recuperación de contraseña: código de 6 dígitos por email, de un solo uso y con vencimiento; respuestas que no revelan si la cuenta existe; límites de intentos y de pedidos por cuenta; cambiar la contraseña cierra sesiones. Detalle en [09-seguridad.md](docs/arquitectura/09-seguridad.md).
 - Móvil: tokens en almacenamiento seguro del SO (`expo-secure-store`), nunca en logs.
 
 ## Red y despliegue

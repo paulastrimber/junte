@@ -23,6 +23,7 @@ Toda respuesta de error, venga de donde venga (Express o Nginx), tiene esta form
 | `TOKEN_EXPIRED` | 401 | Access token vencido (la app intenta refresh). Un refresh vencido NO usa este código |
 | `INVALID_CREDENTIALS` | 401 | Login fallido (mismo mensaje para email inexistente, contraseña mala y hash guardado con formato inválido) |
 | `ACCOUNT_SUSPENDED` | 401 | Usuario con `status: 'suspended'` (en login, refresh o con cualquier token). Pierde todas sus sesiones |
+| `RESET_CODE_INVALID` | 401 | `POST /auth/reset-password`: el código de recuperación es incorrecto, venció, ya se usó o agotó sus intentos; también si la cuenta no existe o está suspendida (no se distingue). La app lo marca en el campo del código y ofrece pedir otro |
 | `FORBIDDEN` | 403 | Autenticado sin permiso (plan ajeno, no participante —check-in y lista de anotados—, no admin) |
 | `QR_INVALID` | 403 | QR ausente, mal formado, vencido o de otro plan; también el QR anterior una vez pasados sus 10 segundos de margen |
 | `OUT_OF_RANGE` | 403 | Distancia mayor al radio del plan, o precisión del GPS peor que 100 m (el `message` dice cuál de las dos) |
@@ -95,8 +96,10 @@ Logger estructurado en JSON (**pino**), una línea por evento, salida a stdout �
 
 ### Qué NO se loguea nunca
 
-Contraseñas, `Authorization`, access/refresh tokens, `qrToken`, coordenadas exactas, bodies completos, URLs firmadas de S3, secretos de configuración, y los datos personales del perfil (`birthDate`, `neighborhood`, `city`).
+Contraseñas, códigos de recuperación de contraseña, `Authorization`, access/refresh tokens, `qrToken`, coordenadas exactas, bodies completos, URLs firmadas de S3, secretos de configuración, y los datos personales del perfil (`birthDate`, `neighborhood`, `city`).
 pino con `redact` sobre `req.headers.authorization`, `password`, `passwordHash`, `refreshTokenHash`, `accessToken`, `refreshToken`, `token`, `qrToken`, `latitude`, `longitude`, `birthDate`, `neighborhood`, `city`, `photoUrl` (en la raíz y un nivel anidado; lista completa en `adapters/logger.js`) como red de seguridad, además de no pasarlos.
+
+**Única excepción, solo en desarrollo:** sin `RESEND_API_KEY` y con `NODE_ENV=development`, el email de recuperación no sale y se muestra en el log del back (`event: "mail.dev"`, con el código), para poder probar el flujo en local. En producción sin credenciales el email se descarta y solo se loguea `mail.disabled`, sin contenido.
 
 ### Niveles
 
