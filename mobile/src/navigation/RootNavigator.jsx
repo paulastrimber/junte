@@ -6,7 +6,9 @@ import { AUTH_STATUS } from '../contexts/AuthContext.jsx'
 import { useAuth } from '../hooks/useAuth.js'
 import { useOfflineSync } from '../hooks/useOffline.js'
 import { usePlanLinks } from '../hooks/usePlanLinks.js'
+import ChangePasswordScreen, { TEXTS as CHANGE_PASSWORD_TEXTS } from '../screens/ChangePasswordScreen.jsx'
 import ChatScreen, { TEXTS as CHAT_TEXTS } from '../screens/ChatScreen.jsx'
+import ForgotPasswordScreen, { TEXTS as FORGOT_TEXTS } from '../screens/ForgotPasswordScreen.jsx'
 import HomeScreen, { TEXTS as HOME_TEXTS } from '../screens/HomeScreen.jsx'
 import LoadingScreen from '../screens/LoadingScreen.jsx'
 import LoginScreen, { TEXTS as LOGIN_TEXTS } from '../screens/LoginScreen.jsx'
@@ -17,6 +19,7 @@ import PlanScreen, { TEXTS as PLAN_TEXTS } from '../screens/PlanScreen.jsx'
 import ProfileScreen, { TEXTS as PROFILE_TEXTS } from '../screens/ProfileScreen.jsx'
 import RegisterScreen, { TEXTS as REGISTER_TEXTS } from '../screens/RegisterScreen.jsx'
 import ReportScreen, { TEXTS as REPORT_TEXTS } from '../screens/ReportScreen.jsx'
+import ResetPasswordScreen, { TEXTS as RESET_TEXTS } from '../screens/ResetPasswordScreen.jsx'
 import RestoreErrorScreen from '../screens/RestoreErrorScreen.jsx'
 import { sizes, stackScreenOptions, tabScreenOptions, useTheme } from '../theme/index.js'
 import { ROUTES } from './routes.js'
@@ -57,6 +60,9 @@ function AuthStack () {
       <Stack.Screen name={ROUTES.LOGIN} component={LoginScreen} options={{ title: LOGIN_TEXTS.title, headerShown: false }} />
       {/* El título va en la pantalla, debajo de la marca: el encabezado queda solo con "volver". */}
       <Stack.Screen name={ROUTES.REGISTER} component={RegisterScreen} options={{ title: REGISTER_TEXTS.title, headerTitle: '' }} />
+      {/* Recuperar la contraseña: pedir el código y, con el código, elegir la nueva. */}
+      <Stack.Screen name={ROUTES.FORGOT_PASSWORD} component={ForgotPasswordScreen} options={{ title: FORGOT_TEXTS.title, headerTitle: '' }} />
+      <Stack.Screen name={ROUTES.RESET_PASSWORD} component={ResetPasswordScreen} options={{ title: RESET_TEXTS.title, headerTitle: '' }} />
     </Stack.Navigator>
   )
 }
@@ -110,6 +116,7 @@ function ProfileStack () {
   return (
     <Stack.Navigator screenOptions={useStackOptions()} initialRouteName={ROUTES.PROFILE}>
       <Stack.Screen name={ROUTES.PROFILE} component={ProfileScreen} options={{ title: PROFILE_TEXTS.title }} />
+      <Stack.Screen name={ROUTES.CHANGE_PASSWORD} component={ChangePasswordScreen} options={{ title: CHANGE_PASSWORD_TEXTS.title }} />
       <Stack.Screen name={ROUTES.HEALTH} getComponent={loadHealth} options={{ title: SCREEN_TITLES.health }} />
       <Stack.Screen name={ROUTES.PENDING_ACTIONS} component={PendingActionsScreen} options={{ title: PENDING_TEXTS.title }} />
     </Stack.Navigator>

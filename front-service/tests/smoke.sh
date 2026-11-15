@@ -5,7 +5,7 @@
 #
 # Verifica: /health, X-Request-Id (siempre generado por Nginx; el del cliente no llega al back), proxy /api/v1/* → /internal/*,
 # /internal no publicado, upgrade a WebSocket de Socket.io (y long-polling rechazado), límite de body, 429 JSON tras una ráfaga en /api/v1/auth/login,
-# que las variantes de esa URL y /auth/register comparten el límite estricto, que /auth/refresh NO lo
+# que las variantes de esa URL, /auth/register y las tres de contraseñas comparten el límite estricto, que /auth/refresh NO lo
 # comparte (usa la zona general), que un X-Forwarded-For de un cliente externo no evade el límite, que
 # el límite es por IP real y que el panel /admin sale con sus cabeceras de seguridad.
 #
@@ -232,11 +232,11 @@ if [ -n "$limited" ]; then
   [ -n "$spoofed" ] && ok "X-Forwarded-For inventado y distinto en cada request se ignora (429 en el request ${#spoof_codes[@]})" \
     || fail "con un X-Forwarded-For inventado distinto en cada request el cliente externo evadió el límite (${spoof_codes[*]})"
 
-  # Login y registro comparten la zona estricta; las variantes de la URL de login también.
+  # Login, registro y contraseñas comparten la zona estricta; las variantes de la URL también.
   # (La IP ya agotó la zona con la ráfaga.) La zona repone de a poco (10 por minuto) y un request suelto
   # puede pasar en cualquier momento; contra AWS pasó. Hasta 3 intentos seguidos: en la zona estricta al menos
   # uno da 429; en la general (10 por segundo) no daría ninguno.
-  for variant in auth/register auth/Login auth/LOGIN auth/login/ auth/Register/; do
+  for variant in auth/register auth/Login auth/LOGIN auth/login/ auth/Register/ auth/forgot-password auth/reset-password auth/change-password auth/Forgot-Password/; do
     tries=()
     for _ in 1 2 3; do
       request variant -X POST -H 'Content-Type: application/json' --data '{}' "$BASE_URL/api/v1/$variant"

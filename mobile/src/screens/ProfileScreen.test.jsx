@@ -364,6 +364,14 @@ describe('ProfileScreen', () => {
       expect(screen.getByRole('button', { name: TEXTS.save })).toBeOnTheScreen()
     })
 
+    it('el botón de cambiar contraseña navega a ChangePassword', async () => {
+      await renderProfile(COMPLETE_USER)
+
+      await fireEvent.press(screen.getByRole('button', { name: TEXTS.changePassword }))
+
+      expect(navigation.navigate).toHaveBeenCalledWith('ChangePassword')
+    })
+
     it('el botón de estado del servidor navega a Health', async () => {
       await renderProfile(COMPLETE_USER)
 

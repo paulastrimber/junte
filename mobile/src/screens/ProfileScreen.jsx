@@ -42,6 +42,7 @@ export const TEXTS = Object.freeze({
   save: 'Guardar cambios',
   saved: 'Cambios guardados.',
   health: 'Estado del servidor',
+  changePassword: 'Cambiar contraseña',
   signOut: 'Cerrar sesión',
   signOutAll: 'Cerrar sesión en todos mis dispositivos'
 })
@@ -126,6 +127,7 @@ export default function ProfileScreen ({ navigation }) {
       <Button title={TEXTS.save} onPress={saveProfile} loading={form.isSaving} disabled={!form.isDirty} />
 
       <View style={styles.footer}>
+        <Button title={TEXTS.changePassword} variant='ghost' icon='key-outline' onPress={() => navigation.navigate(ROUTES.CHANGE_PASSWORD)} />
         <Button title={TEXTS.health} variant='ghost' icon='pulse-outline' onPress={() => navigation.navigate(ROUTES.HEALTH)} />
         <Button title={TEXTS.signOut} variant='ghost' icon='log-out-outline' disabled={session.isWorking} onPress={signOut} />
         <Button title={TEXTS.signOutAll} variant='danger' disabled={session.isWorking} onPress={signOutAll} />

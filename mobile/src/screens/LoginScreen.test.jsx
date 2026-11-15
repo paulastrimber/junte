@@ -1,6 +1,7 @@
 import { act, fireEvent, screen } from '@testing-library/react-native'
 
 import { createFakeAuthService, renderWithAuth } from '../../tests/helpers/auth.jsx'
+import { AuthProvider } from '../contexts/AuthContext.jsx'
 import { deferred } from '../../tests/helpers/deferred.js'
 import { PASSWORD_TOGGLE } from '../components/FormField.jsx'
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
@@ -160,5 +161,31 @@ describe('LoginScreen', () => {
     await fireEvent.press(screen.getByRole('button', { name: TEXTS.register }))
 
     expect(navigation.navigate).toHaveBeenCalledWith('Register')
+  })
+
+  it('"¿Olvidaste tu contraseña?" lleva a recuperarla con el email que ya estaba escrito', async () => {
+    await renderLogin()
+    await fill('  ana@um.edu.uy ', '')
+
+    await fireEvent.press(screen.getByRole('button', { name: TEXTS.forgot }))
+
+    expect(navigation.navigate).toHaveBeenCalledWith('ForgotPassword', { email: 'ana@um.edu.uy' })
+  })
+
+  it('al volver de recuperar la contraseña carga el email, limpia el formulario y avisa que ya puede entrar', async () => {
+    const service = createFakeAuthService()
+    const view = await renderWithAuth(<LoginScreen navigation={navigation} />, { service })
+    await screen.findByText(TEXTS.title)
+    await fill('otro@um.edu.uy', 'la-clave-vieja')
+    expect(screen.queryByText(TEXTS.passwordReset)).not.toBeOnTheScreen()
+
+    // `popTo` vuelve a la misma pantalla (ya montada) con parámetros nuevos.
+    await view.rerender(<AuthProvider service={service}><LoginScreen navigation={navigation} route={{ params: { email: 'ana@um.edu.uy', passwordResetAt: 1 } }} /></AuthProvider>)
+
+    expect(screen.getByText(TEXTS.passwordReset)).toBeOnTheScreen()
+    expect(screen.getByLabelText(TEXTS.email).props.value).toBe('ana@um.edu.uy')
+    expect(screen.getByLabelText(TEXTS.password).props.value).toBe('')
+    // Es un aviso de que salió bien, no una alerta.
+    expect(screen.queryByRole('alert')).not.toBeOnTheScreen()
   })
 })

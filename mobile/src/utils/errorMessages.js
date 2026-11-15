@@ -7,6 +7,7 @@ const MESSAGES = Object.freeze({
   EMAIL_TAKEN: 'Ya existe una cuenta con ese email.',
   INVALID_CREDENTIALS: 'Email o contraseña incorrectos.',
   ACCOUNT_SUSPENDED: 'Tu cuenta está suspendida.',
+  RESET_CODE_INVALID: 'El código no es correcto o ya venció. Revisalo o pedí uno nuevo.',
   RATE_LIMITED: 'Demasiados intentos. Esperá un momento y probá de nuevo.',
   UNAUTHENTICATED: 'Tu sesión terminó. Iniciá sesión de nuevo.',
   TOKEN_EXPIRED: 'Tu sesión terminó. Iniciá sesión de nuevo.',

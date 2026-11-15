@@ -38,6 +38,30 @@ describe('api/auth', () => {
   })
 
   it.each([
+    ['forgotPassword', '/auth/forgot-password', { email: 'ana@um.edu.uy' }, 202],
+    ['resetPassword', '/auth/reset-password', { email: 'ana@um.edu.uy', code: '042137', newPassword: 'clave-nueva-123' }, 204]
+  ])('%s hace POST %s sin access token (skipAuth) y no devuelve nada', async (fn, path, body, status) => {
+    const { client, mock } = setup()
+    mock.onPost(path).reply(status)
+
+    const result = await authApi[fn](body, { client })
+
+    expect(result).toBeUndefined()
+    expect(JSON.parse(mock.history.post[0].data)).toEqual(body)
+    expect(mock.history.post[0].skipAuth).toBe(true)
+  })
+
+  it('changePassword hace POST /auth/change-password con el access token (sin skipAuth)', async () => {
+    const { client, mock } = setup()
+    mock.onPost('/auth/change-password').reply(204)
+
+    await authApi.changePassword({ currentPassword: 'la-actual-123', newPassword: 'clave-nueva-123' }, { client })
+
+    expect(JSON.parse(mock.history.post[0].data)).toEqual({ currentPassword: 'la-actual-123', newPassword: 'clave-nueva-123' })
+    expect(mock.history.post[0].skipAuth).toBeUndefined()
+  })
+
+  it.each([
     ['logout', '/auth/logout'],
     ['logoutAll', '/auth/logout-all']
   ])('%s hace POST %s con el access token (sin skipAuth)', async (fn, path) => {

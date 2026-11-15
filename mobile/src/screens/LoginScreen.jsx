@@ -17,11 +17,15 @@ export const TEXTS = Object.freeze({
   email: 'Email',
   password: 'Contraseña',
   submit: 'Entrar',
-  register: 'Crear una cuenta'
+  register: 'Crear una cuenta',
+  forgot: '¿Olvidaste tu contraseña?',
+  passwordReset: 'Listo: tu contraseña se cambió. Entrá con la nueva.'
 })
 
-export default function LoginScreen ({ navigation }) {
-  const { values, setValue, errors, formError, notice, isSubmitting, submit } = useLoginForm()
+/** Al volver de recuperar la contraseña llega con `{ email, passwordResetAt }`: carga el email y avisa que ya puede entrar. */
+export default function LoginScreen ({ navigation, route }) {
+  const { email: prefillEmail, passwordResetAt = null } = route?.params ?? {}
+  const { values, setValue, errors, formError, notice, isSubmitting, submit } = useLoginForm({ prefillEmail, prefillKey: passwordResetAt })
 
   return (
     <Screen safeTop>
@@ -34,6 +38,7 @@ export default function LoginScreen ({ navigation }) {
       </View>
       {/* La sesión terminó sola (venció, cuenta suspendida): es un aviso, no una falla de lo que hizo la persona. */}
       {notice ? <Notice tone='warning' icon='time-outline' message={notice.message} accessibilityLiveRegion='polite' /> : null}
+      {passwordResetAt ? <Notice tone='success' message={TEXTS.passwordReset} accessibilityLiveRegion='polite' /> : null}
       <FormField
         label={TEXTS.email}
         icon='mail-outline'
@@ -64,6 +69,13 @@ export default function LoginScreen ({ navigation }) {
       <ErrorBanner error={formError} />
       <View style={styles.actions}>
         <Button title={TEXTS.submit} onPress={submit} loading={isSubmitting} />
+        <Button
+          title={TEXTS.forgot}
+          variant='ghost'
+          disabled={isSubmitting}
+          // Lo que ya escribió viaja a la pantalla siguiente: no lo tiene que tipear de nuevo.
+          onPress={() => navigation.navigate(ROUTES.FORGOT_PASSWORD, { email: values.email.trim() })}
+        />
         <Button title={TEXTS.register} variant='ghost' disabled={isSubmitting} onPress={() => navigation.navigate(ROUTES.REGISTER)} />
       </View>
     </Screen>
