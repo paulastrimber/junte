@@ -14,6 +14,7 @@ Referencia: OWASP Top 10 (web) y OWASP API Security Top 10. Cada control indica 
 | Sesiones | Una por login/dispositivo, en la colección `sessions` ([ADR-0008](adr/0008-sesiones-multiples.md)). Máximo 5 activas por usuario: al abrir la sexta se revoca la más antigua. `POST /auth/logout` cierra la sesión del access token; `POST /auth/logout-all` cierra todas |
 | Rotación | Cada `/auth/refresh` emite un par nuevo y reemplaza el hash **de esa sesión** con una actualización condicional sobre el hash vigente (sin "consultar y después actualizar"). Si llega un refresh con firma válida pero que **no coincide** con el hash vigente (reuso de uno viejo), o la sesión está revocada o vencida → se revoca **solo esa sesión** y 401. Dos refresh simultáneos con el mismo token: gana uno, el otro se trata como reuso |
 | Usuario suspendido | `authenticate` responde 401 `ACCOUNT_SUSPENDED` (en cada request: la suspensión vale en el acto, aunque el access token no haya vencido); login y refresh revocan **todas** sus sesiones. Cuando un admin suspende (S6) se llama a `authService.revokeAllSessions(userId)` y se cierran sus conexiones de Socket.io en todas las instancias. Nadie se suspende a sí mismo y una cuenta admin no se suspende desde el panel |
+| Recuperación de contraseña (2026-11-15) | Código de 6 dígitos por email (Resend), válido 15 minutos y de un solo uso. Se guarda solo su HMAC (clave derivada del secreto del back). `forgot-password` responde igual exista o no la cuenta; `reset-password` da el mismo error para cualquier falla. Límites por cuenta: 5 intentos por código, un código por minuto y 5 por hora; además, la zona estricta de Nginx por IP. Cambiar la contraseña cierra todas las sesiones (el reset) o las demás (el cambio desde el perfil) y avisa por email. El código nunca va a un log ni a una respuesta |
 | Firma | Secreto fuerte (≥ 32 caracteres) de Secrets Manager. Al verificar se **fija el algoritmo** (`algorithms: ['HS256']`) para impedir `alg: none` o confusión de algoritmos |
 | Verificación | Middleware `authenticate`: firma, algoritmo, `exp`, `typ === 'access'`, usuario existe y `status === 'active'`. Decodificar sin verificar **no** autentica. Un access vencido es `TOKEN_EXPIRED`; un refresh vencido es `UNAUTHENTICATED` (para que la app no reintente el refresh) |
 
@@ -75,7 +76,7 @@ Las comprobaciones de **propiedad** van en el servicio (no en el controlador), a
 
 ## Borde (Nginx)
 
-IP real vía `X-Forwarded-For` (sin esto el rate limit es global), rate limiting estricto solo en `POST /auth/login` y `/auth/register` (refresh, logout y logout-all usan la zona general), `client_max_body_size`, `X-Request-Id` generado por Nginx (pisa el del cliente). Ver [04-front-service.md](04-front-service.md).
+IP real vía `X-Forwarded-For` (sin esto el rate limit es global), rate limiting estricto solo en `POST /auth/login`, `/auth/register` y los tres de contraseñas (`forgot-password`, `reset-password`, `change-password`); refresh, logout y logout-all usan la zona general, `client_max_body_size`, `X-Request-Id` generado por Nginx (pisa el del cliente). Ver [04-front-service.md](04-front-service.md).
 
 ## Logs
 

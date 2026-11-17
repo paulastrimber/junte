@@ -61,6 +61,22 @@ Una por login/dispositivo.
 
 Reglas: máximo 5 sesiones activas (`revokedAt` vacío y `expiresAt` futuro) por usuario; al abrir otra se revoca la más antigua por `createdAt`. La rotación es una actualización condicional sobre `{ sid, userId, refreshTokenHash, revokedAt: null, expiresAt > ahora }`.
 
+### `passwordResets`
+
+**➕ 2026-11-15.** Recuperación de contraseña: un documento por usuario (pedir otro código reemplaza al anterior). Migración `20261115120000-create-password-resets`.
+
+| Campo | Tipo | Notas |
+|-------|------|-------|
+| `userId` | ObjectId → users | Único |
+| `codeHash` | string | HMAC-SHA256 (hex) del código de 6 dígitos, con una clave derivada del secreto del back y con el usuario adentro. **Nunca el código**: con un millón de combinaciones, un hash simple se revertiría en segundos |
+| `expiresAt` | Date | Hasta cuándo vale el código (15 minutos). Se comprueba en cada consulta |
+| `attempts` | number | Intentos hechos con el código vigente (máx. 5). Se suma **antes** de comparar, en una operación condicional |
+| `requestCount` | number | Códigos pedidos en la ventana (máx. 5 por hora) |
+| `lastSentAt` | Date | Último envío (uno por minuto) |
+| `windowEndsAt` | Date | Fin de la ventana de pedidos. El índice TTL borra el documento al llegar |
+
+Usar el código borra el documento dentro de la misma transacción que cambia `users.passwordHash` y revoca las sesiones: un código nunca sirve dos veces.
+
 ### `plans`
 
 | Campo | Tipo | Notas |
@@ -141,6 +157,8 @@ Un **único registro por par** plan–usuario; una baja lo pasa a `cancelled` (c
 | `sessions` | `{ sid: 1 }` único | Una sesión por `sid` (lo usa la rotación del refresh) |
 | `sessions` | `{ userId: 1 }` | Contar, listar y cerrar las sesiones de un usuario |
 | `sessions` | `{ expiresAt: 1 }` TTL (`expireAfterSeconds: 0`) | MongoDB borra las sesiones vencidas |
+| `passwordResets` | `{ userId: 1 }` único | Un pedido de recuperación por usuario (**➕ 2026-11-15**) |
+| `passwordResets` | `{ windowEndsAt: 1 }` TTL (`expireAfterSeconds: 0`) | MongoDB borra el pedido al terminar la ventana |
 | `interestCategories`, `universities`, `cities` | `{ key: 1 }` único | Una fila por key |
 | `interests` | `{ key: 1 }` único; `{ categoryKey: 1, order: 1 }` | Una fila por key; listar por categoría |
 | `careers` | `{ universityKey: 1, key: 1 }` único | La key es única dentro de cada universidad |

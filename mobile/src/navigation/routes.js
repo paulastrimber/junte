@@ -3,6 +3,9 @@
 export const ROUTES = Object.freeze({
   LOGIN: 'Login',
   REGISTER: 'Register',
+  // Recuperar la contraseña (desde el login): pedir el código y, con el código, elegir la nueva
+  FORGOT_PASSWORD: 'ForgotPassword',
+  RESET_PASSWORD: 'ResetPassword',
   ONBOARDING: 'Onboarding',
   // Tabs de la app
   FEED_TAB: 'FeedTab',
@@ -28,5 +31,6 @@ export const ROUTES = Object.freeze({
   CREATE_PLAN: 'CreatePlan',
   // Tab "Perfil"
   PROFILE: 'Profile',
+  CHANGE_PASSWORD: 'ChangePassword',
   HEALTH: 'Health'
 })

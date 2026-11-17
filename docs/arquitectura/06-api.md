@@ -6,7 +6,7 @@ Contrato público publicado por Nginx bajo `/api/v1`. El back lo atiende bajo `/
 
 ## Convenciones
 
-- Todas las rutas requieren `Authorization: Bearer <access_token>` salvo `POST /auth/register`, `/auth/login`, `/auth/refresh` y `GET /health`. Las URLs son sensibles a mayúsculas y a la barra final: `/auth/Login` y `/auth/login/` no existen (404).
+- Todas las rutas requieren `Authorization: Bearer <access_token>` salvo `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/forgot-password`, `/auth/reset-password` y `GET /health`. Las URLs son sensibles a mayúsculas y a la barra final: `/auth/Login` y `/auth/login/` no existen (404).
 - Cuerpos `application/json`; fechas ISO 8601 con zona horaria; IDs como strings; campos en inglés; coordenadas `[lng, lat]`.
 - **Campos solo-backend** (se ignoran o se rechazan con 400 si vienen en un body): `id`, `creatorId`, `senderId`, `userId`, `reporterId`, `reputation`, `role`, `status` de usuario, `age` (se calcula desde `birthDate`), `photoKey`, `noShow`, `noShowAt`, `noShowCount`, `participantCount`, `availableSpots`, `isFull`, `university` del plan, `qrNonceHash`, `checkInOpensAt`, `checkInClosesAt` y `attendanceClosedAt`. El `status` del plan solo acepta los valores que puede pedir el creador ([estado del plan](#estado-del-plan)).
 - Los esquemas Zod son **estrictos** (`.strict()`): un campo desconocido es 400, no se descarta en silencio.
@@ -43,13 +43,25 @@ Catálogo completo y reglas en [errores-y-logs.md](../practicas/errores-y-logs.m
 | `POST /auth/refresh` | `refreshToken` | 200 `{ accessToken, refreshToken }` rotados | 400, 401 `UNAUTHENTICATED` / `ACCOUNT_SUSPENDED` | Pública | ✔ |
 | `POST /auth/logout` | — | 204: cierra la sesión del access token (idempotente) | 401 | Usuario | ➕ |
 | `POST /auth/logout-all` | — | 204: cierra todas las sesiones del usuario | 401 | Usuario | ➕ |
+| `POST /auth/forgot-password` | `email` | 202 sin cuerpo, **exista o no la cuenta** | 400 | Pública | ➕ (2026-11-15) |
+| `POST /auth/reset-password` | `email, code, newPassword` | 204: cambia la contraseña y cierra todas las sesiones | 400, 401 `RESET_CODE_INVALID` | Pública | ➕ (2026-11-15) |
+| `POST /auth/change-password` | `currentPassword, newPassword` | 204: cambia la contraseña y cierra las demás sesiones | 400, 401 | Usuario | ➕ (2026-11-15) |
 
 - `login` devuelve también `user` (el informe solo listaba los tokens): la app evita un `GET /users/me` extra.
 - `password`: 8 a 128 caracteres. `name`: 1 a 80. `email`: válido, hasta 254, se normaliza (trim + minúsculas). El resto del perfil (fecha de nacimiento, estudios, zona, intereses, foto) se completa después, en el onboarding. `deviceLabel`: 1 a 60 caracteres, solo para identificar la sesión ("android", "ios").
 - Un usuario puede tener sesión en varios dispositivos a la vez (máximo 5 activas; al abrir la sexta se cierra la más antigua). Ver [ADR-0008](adr/0008-sesiones-multiples.md).
 - Reglas del refresh: cada uso rota el par. Reutilizar un refresh ya rotado cierra **esa** sesión y responde 401 (no afecta a las de otros dispositivos). Dos refresh simultáneos con el mismo token: uno gana y el otro se trata como reuso, por eso la app hace un solo refresh en vuelo.
 - `logout` y `logout-all` se autentican con el access token (el `sid` va en el token). Tras el logout el access token sigue valiendo hasta que vence (≤ 15 min); el refresh deja de servir en el acto.
-- Rate limit de Nginx: zona estricta (10 req/min por IP) solo en `login` y `register`; el resto usa la zona general.
+- Rate limit de Nginx: zona estricta (10 req/min por IP) en `login`, `register`, `forgot-password`, `reset-password` y `change-password`; el resto usa la zona general.
+
+**Contraseñas (2026-11-15).** Decidido con Domenico: código por email (Resend), y también el cambio con la sesión iniciada. Detalle y límites en [pendientes · K](../pendientes.md#k-contraseñas-recuperación-y-cambio).
+
+- **`forgot-password`** responde siempre lo mismo (202, sin cuerpo): no revela si hay una cuenta con ese email. Si la hay y está activa, llega un email con un **código de 6 dígitos** que vence a los **15 minutos**. Una cuenta suspendida no recibe nada.
+- **Límites por cuenta:** un código por minuto y 5 por hora (un pedido de más responde 202 igual y no manda nada; el código anterior sigue valiendo). Pedir otro reemplaza al anterior. Cada código admite **5 intentos**; después hay que pedir otro.
+- **`reset-password`:** `code` son 6 dígitos (se aceptan espacios alrededor); `newPassword`, 8 a 128. Cualquier falla —cuenta inexistente o suspendida, código incorrecto, vencido, ya usado o con los intentos agotados— es el mismo **401 `RESET_CODE_INVALID`**. Si sale bien: cambia la contraseña, **cierra todas las sesiones** de la cuenta (hay que iniciar sesión con la nueva), borra sus tokens de push y manda un email avisando el cambio. El código sirve una sola vez.
+- **`change-password`:** la identidad y la sesión salen del token. Si `currentPassword` no es la actual → **400 `VALIDATION_ERROR`** con `details: [{ path: "currentPassword" }]` (no un 401: un cliente no tiene que tomarlo como sesión vencida). `newPassword` tiene que ser distinta de la actual (400). Si sale bien: cierra **las demás** sesiones (la que hizo el cambio sigue abierta), invalida un código de recuperación pendiente y manda el mismo email de aviso.
+- Los access tokens ya emitidos siguen valiendo hasta que vencen (≤ 15 min), igual que tras un `logout`; los refresh dejan de servir en el acto.
+- Sin `RESEND_API_KEY`/`MAIL_FROM` no sale ningún email: en desarrollo el email (con el código) se muestra en el log del back; en producción se descarta con un aviso y `forgot-password` responde 202 igual.
 
 ### Usuario y dispositivos
 

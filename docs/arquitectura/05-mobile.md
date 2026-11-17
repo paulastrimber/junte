@@ -25,7 +25,8 @@ mobile/
   app.config.js            # lee EXPO_PUBLIC_* por perfil de EAS
   eas.json                 # perfiles development / preview / production
   src/
-    screens/               # LoginScreen, RegisterScreen, OnboardingScreen (3 pasos), HomeScreen (feed), PlanScreen,
+    screens/               # LoginScreen, RegisterScreen, ForgotPasswordScreen y ResetPasswordScreen (recuperar la contraseña),
+                           # ChangePasswordScreen (desde el perfil), OnboardingScreen (3 pasos), HomeScreen (feed), PlanScreen,
                            # CreatePlanScreen, PlanQrScreen (QR del creador), CheckInScreen, MyPlansScreen, ChatScreen, ProfileScreen
     components/            # PlanCard, Button, Avatar, EmptyState, ErrorBanner… (presentacionales)
     hooks/

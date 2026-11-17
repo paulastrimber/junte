@@ -61,10 +61,24 @@ export function createSessionRepository (SessionModel) {
 
     /**
      * Cierra todas las sesiones activas de un usuario.
+     * @param {string} userId
+     * @param {{ now: Date, session?: import('mongoose').ClientSession }} options  `session`: dentro de una transacción.
      * @returns {Promise<number>} cuántas cerró.
      */
-    async revokeAllByUser (userId, { now }) {
-      const result = await SessionModel.updateMany({ userId, revokedAt: null }, { $set: { revokedAt: now } })
+    async revokeAllByUser (userId, { now, session }) {
+      const result = await SessionModel.updateMany({ userId, revokedAt: null }, { $set: { revokedAt: now } }, { session })
+      return result.modifiedCount
+    },
+
+    /**
+     * Cierra todas las sesiones activas de un usuario menos una (la que hizo el cambio de contraseña).
+     * @param {string} userId
+     * @param {string} sid  La sesión que queda abierta.
+     * @param {{ now: Date, session?: import('mongoose').ClientSession }} options
+     * @returns {Promise<number>} cuántas cerró.
+     */
+    async revokeAllByUserExcept (userId, sid, { now, session }) {
+      const result = await SessionModel.updateMany({ userId, sid: { $ne: sid }, revokedAt: null }, { $set: { revokedAt: now } }, { session })
       return result.modifiedCount
     },
 

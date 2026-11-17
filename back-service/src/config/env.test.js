@@ -40,7 +40,8 @@ describe('loadConfig', () => {
       jwt: { secret: SECRET },
       storage: null,
       feed: { weights: { interests: 0.5, distance: 0.3, schedule: 0.2 } },
-      push: null
+      push: null,
+      mail: null
     })
     expect(Object.isFrozen(config)).toBe(true)
     expect(Object.isFrozen(config.mongo)).toBe(true)
@@ -224,5 +225,31 @@ describe('FCM_SERVICE_ACCOUNT', () => {
       expect(err.variables).toEqual(['FCM_SERVICE_ACCOUNT'])
       expect(err.message).not.toContain('junte-dev')
     }
+  })
+})
+
+describe('RESEND_API_KEY y MAIL_FROM (emails)', () => {
+  const MAIL_ENV = { RESEND_API_KEY: 're_clave_de_prueba_123', MAIL_FROM: 'junte <no-reply@junteapp.me>' }
+
+  it('sin ninguna de las dos, mail es null (no sale ningún email)', () => {
+    expect(loadConfig(validEnv).mail).toBeNull()
+  })
+
+  it('con las dos, deja la clave y el remitente', () => {
+    expect(loadConfig({ ...validEnv, ...MAIL_ENV }).mail).toEqual({ resend: { apiKey: MAIL_ENV.RESEND_API_KEY }, from: MAIL_ENV.MAIL_FROM })
+    expect(loadConfig({ ...validEnv, ...MAIL_ENV, MAIL_FROM: 'no-reply@junteapp.me' }).mail.from).toBe('no-reply@junteapp.me')
+  })
+
+  it('una sin la otra es un error que nombra la que falta', () => {
+    expect(errorOf({ ...validEnv, RESEND_API_KEY: MAIL_ENV.RESEND_API_KEY }).variables).toEqual(['MAIL_FROM'])
+    expect(errorOf({ ...validEnv, MAIL_FROM: MAIL_ENV.MAIL_FROM }).variables).toEqual(['RESEND_API_KEY'])
+  })
+
+  it('un remitente que no es un email, o una clave con espacios, se informan sin mostrar el valor', () => {
+    const from = errorOf({ ...validEnv, ...MAIL_ENV, MAIL_FROM: 'junte sin direccion' })
+    expect(from.variables).toEqual(['MAIL_FROM'])
+    const key = errorOf({ ...validEnv, ...MAIL_ENV, RESEND_API_KEY: 're_clave con espacios' })
+    expect(key.variables).toEqual(['RESEND_API_KEY'])
+    expect(key.message).not.toContain('re_clave')
   })
 })

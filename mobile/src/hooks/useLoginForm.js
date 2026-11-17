@@ -6,18 +6,30 @@ import { useAuth } from './useAuth.js'
 
 /**
  * Estado y envío del formulario de login: validación local, errores por `code` y estado de carga.
+ * @param {object} [options]
+ * @param {string} [options.prefillEmail]  Email con el que arranca el formulario.
+ * @param {number | null} [options.prefillKey]  Cambia cuando hay que volver a cargar `prefillEmail` con la pantalla ya
+ *   abierta (al volver de recuperar la contraseña): el formulario se limpia y queda ese email.
  * @returns {{
  *   values: { email: string, password: string }, setValue: (field: string, value: string) => void,
  *   errors: Record<string, string>, formError: import('../utils/errorMessages.js').ViewError | null,
  *   notice: import('../utils/errorMessages.js').ViewError | null, isSubmitting: boolean, submit: () => Promise<void>
  * }}
  */
-export function useLoginForm () {
+export function useLoginForm ({ prefillEmail = '', prefillKey = null } = {}) {
   const { signIn, sessionEndedBy } = useAuth()
-  const [values, setValues] = useState({ email: '', password: '' })
+  const [values, setValues] = useState({ email: prefillEmail, password: '' })
   const [errors, setErrors] = useState({})
   const [formError, setFormError] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // Ajuste de estado durante el render (no en un efecto): cuando cambia la clave, el formulario arranca de nuevo.
+  const [appliedKey, setAppliedKey] = useState(prefillKey)
+  if (prefillKey !== appliedKey) {
+    setAppliedKey(prefillKey)
+    setValues({ email: prefillEmail, password: '' })
+    setErrors({})
+    setFormError(null)
+  }
   // Si la sesión terminó sola (refresh rechazado, cuenta suspendida) se explica por qué se llegó acá.
   const notice = useMemo(() => (sessionEndedBy ? toViewError(sessionEndedBy) : null), [sessionEndedBy])
 

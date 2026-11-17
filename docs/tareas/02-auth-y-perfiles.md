@@ -56,3 +56,18 @@ Las de "Auth y permisos" y "Validación" de [testing.md](../practicas/testing.md
 - [x] **S6 · Admin de catálogos** (listar, crear, renombrar, ordenar, activar/desactivar) con `catalogService.invalidate()`.
 
 **Estado:** back ✅ (tests, `task ci`, migración sobre la base local). App ✅ con tests y lint, **sin probar en emulador ni teléfono**.
+
+## Sprint 2c · Contraseñas (2026-11-15)
+
+**Objetivo:** que quien olvidó su contraseña pueda volver a entrar, y que cualquiera pueda cambiarla desde el perfil. No estaba en el informe ni en el backlog; decidido con Domenico el 2026-11-15 ([pendientes · K](../pendientes.md#k-contraseñas-recuperación-y-cambio)).
+
+- [x] **S2c-BE-01 · Adapter `mailer`** (Resend por HTTPS; en memoria para tests, el log en desarrollo y no-op en producción sin credenciales). `RESEND_API_KEY`, `MAIL_FROM` y `RESEND_API_KEY_SECRET_ID`.
+- [x] **S2c-BE-02 · `POST /auth/forgot-password`**: siempre 202; código de 6 dígitos por email, guardado como HMAC en `passwordResets` (migración); un código por minuto y 5 por hora.
+- [x] **S2c-BE-03 · `POST /auth/reset-password`**: 5 intentos por código, 15 minutos, un solo uso; cambia la contraseña y cierra todas las sesiones en una transacción; `RESET_CODE_INVALID` para cualquier falla.
+- [x] **S2c-BE-04 · `POST /auth/change-password`**: con la contraseña actual; cierra las demás sesiones.
+- [x] **S2c-NG-01 · Zona estricta de Nginx** también para los tres endpoints (y `smoke.sh`).
+- [x] **S2c-MOB-01 · "¿Olvidaste tu contraseña?"** en el login → pedir el código → código + contraseña nueva (con "mandarme otro código" después de un minuto) → vuelve al login con el aviso.
+- [x] **S2c-MOB-02 · "Cambiar contraseña"** en el perfil.
+- [ ] ⛔ **S2c-INF-01 · Conectar Resend en AWS** (equipo de AWS; no se tocó `infra/`): cuenta de Resend, dominio `junteapp.me` verificado, secreto `junte/<env>/resend-api-key` y pasarle al back `RESEND_API_KEY_SECRET_ID` y `MAIL_FROM`. Pasos en [pendientes · K](../pendientes.md#para-el-equipo-de-aws-conectar-resend).
+
+**Estado:** back ✅ (tests, lint, `migrate:check`). App ✅ con tests y lint, **sin probar en un teléfono**. Nginx: falta correr `nginx -t` y `smoke.sh` (lo corre CI). **Ningún email real salió todavía**: falta la cuenta de Resend; en local el código se ve en el log del back.

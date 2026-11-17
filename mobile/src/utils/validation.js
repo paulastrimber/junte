@@ -6,9 +6,12 @@ import { MAX_AGE, MIN_AGE, ageOn, parseCalendarDate, today } from './dates.js'
 export const PASSWORD_MIN = 8
 export const PASSWORD_MAX = 128
 export const NAME_MAX = 80
+/** Dígitos del código de recuperación de contraseña que llega por email. */
+export const RESET_CODE_LENGTH = 6
 
 // Forma básica (algo@dominio.tld); la validación real del formato la hace el back.
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const RESET_CODE = /^\d{6}$/
 
 export function validateName (value) {
   const text = value.trim()
@@ -29,6 +32,14 @@ export function validatePassword (value, { checkLength = true } = {}) {
   if (value === '') return 'Ingresá tu contraseña.'
   if (checkLength && value.length < PASSWORD_MIN) return `La contraseña debe tener al menos ${PASSWORD_MIN} caracteres.`
   if (value.length > PASSWORD_MAX) return `La contraseña admite hasta ${PASSWORD_MAX} caracteres.`
+  return null
+}
+
+/** Código de recuperación de contraseña: 6 dígitos (se aceptan espacios alrededor, por el copiar y pegar). */
+export function validateResetCode (value) {
+  const text = value.trim()
+  if (text === '') return 'Ingresá el código que te llegó por email.'
+  if (!RESET_CODE.test(text)) return `El código tiene ${RESET_CODE_LENGTH} dígitos.`
   return null
 }
 

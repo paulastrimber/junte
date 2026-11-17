@@ -204,6 +204,40 @@ describe('sessions', () => {
   })
 })
 
+describe('passwordResets', () => {
+  const reset = (overrides = {}) => ({
+    userId: new mongoose.Types.ObjectId(),
+    codeHash: 'a'.repeat(64),
+    expiresAt: new Date(Date.now() + 60_000),
+    attempts: 0,
+    requestCount: 1,
+    lastSentAt: new Date(),
+    windowEndsAt: new Date(Date.now() + 3_600_000),
+    ...overrides
+  })
+
+  it('un solo pedido por usuario', async () => {
+    const userId = new mongoose.Types.ObjectId()
+    await raw('passwordResets').insertOne(reset({ userId }))
+
+    await expect(raw('passwordResets').insertOne(reset({ userId }))).rejects.toMatchObject({ code: 11000 })
+  })
+
+  it('el índice TTL de windowEndsAt borra el pedido al terminar la ventana', async () => {
+    const indexes = await raw('passwordResets').indexes()
+
+    expect(indexes.find((index) => index.name === 'windowEndsAt_ttl')).toMatchObject({ key: { windowEndsAt: 1 }, expireAfterSeconds: 0 })
+  })
+
+  it('rechaza guardar algo que no sea el HMAC del código, intentos negativos o un pedido sin vencimiento', async () => {
+    const { expiresAt, ...incomplete } = reset()
+
+    await expect(raw('passwordResets').insertOne(reset({ codeHash: '123456' }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('passwordResets').insertOne(reset({ attempts: -1 }))).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+    await expect(raw('passwordResets').insertOne(incomplete)).rejects.toMatchObject({ code: DOCUMENT_VALIDATION_FAILED })
+  })
+})
+
 describe('validador de users: perfil', () => {
   it('rechaza un birthDate que no es fecha', async () => {
     const user = await makeUser()

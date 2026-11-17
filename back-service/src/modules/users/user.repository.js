@@ -156,6 +156,19 @@ export function createUserRepository (UserModel) {
       return { total, createdSince, suspended }
     },
 
+    /**
+     * Cambia la contraseña (solo el módulo `auth`, ya hasheada). Va dentro de la transacción que cierra las sesiones.
+     * @param {string} id
+     * @param {string} passwordHash
+     * @param {{ session?: import('mongoose').ClientSession }} [options]
+     * @returns {Promise<boolean>} false si el usuario no existe.
+     */
+    async setPasswordHash (id, passwordHash, { session } = {}) {
+      if (!mongoose.isValidObjectId(id)) return false
+      const result = await UserModel.updateOne({ _id: id }, { $set: { passwordHash } }, { session })
+      return result.matchedCount === 1
+    },
+
     /** @returns {Promise<UserEntity | null>} */
     async setPhotoKey (id, photoKey) {
       if (!mongoose.isValidObjectId(id)) return null

@@ -68,6 +68,17 @@ export function createDeviceTokenRepository (DeviceTokenModel) {
       return (await DeviceTokenModel.find({ userId: { $in: valid } }).lean()).map(toEntity)
     },
 
+    /**
+     * Borra todos los tokens de un usuario (al recuperar la contraseña se cierran todas sus sesiones: esos teléfonos
+     * dejan de recibir avisos hasta que vuelva a iniciar sesión).
+     * @returns {Promise<number>}
+     */
+    async removeAllByUser (userId) {
+      if (!mongoose.isValidObjectId(userId)) return 0
+      const result = await DeviceTokenModel.deleteMany({ userId })
+      return result.deletedCount
+    },
+
     /** Borra los tokens que FCM informó como inválidos. @returns {Promise<number>} */
     async removeTokens (tokens) {
       if (tokens.length === 0) return 0

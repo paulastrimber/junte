@@ -1,7 +1,7 @@
 import { ApiError, CLIENT_ERROR_CODES } from '../services/api/errors.js'
 import { ageOn, formatForDisplay, parseCalendarDate, toCalendarDate, toLocalDate, today } from './dates.js'
 import { CHAT_ERROR_MESSAGES, fieldErrorsFrom, messageForError, toViewError } from './errorMessages.js'
-import { validateBirthDate, validateEmail, validateName, validatePassword } from './validation.js'
+import { validateBirthDate, validateEmail, validateName, validatePassword, validateResetCode } from './validation.js'
 
 describe('dates', () => {
   it('toCalendarDate usa el día LOCAL, no el de UTC', () => {
@@ -52,6 +52,15 @@ describe('validation', () => {
     expect(validateEmail('')).toMatch(/email/)
     expect(validateEmail('ana@')).toMatch(/válido/)
     expect(validateEmail('ana um@x.com')).toMatch(/válido/)
+  })
+
+  it('validateResetCode acepta 6 dígitos (con espacios alrededor) y nada más', () => {
+    expect(validateResetCode('042137')).toBeNull()
+    expect(validateResetCode(' 042137 ')).toBeNull()
+    expect(validateResetCode('')).toMatch(/código/)
+    expect(validateResetCode('12345')).toMatch(/6 dígitos/)
+    expect(validateResetCode('1234567')).toMatch(/6 dígitos/)
+    expect(validateResetCode('12a456')).toMatch(/6 dígitos/)
   })
 
   it('validatePassword exige 8 al registrar pero no al iniciar sesión', () => {
