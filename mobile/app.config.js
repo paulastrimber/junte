@@ -126,8 +126,15 @@ export default ({ config }) => ({
     'expo-secure-store',
     // Fotos de perfil con caché en disco (la URL firmada cambia; la caché va por la ruta sin firma).
     'expo-image',
-    // Foto de perfil: solo se elige de la galería (no se pide acceso a la cámara).
-    ['expo-image-picker', { photosPermission: 'junte necesita acceder a tus fotos para que elijas tu foto de perfil.', cameraPermission: false, microphonePermission: false }],
+    // Foto de perfil: solo se elige de la galería (image-picker nunca abre la cámara).
+    // OJO: `cameraPermission: false` / `microphonePermission: false` NO significan "no los pide image-picker": BLOQUEAN
+    // android.permission.CAMERA / RECORD_AUDIO en el manifiesto (tools:node="remove") y rompen el QR de check-in
+    // (expo-camera) y las notas de voz (expo-audio). Por eso se repiten los mismos textos que en esos plugins.
+    ['expo-image-picker', {
+      photosPermission: 'junte necesita acceder a tus fotos para que elijas tu foto de perfil.',
+      cameraPermission: 'junte usa la cámara para leer el QR de asistencia de los planes.',
+      microphonePermission: 'junte usa el micrófono para grabar las notas de voz que mandás en el chat de un plan.'
+    }],
     '@react-native-community/datetimepicker',
     // Feed cercano y lugar de un plan: solo mientras se usa la app (sin ubicación en segundo plano).
     ['expo-location', {

@@ -224,7 +224,7 @@ Lo que apareció al implementar auth y perfiles (S2) y queda para revisar con el
 - **El `S3Client` usa `requestChecksumCalculation: 'WHEN_REQUIRED'`.** Con el valor por defecto del SDK actual la URL firmada lleva un checksum CRC32 del body vacío y S3 rechaza la subida real.
 
 ### Sin probar
-- **La app no se probó en emulador ni en teléfono.** Verificado: tests (jest-expo), lint, `expo-doctor` y `expo export --platform android`. Sin probar: `expo-secure-store`, `expo-image-picker` y `@react-native-community/datetimepicker` nativos, los permisos que agregan sus plugins al manifiesto (`cameraPermission: false` en el plugin de imágenes), teclado y layout reales, y el flujo completo contra un bucket de S3 real.
+- **La app no se probó en emulador ni en teléfono.** Verificado: tests (jest-expo), lint, `expo-doctor` y `expo export --platform android`. Sin probar: `expo-secure-store`, `expo-image-picker` y `@react-native-community/datetimepicker` nativos, los permisos que agregan sus plugins al manifiesto (el plugin de imágenes ya no usa `cameraPermission: false`, que bloqueaba CAMERA y rompía el QR de check-in), teclado y layout reales, y el flujo completo contra un bucket de S3 real.
 - La app contra el back real tampoco se probó de punta a punta; sí el back por HTTP (Supertest y `curl` a través de Nginx local) y el smoke test de Nginx.
 
 ## E. Notas del sprint 2b: catálogos y onboarding
